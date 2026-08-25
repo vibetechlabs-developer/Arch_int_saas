@@ -1,25 +1,9 @@
 from rest_framework import permissions
 from rest_framework.request import Request
 
+from apps.common.permissions import is_platform_admin
 
-def is_platform_admin(request: Request) -> bool:
-    """
-    Check if the authenticated user is a Platform Super Admin.
-    Checks either Django superuser status or platform_admin JWT token claim.
-    """
-    user = getattr(request, "user", None)
-    if not user or not user.is_authenticated:
-        return False
-
-    if getattr(user, "is_superuser", False):
-        return True
-
-    # Check JWT claims payload if present
-    auth = getattr(request, "auth", None)
-    if isinstance(auth, dict) and auth.get("token_type") == "platform_admin":
-        return True
-
-    return False
+__all__ = ["is_platform_admin", "IsPlatformAdmin", "IsPlatformAdminOrCompanyAccess"]
 
 
 class IsPlatformAdmin(permissions.BasePermission):

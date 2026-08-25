@@ -1,16 +1,19 @@
 import uuid
 from typing import Any, Dict, Optional
-from django.db.models import Q, QuerySet
-from rest_framework import exceptions as drf_exceptions
+from django.db.models import QuerySet
 
-from apps.company.models import Company, get_default_company_settings
+from apps.company import selectors, validators
+from apps.company.models import Company
+from apps.company.repositories import CompanyRepository
 
 
 class CompanyService:
     """
     Business logic and orchestration service for Company tenants.
     Adheres to Folder_Structure.md §2: controllers contain no business logic;
-    all data operations and validations run through CompanyService.
+    all data operations and validations run through CompanyService, which in
+    turn delegates persistence to CompanyRepository, read/list queries to
+    apps.company.selectors, and input normalization to apps.company.validators.
     """
 
     @classmethod
@@ -25,18 +28,8 @@ class CompanyService:
         """
         Create a new Company tenant.
         """
-        company_settings = get_default_company_settings()
-        if settings and isinstance(settings, dict):
-            company_settings.update(settings)
-
-        company = Company.objects.create(
-            name=name.strip(),
-            currency=currency.strip(),
-            gst_number=gst_number.strip() if gst_number else None,
-            status=status,
-            settings=company_settings,
-        )
-        return company
+        fields = validators.build_create_fields(name, currency, gst_number, status, settings)
+        return CompanyRepository.create(**fields)
 
     @classmethod
     def get_company_by_id(cls, company_id: str | uuid.UUID) -> Company:
@@ -44,10 +37,7 @@ class CompanyService:
         Retrieve an active, non-deleted Company by primary key UUID.
         Raises NotFound if company does not exist or is soft-deleted.
         """
-        try:
-            return Company.objects.get(id=company_id)
-        except (Company.DoesNotExist, ValueError):
-            raise drf_exceptions.NotFound("The requested company was not found.")
+        return CompanyRepository.get_by_id(company_id)
 
     @classmethod
     def list_companies(
@@ -59,33 +49,7 @@ class CompanyService:
         """
         List active companies with optional status filtering and search.
         """
-        queryset = Company.objects.all()
-
-        if status:
-            queryset = queryset.filter(status=status)
-
-        if search:
-            search_query = search.strip()
-            queryset = queryset.filter(
-                Q(name__icontains=search_query) | Q(gst_number__icontains=search_query)
-            )
-
-        valid_order_fields = {
-            "created_at",
-            "-created_at",
-            "name",
-            "-name",
-            "status",
-            "-status",
-            "updated_at",
-            "-updated_at",
-        }
-        if ordering in valid_order_fields:
-            queryset = queryset.order_by(ordering)
-        else:
-            queryset = queryset.order_by("-created_at")
-
-        return queryset
+        return selectors.list_companies(status=status, search=search, ordering=ordering)
 
     @classmethod
     def update_company(
@@ -99,30 +63,10 @@ class CompanyService:
         Only Platform Admins are allowed to alter tenant status.
         """
         company = cls.get_company_by_id(company_id)
-
-        if "name" in validated_data:
-            company.name = validated_data["name"].strip()
-
-        if "currency" in validated_data:
-            company.currency = validated_data["currency"].strip()
-
-        if "gst_number" in validated_data:
-            company.gst_number = (
-                validated_data["gst_number"].strip()
-                if validated_data["gst_number"]
-                else None
-            )
-
-        if "status" in validated_data and is_platform_admin:
-            company.status = validated_data["status"]
-
-        if "settings" in validated_data and isinstance(validated_data["settings"], dict):
-            current_settings = dict(company.settings or {})
-            current_settings.update(validated_data["settings"])
-            company.settings = current_settings
-
-        company.save()
-        return company
+        fields = validators.build_update_fields(
+            validated_data, company.settings, is_platform_admin
+        )
+        return CompanyRepository.save(company, fields)
 
     @classmethod
     def soft_delete_company(cls, company_id: str | uuid.UUID) -> None:
@@ -130,4 +74,4 @@ class CompanyService:
         Soft-delete a Company tenant by setting deleted_at timestamp.
         """
         company = cls.get_company_by_id(company_id)
-        company.delete()
+        CompanyRepository.soft_delete(company)

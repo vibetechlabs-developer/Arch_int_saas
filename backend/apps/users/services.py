@@ -2,12 +2,13 @@ import logging
 import uuid
 from typing import Any, Dict, Iterable, Optional
 from django.db import transaction
-from django.db.models import Q, QuerySet
+from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
 from apps.common.exceptions import ConflictError
-from apps.company.models import Company
+from apps.users import selectors, validators
 from apps.users.models import Role
+from apps.users.repositories import RoleRepository
 
 logger = logging.getLogger("apps.users.services")
 audit_logger = logging.getLogger("apps.users.audit")
@@ -17,7 +18,9 @@ class RoleService:
     """
     Business logic and orchestration service for Role management.
     Adheres to Folder_Structure.md §2: controllers contain no business logic;
-    all data operations and validations run through RoleService.
+    all data operations and validations run through RoleService, which in
+    turn delegates persistence to RoleRepository, read/list queries to
+    apps.users.selectors, and input normalization to apps.users.validators.
     """
 
     @classmethod
@@ -33,38 +36,13 @@ class RoleService:
         List active (non-soft-deleted) roles with optional tenant scoping,
         status filtering, search, and ordering.
         """
-        queryset = Role.objects.select_related("company").all()
-
-        if company_id:
-            queryset = queryset.filter(company_id=company_id)
-        elif company_ids is not None:
-            queryset = queryset.filter(company_id__in=company_ids)
-
-        if is_active is not None:
-            queryset = queryset.filter(is_active=is_active)
-
-        if search:
-            search_query = search.strip()
-            queryset = queryset.filter(
-                Q(name__icontains=search_query) | Q(description__icontains=search_query)
-            )
-
-        valid_order_fields = {
-            "created_at",
-            "-created_at",
-            "name",
-            "-name",
-            "updated_at",
-            "-updated_at",
-            "is_active",
-            "-is_active",
-        }
-        if ordering in valid_order_fields:
-            queryset = queryset.order_by(ordering)
-        else:
-            queryset = queryset.order_by("-created_at")
-
-        return queryset
+        return selectors.list_roles(
+            company_id=company_id,
+            company_ids=company_ids,
+            is_active=is_active,
+            search=search,
+            ordering=ordering,
+        )
 
     @classmethod
     def get_role_by_id(
@@ -76,10 +54,7 @@ class RoleService:
         Retrieve an active, non-deleted Role by primary key UUID.
         Raises NotFound if role does not exist, is soft-deleted, or belongs to another company.
         """
-        try:
-            role = Role.objects.select_related("company").get(id=role_id)
-        except (Role.DoesNotExist, ValueError):
-            raise drf_exceptions.NotFound("The requested role was not found.")
+        role = RoleRepository.get_by_id(role_id)
 
         if company_id is not None and str(role.company_id) != str(company_id):
             raise drf_exceptions.NotFound("The requested role was not found.")
@@ -100,31 +75,19 @@ class RoleService:
         Enforces name uniqueness per company among active records and transaction atomicity.
         """
         with transaction.atomic():
-            # Validate target company exists and is active
-            try:
-                company = Company.objects.get(id=company_id)
-            except (Company.DoesNotExist, ValueError):
-                raise drf_exceptions.NotFound("The specified company was not found.")
+            company = RoleRepository.get_company_by_id(company_id)
+            cleaned_name = validators.clean_role_name(name)
 
-            cleaned_name = name.strip()
-            if not cleaned_name:
-                raise drf_exceptions.ValidationError({"name": ["Role name cannot be blank or empty."]})
-
-            # Enforce unique active role name per company
-            if Role.objects.filter(
-                company_id=company.id,
-                name__iexact=cleaned_name,
-            ).exists():
+            if RoleRepository.name_exists_for_company(company.id, cleaned_name):
                 raise ConflictError("A role with this name already exists for this company.")
 
-            role = Role.objects.create(
+            role = RoleRepository.create(
                 company=company,
                 name=cleaned_name,
-                description=description.strip() if description else "",
+                description=validators.clean_role_description(description),
                 is_active=is_active,
             )
 
-            # Audit logging
             actor_id = getattr(actor_user, "id", None)
             audit_logger.info(
                 "Role created",
@@ -164,33 +127,27 @@ class RoleService:
                 "is_active": role.is_active,
             }
 
+            fields: Dict[str, Any] = {}
+
             if "name" in validated_data:
-                new_name = validated_data["name"].strip()
-                if not new_name:
-                    raise drf_exceptions.ValidationError({"name": ["Role name cannot be blank or empty."]})
-
+                new_name = validators.clean_role_name(validated_data["name"])
                 if new_name.lower() != role.name.lower():
-                    if Role.objects.filter(
-                        company_id=role.company_id,
-                        name__iexact=new_name,
-                    ).exclude(id=role.id).exists():
+                    if RoleRepository.name_exists_for_company(
+                        role.company_id, new_name, exclude_id=role.id
+                    ):
                         raise ConflictError("A role with this name already exists for this company.")
-
-                role.name = new_name
+                fields["name"] = new_name
 
             if "description" in validated_data:
-                role.description = (
-                    validated_data["description"].strip()
-                    if validated_data["description"]
-                    else ""
+                fields["description"] = validators.clean_role_description(
+                    validated_data["description"]
                 )
 
             if "is_active" in validated_data:
-                role.is_active = validated_data["is_active"]
+                fields["is_active"] = validated_data["is_active"]
 
-            role.save()
+            role = RoleRepository.save(role, fields)
 
-            # Audit logging
             actor_id = getattr(actor_user, "id", None)
             audit_logger.info(
                 "Role updated",
@@ -227,9 +184,8 @@ class RoleService:
             company_id_str = str(role.company_id)
             role_name = role.name
 
-            role.delete()
+            RoleRepository.soft_delete(role)
 
-            # Audit logging
             actor_id = getattr(actor_user, "id", None)
             audit_logger.info(
                 "Role deleted",

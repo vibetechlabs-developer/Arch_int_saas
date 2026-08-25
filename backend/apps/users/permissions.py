@@ -2,31 +2,9 @@ from typing import Optional
 from rest_framework import permissions
 from rest_framework.request import Request
 
+from apps.common.permissions import is_platform_admin
 
-def is_platform_admin(request: Request) -> bool:
-    """
-    Check if the authenticated user is a Platform Super Admin.
-    Checks either Django superuser status or platform_admin JWT token claim.
-    Fails closed (returns False) on any missing, malformed, or invalid auth.
-    """
-    try:
-        user = getattr(request, "user", None)
-        if not user or not user.is_authenticated:
-            return False
-
-        if getattr(user, "is_superuser", False):
-            return True
-
-        auth = getattr(request, "auth", None)
-        if hasattr(auth, "get"):
-            if auth.get("token_type") == "platform_admin":
-                return True
-        elif isinstance(auth, dict) and auth.get("token_type") == "platform_admin":
-            return True
-
-        return False
-    except Exception:
-        return False
+__all__ = ["is_platform_admin", "has_permission", "RolePermission"]
 
 
 def has_permission(request: Request, permission_code: str, company_id: Optional[str] = None) -> bool:

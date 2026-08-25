@@ -1,12 +1,17 @@
 from typing import Any, Dict
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import update_last_login
-from django.utils import timezone
+from django.db import transaction
 from rest_framework import exceptions as drf_exceptions
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.authentication import validators
+from apps.authentication.repositories import (
+    PasswordResetTokenRepository,
+    TokenBlacklistRepository,
+    UserRepository,
+)
 from apps.authentication.tokens import (
     CompanyUserRefreshToken,
     PlatformAdminRefreshToken,
@@ -18,6 +23,9 @@ User = get_user_model()
 class AuthenticationService:
     """
     Service layer for authentication, token generation, rotation, and revocation.
+    Delegates persistence to apps.authentication.repositories and input
+    validation to apps.authentication.validators (BACKEND_RULES.md:
+    View -> Serializer -> Service -> Repository -> Model).
     """
 
     @staticmethod
@@ -27,31 +35,14 @@ class AuthenticationService:
         and account status.
         Raises drf_exceptions.AuthenticationFailed on any mismatch.
         """
-        if not email or not password:
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired authentication credentials."
-            )
+        validators.require_credentials(email, password)
 
-        # User.objects uses SoftDeleteManager (automatically filters deleted_at is null)
-        user = User.objects.filter(email__iexact=email.strip()).first()
+        user = UserRepository.get_active_by_email(email)
 
-        if user is None:
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired authentication credentials."
-            )
+        if user is None or not user.check_password(password) or not user.is_active:
+            raise drf_exceptions.AuthenticationFailed(validators.GENERIC_AUTH_ERROR)
 
-        if not user.check_password(password):
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired authentication credentials."
-            )
-
-        if not user.is_active:
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired authentication credentials."
-            )
-
-        # Update last login timestamp
-        update_last_login(None, user)
+        UserRepository.touch_last_login(user)
         return user
 
     @classmethod
@@ -76,9 +67,7 @@ class AuthenticationService:
         user = cls._verify_credentials(email, password)
 
         if not (user.is_superuser and user.is_staff):
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired authentication credentials."
-            )
+            raise drf_exceptions.AuthenticationFailed(validators.GENERIC_AUTH_ERROR)
 
         refresh = PlatformAdminRefreshToken.for_user(user)
 
@@ -93,10 +82,7 @@ class AuthenticationService:
         """
         Exchange a valid refresh token for a new access token and rotated refresh token.
         """
-        if not refresh_token_str or not isinstance(refresh_token_str, str):
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired authentication credentials."
-            )
+        validators.require_refresh_token_str(refresh_token_str)
 
         try:
             refresh = RefreshToken(refresh_token_str)
@@ -133,27 +119,20 @@ class AuthenticationService:
             return result
 
         except (TokenError, InvalidToken) as exc:
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired authentication credentials."
-            ) from exc
+            raise drf_exceptions.AuthenticationFailed(validators.GENERIC_AUTH_ERROR) from exc
 
     @staticmethod
     def logout(refresh_token_str: str) -> None:
         """
         Revoke/blacklist the given refresh token.
         """
-        if not refresh_token_str or not isinstance(refresh_token_str, str):
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired authentication credentials."
-            )
+        validators.require_refresh_token_str(refresh_token_str)
 
         try:
             refresh = RefreshToken(refresh_token_str)
             refresh.blacklist()
         except (TokenError, InvalidToken) as exc:
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired authentication credentials."
-            ) from exc
+            raise drf_exceptions.AuthenticationFailed(validators.GENERIC_AUTH_ERROR) from exc
 
     @classmethod
     def request_password_reset(cls, email: str) -> str:
@@ -169,12 +148,10 @@ class AuthenticationService:
         if not email or not isinstance(email, str):
             return generic_message
 
-        normalized_email = email.strip().lower()
-        user = User.objects.filter(email__iexact=normalized_email).first()
+        user = UserRepository.get_active_by_email(email.strip().lower())
 
         if user is not None and user.is_active:
-            from apps.authentication.models import PasswordResetToken
-            record, raw_token = PasswordResetToken.generate_token_for_user(user)
+            _record, raw_token = PasswordResetTokenRepository.create_for_user(user)
             PasswordResetEmailService.send_password_reset_email(user, raw_token)
 
         return generic_message
@@ -185,58 +162,25 @@ class AuthenticationService:
         Validate reset token, validate new password against Django validators,
         update password, consume token, and invalidate existing active sessions.
         """
-        if not token or not isinstance(token, str):
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired password reset token."
-            )
+        validators.require_reset_token_str(token)
+        validators.require_new_password_str(new_password)
 
-        if not new_password or not isinstance(new_password, str):
-            raise drf_exceptions.ValidationError(
-                {"newPassword": "New password must be provided."}
-            )
-
-        from apps.authentication.models import PasswordResetToken
-        token_hash = PasswordResetToken.hash_token(token.strip())
-
-        token_record = (
-            PasswordResetToken.objects.filter(token_hash=token_hash)
-            .select_related("user")
-            .first()
-        )
+        token_record = PasswordResetTokenRepository.get_by_raw_token(token)
 
         if token_record is None or not token_record.is_valid:
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired password reset token."
-            )
+            raise drf_exceptions.AuthenticationFailed(validators.GENERIC_RESET_TOKEN_ERROR)
 
         user = token_record.user
         if user is None or not user.is_active:
-            raise drf_exceptions.AuthenticationFailed(
-                "Invalid or expired password reset token."
-            )
+            raise drf_exceptions.AuthenticationFailed(validators.GENERIC_RESET_TOKEN_ERROR)
 
-        # Validate password complexity against configured AUTH_PASSWORD_VALIDATORS
-        from django.contrib.auth.password_validation import validate_password
-        validate_password(new_password, user=user)
+        validators.validate_new_password_strength(new_password, user)
 
         # Atomic update of password, token consumption, and session invalidation
-        from django.db import transaction
-        from rest_framework_simplejwt.token_blacklist.models import (
-            BlacklistedToken,
-            OutstandingToken,
-        )
-
         with transaction.atomic():
-            user.set_password(new_password)
-            user.save(update_fields=["password", "updated_at"])
-
-            token_record.consumed_at = timezone.now()
-            token_record.save(update_fields=["consumed_at", "updated_at"])
-
-            # Invalidate/blacklist all existing refresh tokens for this user
-            outstanding_tokens = OutstandingToken.objects.filter(user=user)
-            for outstanding in outstanding_tokens:
-                BlacklistedToken.objects.get_or_create(token=outstanding)
+            UserRepository.set_password(user, new_password)
+            PasswordResetTokenRepository.mark_consumed(token_record)
+            TokenBlacklistRepository.blacklist_all_outstanding_for_user(user)
 
         return "Password has been reset successfully."
 
@@ -280,4 +224,3 @@ class PasswordResetEmailService:
         except Exception:
             # Email delivery failures must not crash the auth flow or reveal state to the client
             pass
-

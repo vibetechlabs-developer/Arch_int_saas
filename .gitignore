@@ -3,6 +3,9 @@
 .idea/
 *.swp
 
+# Local Claude Code session state (not project source)
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
