@@ -190,15 +190,127 @@ class CompanyViewSetTestCase(TestCase):
         self.assertEqual(data["data"]["id"], str(self.company1.id))
         self.assertEqual(data["data"]["name"], "Alpha Design Studio")
 
-    def test_get_company_detail_as_non_member_fails_403(self):
+    def test_get_company_detail_as_user_with_no_company_membership_fails_403(self):
         """
-        Verify non-member user cannot access another company detail (403 Permission Error).
+        A user with ZERO active company memberships anywhere is rejected by
+        TenantJWTAuthentication itself (see apps/authentication/
+        authentication.py's "no active company membership" branch) before
+        the view or its object-level permission check are ever reached.
+        This 403 is identical regardless of which company ID (real or
+        fake) was requested, so it reveals nothing company-specific — it is
+        NOT the Error_Handling.md §5 enumeration case (which is about the
+        response DIFFERING based on whether a specific ID is real), so it
+        correctly stays 403, distinct from the genuine cross-tenant case
+        below.
         """
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.other_token}")
         response = self.client.get(f"/companies/{self.company1.id}")
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(response.json()["error"]["code"], "PERMISSION_ERROR")
+
+    def test_patch_company_as_user_with_no_company_membership_fails_403(self):
+        """
+        Same boundary as above (TenantJWTAuthentication, not the view's
+        object-level check), exercised via PATCH.
+        """
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.other_token}")
+        response = self.client.patch(
+            f"/companies/{self.company1.id}",
+            {"name": "Hostile Rename Attempt"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.json()["error"]["code"], "PERMISSION_ERROR")
+
+        # The company must be entirely unaffected by the rejected attempt.
+        self.company1.refresh_from_db()
+        self.assertEqual(self.company1.name, "Alpha Design Studio")
+
+    def test_get_company_detail_as_member_of_different_company_returns_404(self):
+        """
+        BE-018 (Decision 1 — the genuine cross-tenant case): a user who IS
+        an active member of Company 1 gets 404, not 403, when probing
+        Company 2 (which they do NOT belong to). Unlike the no-membership
+        case above, this request DOES pass tenant resolution (the caller
+        has exactly one active membership, so TenantJWTAuthentication
+        resolves request.company_id to Company 1 without error) and reaches
+        the view's object-level permission check for Company 2 specifically
+        — this is the real Error_Handling.md §5 enumeration scenario, fixed
+        by ObjectPermission404Mixin (apps/common/views.py).
+        """
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.get(f"/companies/{self.company2.id}")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
+
+    def test_patch_company_as_member_of_different_company_returns_404(self):
+        """
+        PATCH equivalent of the test above — the genuine cross-tenant
+        object-level case, via the mutating verb.
+        """
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.patch(
+            f"/companies/{self.company2.id}",
+            {"name": "Hostile Rename Attempt"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
+
+        self.company2.refresh_from_db()
+        self.assertEqual(self.company2.name, "Beta Architecture")
+
+    def test_update_company_validation_error_400(self):
+        """
+        BE-018: PATCH with a blank name is rejected by CompanyUpdateSerializer
+        with the standard 400 VALIDATION_ERROR envelope — previously only
+        exercised on create, never on update.
+        """
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        response = self.client.patch(
+            f"/companies/{self.company1.id}",
+            {"name": "   "},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["error"]["code"], "VALIDATION_ERROR")
+        self.assertTrue(any(d["field"] == "name" for d in data["error"]["details"]))
+
+        # Original name must be untouched.
+        self.company1.refresh_from_db()
+        self.assertEqual(self.company1.name, "Alpha Design Studio")
+
+    def test_soft_deleted_company_returns_404(self):
+        """
+        BE-018: a soft-deleted company 404s for GET and PATCH regardless of
+        who's asking — including a Platform Admin — since SoftDeleteManager
+        excludes it from the default `objects` queryset CompanyService reads
+        from. Isolated from the delete-endpoint flow so it tests the
+        soft-deleted *state* directly, not just the immediate post-delete
+        response.
+        """
+        self.company1.delete()  # soft delete via SoftDeleteModel
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+
+        get_response = self.client.get(f"/companies/{self.company1.id}")
+        self.assertEqual(get_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(get_response.json()["error"]["code"], "NOT_FOUND")
+
+        patch_response = self.client.patch(
+            f"/companies/{self.company1.id}",
+            {"name": "Should Not Apply"},
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(patch_response.json()["error"]["code"], "NOT_FOUND")
 
     def test_update_company_as_member(self):
         """

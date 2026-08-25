@@ -6,6 +6,7 @@ from rest_framework.response import Response
 
 from apps.common.pagination import StandardPagination
 from apps.common.responses import ApiResponse
+from apps.common.views import ObjectPermission404Mixin
 from apps.company.models import Company
 from apps.company.permissions import IsPlatformAdminOrCompanyAccess, is_platform_admin
 from apps.company.serializers import (
@@ -50,7 +51,7 @@ from apps.company.services import CompanyService
         tags=["Company"],
     ),
 )
-class CompanyViewSet(viewsets.GenericViewSet):
+class CompanyViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     """
     ViewSet for Company tenant CRUD operations.
     Enforces standard ApiResponse envelopes and permission boundaries.

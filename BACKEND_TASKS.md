@@ -407,7 +407,25 @@ Depends On
 
 ### BE-018 – Company Tests
 
-**Status:** Todo
+**Status:** Review
+
+**Priority:** Critical
+
+**Owner:** Backend Team
+
+**Implementation notes:** Began with an audit of existing `apps.company` coverage (30 tests: 6 model, 2 serializer, 7 service, 15 view) against `05_Security/Permissions.md`, `05_Security/Tenant.md`, `Error_Handling.md`, `BACKEND_RULES.md` — no `Company_API.md`/`RBAC.md` exist as files, closest real docs used instead. Coverage matrix found existing tests comprehensive with one real defect and one design decision needing a call, both surfaced to the user before any code was written.
+
+**Defect fixed (Decision 1):** `CompanyViewSet` returned 403 instead of 404 for cross-tenant object access by ID (`Error_Handling.md §5`). Fixed with a new reusable `ObjectPermission404Mixin` in `apps/common/views.py` — overrides `check_object_permissions` to raise `Http404` instead of DRF's default `PermissionDenied` whenever `has_object_permission` fails, leaving view-level (`has_permission`) failures like list/create/delete-by-non-admin untouched (still correctly 403, since no specific object is being probed there). Applied to `CompanyViewSet`.
+
+**Debugging finding (not initially anticipated):** the first test run surfaced 2 failures that led to discovering a genuine two-tier security boundary, not a bug in the fix itself. A user with **zero** active company memberships anywhere is rejected by `TenantJWTAuthentication` during authentication — before the view or the new mixin are ever reached — with a 403 that is identical regardless of which company ID was requested (real or fake), so it reveals nothing company-specific and is correctly *not* subject to the §5 anti-enumeration rule. A user who *is* a member of a different company, by contrast, passes authentication and reaches the view, where the new mixin now correctly returns 404. Tests were corrected to assert the right status for each boundary rather than assuming both should be 404.
+
+**Decision 2 (settings merge):** left `apps/company/validators.py::build_update_fields`'s shallow top-level merge unchanged; added a test that documents and locks in the current behavior (a nested key update replaces its sibling nested dict wholesale, not deep-merged) as a regression guard, not a redesign.
+
+**Tests added/corrected (6, all in existing files, no new files):** `test_get_company_detail_as_user_with_no_company_membership_fails_403`, `test_patch_company_as_user_with_no_company_membership_fails_403` (both corrected from an initial wrong assumption), `test_get_company_detail_as_member_of_different_company_returns_404`, `test_patch_company_as_member_of_different_company_returns_404`, `test_update_company_validation_error_400`, `test_soft_deleted_company_returns_404` — plus `test_update_company_settings_merge_is_shallow` in `test_services.py`.
+
+**Deliberately not touched:** `RoleViewSet`/`RolePermission` (`apps.users`) has the identical object-level 403-vs-404 pattern, confirmed during the BE-017 audit. Left unfixed this task since it's outside `apps.company` — the shared `ObjectPermission404Mixin` makes applying the same fix there a one-line change (`class RoleViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet)`) whenever approved.
+
+`apps/company` tests: 37 passed (was 30). Full backend suite: **211 passed, 0 failed**.
 
 Depends On
 

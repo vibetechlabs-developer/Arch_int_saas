@@ -91,6 +91,44 @@ class CompanyServiceTestCase(TestCase):
         )
         self.assertEqual(updated.status, "suspended")
 
+    def test_update_company_settings_merge_is_shallow(self):
+        """
+        BE-018 (Decision 2 — documented, not redesigned): CompanyService's
+        settings update is a top-level SHALLOW merge (apps/company/
+        validators.py::build_update_fields), not a deep/recursive merge.
+
+        Updating one top-level settings key:
+        - leaves sibling top-level keys (e.g. "numbering") completely
+          untouched, and
+        - REPLACES the targeted key's entire value rather than merging into
+          it — so supplying {"paymentTerms": {"lateFeePercent": 2}} drops
+          any other keys ("defaultDays") that were previously inside
+          paymentTerms.
+
+        This is current, accepted behavior — this test locks it in as a
+        regression guard, it is not asserting this is the "correct" design.
+        """
+        company = CompanyService.create_company(
+            name="Merge Behavior Co",
+            settings={
+                "numbering": {"invoicePrefix": "MBC-"},
+                "paymentTerms": {"defaultDays": 15, "lateFeePercent": 0},
+            },
+        )
+
+        updated = CompanyService.update_company(
+            company_id=company.id,
+            validated_data={"settings": {"paymentTerms": {"lateFeePercent": 2}}},
+            is_platform_admin=False,
+        )
+
+        # Sibling top-level key is untouched.
+        self.assertEqual(updated.settings["numbering"], {"invoicePrefix": "MBC-"})
+        # Targeted key is replaced wholesale, not deep-merged: "defaultDays"
+        # is gone, only the newly-supplied "lateFeePercent" remains.
+        self.assertEqual(updated.settings["paymentTerms"], {"lateFeePercent": 2})
+        self.assertNotIn("defaultDays", updated.settings["paymentTerms"])
+
     def test_soft_delete_company(self):
         """
         Verify that soft delete marks deleted_at and hides company from get_company_by_id.
