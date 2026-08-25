@@ -6,6 +6,7 @@ from rest_framework.response import Response
 
 from apps.common.pagination import StandardPagination
 from apps.common.responses import ApiResponse
+from apps.company.models import Company
 from apps.company.permissions import IsPlatformAdminOrCompanyAccess, is_platform_admin
 from apps.company.serializers import (
     CompanyCreateSerializer,
@@ -58,6 +59,11 @@ class CompanyViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated, IsPlatformAdminOrCompanyAccess]
     pagination_class = StandardPagination
     serializer_class = CompanySerializer
+    # Every action below is fully overridden and goes through CompanyService
+    # rather than self.get_queryset()/self.get_object() — this attribute is
+    # inert at runtime and exists solely so drf-spectacular (BE-016) can
+    # resolve the response model for schema generation.
+    queryset = Company.objects.none()
 
     def list(self, request: Request) -> Response:
         """

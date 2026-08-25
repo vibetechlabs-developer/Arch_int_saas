@@ -17,9 +17,38 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import include, path
+from rest_framework.permissions import AllowAny
+from drf_spectacular.views import (
+    SpectacularAPIView,
+    SpectacularRedocView,
+    SpectacularSwaggerView,
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # BE-016: OpenAPI schema + interactive docs. Unprefixed, matching every
+    # other route in this project (API_Response_Format.md §6 — unversioned
+    # by default). Publicly readable (AllowAny) since the schema only
+    # describes endpoint shapes, never tenant data.
+    path(
+        "schema/",
+        SpectacularAPIView.as_view(permission_classes=[AllowAny]),
+        name="schema",
+    ),
+    path(
+        "docs/",
+        SpectacularSwaggerView.as_view(
+            url_name="schema", permission_classes=[AllowAny]
+        ),
+        name="swagger-ui",
+    ),
+    path(
+        "redoc/",
+        SpectacularRedocView.as_view(
+            url_name="schema", permission_classes=[AllowAny]
+        ),
+        name="redoc",
+    ),
     path("", include("apps.authentication.urls")),
     path("", include("apps.company.urls")),
     path("", include("apps.users.urls")),

@@ -37,8 +37,20 @@ class TenantJWTAuthentication(JWTAuthentication):
         # called directly, bypassing the RefreshToken.for_user() overrides that set it).
         token_type = token.get("token_type", None) if hasattr(token, "get") else token.payload.get("token_type", None)
         request.is_platform_admin = token_type == "platform_admin"
-        # Certain auth endpoints do not require tenant resolution.
-        exempt_paths = ["/auth/logout", "/auth/me", "/auth/refresh"]
+        # Certain auth endpoints do not require tenant resolution. Also
+        # exempts BE-016's public API docs routes (registered without an
+        # optional trailing slash, unlike the /auth/* routes above, so the
+        # exact string here matches what request.path actually reports) —
+        # otherwise a caller with a stored Bearer token but no/ambiguous
+        # company membership would get a 403 from just loading the docs.
+        exempt_paths = [
+            "/auth/logout",
+            "/auth/me",
+            "/auth/refresh",
+            "/schema/",
+            "/docs/",
+            "/redoc/",
+        ]
         if request.path in exempt_paths:
             request.company_id = None
             return (user, token)

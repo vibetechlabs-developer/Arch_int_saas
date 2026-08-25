@@ -7,6 +7,7 @@ from rest_framework.response import Response
 
 from apps.common.pagination import StandardPagination
 from apps.common.responses import ApiResponse
+from apps.users.models import Role
 from apps.users.permissions import RolePermission, is_platform_admin
 from apps.users.serializers import (
     RoleCreateSerializer,
@@ -92,6 +93,11 @@ class RoleViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated, RolePermission]
     pagination_class = StandardPagination
     serializer_class = RoleSerializer
+    # Every action below is fully overridden and goes through RoleService
+    # rather than self.get_queryset()/self.get_object() — this attribute is
+    # inert at runtime and exists solely so drf-spectacular (BE-016) can
+    # resolve the response model for schema generation.
+    queryset = Role.objects.none()
 
     def list(self, request: Request) -> Response:
         """
