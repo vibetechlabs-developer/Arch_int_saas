@@ -61,6 +61,22 @@ class MeEndpointTestCase(TestCase):
         self.assertFalse(data["success"])
         self.assertEqual(data["error"]["code"], "AUTHENTICATION_ERROR")
 
+    def test_refresh_token_rejected_as_bearer_access_token(self):
+        """
+        BE-017 audit gap / JWT.md §4: a refresh token (token_type="refresh")
+        must never be usable as a Bearer access token on a protected
+        endpoint — SIMPLE_JWT["AUTH_TOKEN_CLASSES"] only accepts
+        company_user/platform_admin/access token types, so a refresh token
+        must fail verify_token_type() for all of them.
+        """
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.refresh}")
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["error"]["code"], "AUTHENTICATION_ERROR")
+
     def test_expired_access_token_returns_401(self):
         """
         Expired access token returns 401 AUTHENTICATION_ERROR.

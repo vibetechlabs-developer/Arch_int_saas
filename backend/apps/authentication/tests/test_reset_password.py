@@ -212,6 +212,40 @@ class ResetPasswordTestCase(TestCase):
             "AUTHENTICATION_ERROR",
         )
 
+    def test_token_superseded_by_newer_forgot_password_request_is_rejected(self):
+        """
+        BE-017 audit gap: a reset token that has been superseded by a later
+        POST /auth/forgot-password call (which invalidates prior unconsumed
+        tokens — see test_forgot_password.py's DB-level assertion of this)
+        must be rejected by the live /auth/reset-password endpoint itself,
+        not just observably marked consumed in the database.
+        """
+        self.client.post("/auth/forgot-password", {"email": self.email}, format="json")
+
+        response = self.client.post(
+            self.url,
+            {"token": self.raw_token, "newPassword": self.new_password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["error"]["code"], "AUTHENTICATION_ERROR")
+
+        # The original token record is the one that was superseded/consumed.
+        self.token_record.refresh_from_db()
+        self.assertTrue(self.token_record.is_consumed)
+
+        # Original password must still work — the rejected reset must not
+        # have taken effect.
+        login = self.client.post(
+            "/auth/login",
+            {"email": self.email, "password": self.initial_password},
+            format="json",
+        )
+        self.assertEqual(login.status_code, status.HTTP_200_OK)
+
     def test_password_or_token_are_never_returned_in_response(self):
         """
         API response never leaks passwords, password hashes, or token values.

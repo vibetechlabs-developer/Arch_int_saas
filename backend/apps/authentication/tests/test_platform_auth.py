@@ -107,3 +107,29 @@ class PlatformAuthEndpointTestCase(TestCase):
         me_data = me_res.json()["data"]
         self.assertEqual(me_data["email"], "platform.admin@example.com")
         self.assertTrue(me_data["isStaff"])
+
+    def test_platform_admin_login_recognized_end_to_end_on_gated_endpoint(self):
+        """
+        BE-017 audit gap: every existing "platform admin" test elsewhere in
+        the suite mints its token via PlatformAdminAccessToken.for_user()
+        directly, bypassing the RefreshToken.access_token property's claim
+        copy-loop that the real login flow (AuthenticationService.
+        login_platform_admin -> PlatformAdminRefreshToken.for_user().
+        access_token) actually goes through. This proves the token issued
+        by the real POST /platform-auth/login endpoint is recognized as
+        platform_admin end-to-end by an endpoint that actually gates on it
+        (GET /companies, via IsPlatformAdminOrCompanyAccess), not just an
+        endpoint like /auth/me that accepts any authenticated user.
+        """
+        login_res = self.client.post(
+            self.url,
+            {"email": "platform.admin@example.com", "password": self.password},
+            format="json",
+        )
+        access_token = login_res.json()["data"]["accessToken"]
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
+        companies_res = self.client.get("/companies")
+
+        self.assertEqual(companies_res.status_code, status.HTTP_200_OK)
+        self.assertTrue(companies_res.json()["success"])

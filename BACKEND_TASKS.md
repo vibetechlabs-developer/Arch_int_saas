@@ -381,7 +381,23 @@ Depends On
 
 ### BE-017 – Authentication Tests
 
-**Status:** Todo
+**Status:** Review
+
+**Priority:** Critical
+
+**Owner:** Backend Team
+
+**Implementation notes:** Not a from-scratch suite — began with a full audit of existing authentication coverage (`apps/authentication/tests/`: 41 tests across `test_login.py`, `test_logout.py`, `test_me.py`, `test_refresh.py`, `test_forgot_password.py`, `test_reset_password.py`, `test_platform_auth.py`; plus `apps/users/tests/test_tenant_auth_integration.py`: 10 tests; plus `apps/common/tests/test_api_docs.py`: 6 tests from BE-016). Built a coverage matrix against `04_API/Authentication_API.md`, `05_Security/JWT.md`, `05_Security/Tenant.md`, `BACKEND_RULES.md`, `05_Security/Permissions.md`, and `00_Development_Standards/Logging_Standards.md`. Conclusion: existing coverage was already comprehensive (every documented endpoint, every JWT claim rule, every tenant-resolution scenario, zero true duplicate tests — a couple of adjacent-but-distinct tests noted, not flagged as waste).
+
+Closed 4 genuine gaps, all as new test methods in **existing** files (no new test files):
+- `test_reset_password.py::test_token_superseded_by_newer_forgot_password_request_is_rejected` — the live `/auth/reset-password` endpoint, not just DB state, rejects a token invalidated by a later forgot-password request.
+- `test_tenant_auth_integration.py::test_forged_company_id_claim_in_token_is_ignored` — JWT.md §3: a forged `company_id`/`companyId` claim injected into an otherwise-valid token never influences tenant resolution.
+- `test_me.py::test_refresh_token_rejected_as_bearer_access_token` — JWT.md §4: a refresh token cannot be used as a Bearer access token.
+- `test_platform_auth.py::test_platform_admin_login_recognized_end_to_end_on_gated_endpoint` — the real `POST /platform-auth/login` → `RefreshToken.access_token` production path (not the `PlatformAdminAccessToken.for_user()` shortcut used elsewhere) is recognized by a permission-gated endpoint (`GET /companies`), guarding against the exact class of claim-propagation bug fixed earlier this session.
+
+**Production defect found, not fixed (awaiting approval, recommended for BE-018 instead):** `CompanyViewSet`/`RoleViewSet` return 403 (not 404) when a non-member requests another company's resource by a known/guessed UUID — violates `Error_Handling.md §5`'s explicit anti-enumeration rule (cross-tenant access by ID must be 404, confirming nothing). Lives in `apps.company`/`apps.users`, not `apps.authentication`, so left out of BE-017's scope per the user's explicit rule to defer any production-code fix pending approval.
+
+Zero production code changed by this task. `apps/authentication/tests/` + `apps/users/tests/test_tenant_auth_integration.py` now 59 tests (was 55); full backend suite: **205 passed, 0 failed**.
 
 Depends On
 

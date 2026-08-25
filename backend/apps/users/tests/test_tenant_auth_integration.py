@@ -81,6 +81,25 @@ class TenantAuthIntegrationTest(TestCase):
         # Soft delete the membership (BaseModel provides soft delete via .delete())
         membership.delete()
 
+    # BE-017 audit gap: JWT.md §3 — a forged/injected company_id claim in an
+    # otherwise-valid, correctly-signed token must never influence tenant
+    # resolution. The server must always re-derive company_id from active
+    # CompanyMembership records, not from anything embedded in the token.
+    def test_forged_company_id_claim_in_token_is_ignored(self):
+        forged_token = CompanyUserAccessToken.for_user(self.single_user)
+        forged_token["company_id"] = str(self.company_b.id)
+        forged_token["companyId"] = str(self.company_b.id)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {forged_token}")
+        resp = self.client.get("/test/tenant-info/")
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        data = resp.json()
+        # Resolved from the real active membership (Company A), never from
+        # the forged claim (Company B).
+        self.assertEqual(data["data"]["company_id"], str(self.company_a.id))
+        self.assertNotEqual(data["data"]["company_id"], str(self.company_b.id))
+
     # A. Single active membership, no companyId param
     def test_single_active_membership(self):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.single_token}")
