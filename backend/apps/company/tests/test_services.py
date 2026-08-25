@@ -2,6 +2,7 @@ import uuid
 from django.test import TestCase
 from rest_framework.exceptions import NotFound
 
+from apps.audit.models import AuditLog
 from apps.company.models import Company, CompanyStatus
 from apps.company.services import CompanyService
 
@@ -141,3 +142,53 @@ class CompanyServiceTestCase(TestCase):
 
         # Still accessible in all_objects
         self.assertTrue(Company.all_objects.filter(id=c_id).exists())
+
+    def test_create_company_writes_audit_log_entry(self):
+        """
+        BE-019: CompanyService.create_company had no audit logging at all
+        before this task — verify the durable row now exists.
+        """
+        company = CompanyService.create_company(name="Audit Coverage Co")
+
+        entry = AuditLog.objects.get(entity_type="company", entity_id=company.id, action="create")
+        self.assertEqual(entry.company_id, company.id)
+        self.assertIsNone(entry.before_state)
+        self.assertEqual(entry.after_state["name"], "Audit Coverage Co")
+
+    def test_update_company_writes_audit_log_entry_with_before_and_after(self):
+        CompanyService.update_company(
+            company_id=self.company.id,
+            validated_data={"name": "Renamed Co"},
+            is_platform_admin=False,
+        )
+
+        entry = AuditLog.objects.filter(
+            entity_type="company", entity_id=self.company.id, action="update"
+        ).latest("created_at")
+        self.assertEqual(entry.before_state["name"], "Apex Interiors")
+        self.assertEqual(entry.after_state["name"], "Renamed Co")
+
+    def test_status_change_visible_in_update_audit_entry(self):
+        """
+        A status change is not a distinct AuditAction — it's an UPDATE with
+        the "status" key differing between before_state and after_state.
+        """
+        CompanyService.update_company(
+            company_id=self.company.id,
+            validated_data={"status": "suspended"},
+            is_platform_admin=True,
+        )
+
+        entry = AuditLog.objects.filter(
+            entity_type="company", entity_id=self.company.id, action="update"
+        ).latest("created_at")
+        self.assertEqual(entry.before_state["status"], "active")
+        self.assertEqual(entry.after_state["status"], "suspended")
+
+    def test_soft_delete_company_writes_audit_log_entry(self):
+        c_id = self.company.id
+        CompanyService.soft_delete_company(c_id)
+
+        entry = AuditLog.objects.get(entity_type="company", entity_id=c_id, action="delete")
+        self.assertEqual(entry.before_state["name"], "Apex Interiors")
+        self.assertIsNone(entry.after_state)

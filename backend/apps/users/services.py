@@ -5,13 +5,14 @@ from django.db import transaction
 from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
+from apps.audit.models import AuditAction
+from apps.audit.services import AuditLogService
 from apps.common.exceptions import ConflictError
 from apps.users import selectors, validators
 from apps.users.models import Role
 from apps.users.repositories import RoleRepository
 
 logger = logging.getLogger("apps.users.services")
-audit_logger = logging.getLogger("apps.users.audit")
 
 
 class RoleService:
@@ -69,6 +70,7 @@ class RoleService:
         description: str = "",
         is_active: bool = True,
         actor_user: Any = None,
+        request: Any = None,
     ) -> Role:
         """
         Create a new Role within a Company tenant.
@@ -88,21 +90,18 @@ class RoleService:
                 is_active=is_active,
             )
 
-            actor_id = getattr(actor_user, "id", None)
-            audit_logger.info(
-                "Role created",
-                extra={
-                    "action": "create",
-                    "entity_type": "role",
-                    "entity_id": str(role.id),
-                    "company_id": str(company.id),
-                    "actor_user_id": str(actor_id) if actor_id else None,
-                    "new_value": {
-                        "name": role.name,
-                        "description": role.description,
-                        "is_active": role.is_active,
-                    },
+            AuditLogService.record(
+                action=AuditAction.CREATE,
+                entity_type="role",
+                entity_id=role.id,
+                company_id=company.id,
+                actor_user=actor_user,
+                after_state={
+                    "name": role.name,
+                    "description": role.description,
+                    "is_active": role.is_active,
                 },
+                request=request,
             )
 
             return role
@@ -114,6 +113,7 @@ class RoleService:
         validated_data: Dict[str, Any],
         company_id: Optional[str | uuid.UUID] = None,
         actor_user: Any = None,
+        request: Any = None,
     ) -> Role:
         """
         Update an existing Role within a Company tenant.
@@ -148,22 +148,19 @@ class RoleService:
 
             role = RoleRepository.save(role, fields)
 
-            actor_id = getattr(actor_user, "id", None)
-            audit_logger.info(
-                "Role updated",
-                extra={
-                    "action": "update",
-                    "entity_type": "role",
-                    "entity_id": str(role.id),
-                    "company_id": str(role.company_id),
-                    "actor_user_id": str(actor_id) if actor_id else None,
-                    "old_value": old_value,
-                    "new_value": {
-                        "name": role.name,
-                        "description": role.description,
-                        "is_active": role.is_active,
-                    },
+            AuditLogService.record(
+                action=AuditAction.UPDATE,
+                entity_type="role",
+                entity_id=role.id,
+                company_id=role.company_id,
+                actor_user=actor_user,
+                before_state=old_value,
+                after_state={
+                    "name": role.name,
+                    "description": role.description,
+                    "is_active": role.is_active,
                 },
+                request=request,
             )
 
             return role
@@ -174,29 +171,29 @@ class RoleService:
         role_id: str | uuid.UUID,
         company_id: Optional[str | uuid.UUID] = None,
         actor_user: Any = None,
+        request: Any = None,
     ) -> None:
         """
         Soft-delete a Role by setting deleted_at timestamp.
         """
         with transaction.atomic():
             role = cls.get_role_by_id(role_id, company_id=company_id)
-            role_id_str = str(role.id)
-            company_id_str = str(role.company_id)
-            role_name = role.name
+            role_id_val = role.id
+            company_id_val = role.company_id
+            before_state = {
+                "name": role.name,
+                "description": role.description,
+                "is_active": role.is_active,
+            }
 
             RoleRepository.soft_delete(role)
 
-            actor_id = getattr(actor_user, "id", None)
-            audit_logger.info(
-                "Role deleted",
-                extra={
-                    "action": "delete",
-                    "entity_type": "role",
-                    "entity_id": role_id_str,
-                    "company_id": company_id_str,
-                    "actor_user_id": str(actor_id) if actor_id else None,
-                    "old_value": {
-                        "name": role_name,
-                    },
-                },
+            AuditLogService.record(
+                action=AuditAction.DELETE,
+                entity_type="role",
+                entity_id=role_id_val,
+                company_id=company_id_val,
+                actor_user=actor_user,
+                before_state=before_state,
+                request=request,
             )

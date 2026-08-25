@@ -83,6 +83,7 @@ INSTALLED_APPS = [
     "apps.users",
     "apps.authentication",
     "apps.company",
+    "apps.audit",
 ]
 
 AUTH_USER_MODEL = "users.User"

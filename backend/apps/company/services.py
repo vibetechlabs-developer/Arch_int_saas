@@ -1,10 +1,19 @@
 import uuid
 from typing import Any, Dict, Optional
+from django.db import transaction
 from django.db.models import QuerySet
 
+from apps.audit.models import AuditAction
+from apps.audit.services import AuditLogService
 from apps.company import selectors, validators
 from apps.company.models import Company
 from apps.company.repositories import CompanyRepository
+
+AUDITED_FIELDS = ("name", "status", "currency", "gst_number", "settings")
+
+
+def _audit_snapshot(company: Company) -> Dict[str, Any]:
+    return {field: getattr(company, field) for field in AUDITED_FIELDS}
 
 
 class CompanyService:
@@ -24,12 +33,27 @@ class CompanyService:
         gst_number: Optional[str] = None,
         status: str = "trial",
         settings: Optional[Dict[str, Any]] = None,
+        actor_user: Any = None,
+        request: Any = None,
     ) -> Company:
         """
         Create a new Company tenant.
         """
-        fields = validators.build_create_fields(name, currency, gst_number, status, settings)
-        return CompanyRepository.create(**fields)
+        with transaction.atomic():
+            fields = validators.build_create_fields(name, currency, gst_number, status, settings)
+            company = CompanyRepository.create(**fields)
+
+            AuditLogService.record(
+                action=AuditAction.CREATE,
+                entity_type="company",
+                entity_id=company.id,
+                company_id=company.id,
+                actor_user=actor_user,
+                after_state=_audit_snapshot(company),
+                request=request,
+            )
+
+            return company
 
     @classmethod
     def get_company_by_id(cls, company_id: str | uuid.UUID) -> Company:
@@ -57,21 +81,64 @@ class CompanyService:
         company_id: str | uuid.UUID,
         validated_data: Dict[str, Any],
         is_platform_admin: bool = False,
+        actor_user: Any = None,
+        request: Any = None,
     ) -> Company:
         """
         Update an existing Company tenant.
         Only Platform Admins are allowed to alter tenant status.
+
+        Recorded as a single AuditAction.UPDATE entry regardless of which
+        fields changed — a status change is not a distinct action type
+        (03_Database/Database_Schema.md's documented action set is just
+        create/update/delete/approve), it's simply visible as the "status"
+        key differing between before_state and after_state.
         """
-        company = cls.get_company_by_id(company_id)
-        fields = validators.build_update_fields(
-            validated_data, company.settings, is_platform_admin
-        )
-        return CompanyRepository.save(company, fields)
+        with transaction.atomic():
+            company = cls.get_company_by_id(company_id)
+            before_state = _audit_snapshot(company)
+
+            fields = validators.build_update_fields(
+                validated_data, company.settings, is_platform_admin
+            )
+            company = CompanyRepository.save(company, fields)
+
+            AuditLogService.record(
+                action=AuditAction.UPDATE,
+                entity_type="company",
+                entity_id=company.id,
+                company_id=company.id,
+                actor_user=actor_user,
+                before_state=before_state,
+                after_state=_audit_snapshot(company),
+                request=request,
+            )
+
+            return company
 
     @classmethod
-    def soft_delete_company(cls, company_id: str | uuid.UUID) -> None:
+    def soft_delete_company(
+        cls,
+        company_id: str | uuid.UUID,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> None:
         """
         Soft-delete a Company tenant by setting deleted_at timestamp.
         """
-        company = cls.get_company_by_id(company_id)
-        CompanyRepository.soft_delete(company)
+        with transaction.atomic():
+            company = cls.get_company_by_id(company_id)
+            before_state = _audit_snapshot(company)
+            company_id_val = company.id
+
+            CompanyRepository.soft_delete(company)
+
+            AuditLogService.record(
+                action=AuditAction.DELETE,
+                entity_type="company",
+                entity_id=company_id_val,
+                company_id=company_id_val,
+                actor_user=actor_user,
+                before_state=before_state,
+                request=request,
+            )

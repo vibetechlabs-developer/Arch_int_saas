@@ -204,6 +204,7 @@ class RoleViewSet(viewsets.GenericViewSet):
             description=serializer.validated_data.get("description", ""),
             is_active=serializer.validated_data.get("is_active", True),
             actor_user=request.user,
+            request=request,
         )
 
         response_data = RoleSerializer(role).data
@@ -237,6 +238,7 @@ class RoleViewSet(viewsets.GenericViewSet):
             role_id=pk,
             validated_data=serializer.validated_data,
             actor_user=request.user,
+            request=request,
         )
         response_data = RoleSerializer(updated_role).data
         request_id = getattr(request, "request_id", None)
@@ -256,7 +258,7 @@ class RoleViewSet(viewsets.GenericViewSet):
         role = RoleService.get_role_by_id(pk)
         self.check_object_permissions(request, role)
 
-        RoleService.soft_delete_role(pk, actor_user=request.user)
+        RoleService.soft_delete_role(pk, actor_user=request.user, request=request)
         request_id = getattr(request, "request_id", None)
 
         return ApiResponse.success(

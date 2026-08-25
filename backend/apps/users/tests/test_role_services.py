@@ -2,6 +2,7 @@ import uuid
 from django.test import TestCase
 from rest_framework import exceptions as drf_exceptions
 
+from apps.audit.models import AuditLog
 from apps.common.exceptions import ConflictError
 from apps.company.models import Company, CompanyStatus
 from apps.users.models import Role
@@ -163,3 +164,39 @@ class RoleServiceTestCase(TestCase):
 
         # Still exists in all_objects
         self.assertTrue(Role.all_objects.filter(id=role_id).exists())
+
+    def test_create_role_writes_audit_log_entry(self):
+        """
+        BE-019: RoleService.create_role now routes through AuditLogService
+        instead of a bare audit_logger.info() call — verify the durable row.
+        """
+        role = RoleService.create_role(
+            company_id=self.company1.id,
+            name="Audit Coverage Role",
+        )
+
+        entry = AuditLog.objects.get(entity_type="role", entity_id=role.id)
+        self.assertEqual(entry.action, "create")
+        self.assertEqual(entry.company_id, self.company1.id)
+        self.assertIsNone(entry.before_state)
+        self.assertEqual(entry.after_state["name"], "Audit Coverage Role")
+
+    def test_update_role_writes_audit_log_entry_with_before_and_after(self):
+        RoleService.update_role(
+            role_id=self.role1.id,
+            validated_data={"name": "Renamed Role"},
+        )
+
+        entry = AuditLog.objects.filter(
+            entity_type="role", entity_id=self.role1.id, action="update"
+        ).latest("created_at")
+        self.assertEqual(entry.before_state["name"], "Project Manager")
+        self.assertEqual(entry.after_state["name"], "Renamed Role")
+
+    def test_soft_delete_role_writes_audit_log_entry(self):
+        role_id = self.role1.id
+        RoleService.soft_delete_role(role_id)
+
+        entry = AuditLog.objects.get(entity_type="role", entity_id=role_id, action="delete")
+        self.assertEqual(entry.before_state["name"], "Project Manager")
+        self.assertIsNone(entry.after_state)

@@ -97,7 +97,11 @@ class CompanyViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         serializer = CompanyCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        company = CompanyService.create_company(**serializer.validated_data)
+        company = CompanyService.create_company(
+            **serializer.validated_data,
+            actor_user=request.user,
+            request=request,
+        )
         response_data = CompanySerializer(company).data
         request_id = getattr(request, "request_id", None)
 
@@ -129,6 +133,8 @@ class CompanyViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
             company_id=pk,
             validated_data=serializer.validated_data,
             is_platform_admin=is_platform_admin(request),
+            actor_user=request.user,
+            request=request,
         )
         response_data = CompanySerializer(updated_company).data
         request_id = getattr(request, "request_id", None)
@@ -148,7 +154,7 @@ class CompanyViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         company = CompanyService.get_company_by_id(pk)
         self.check_object_permissions(request, company)
 
-        CompanyService.soft_delete_company(pk)
+        CompanyService.soft_delete_company(pk, actor_user=request.user, request=request)
         request_id = getattr(request, "request_id", None)
 
         return ApiResponse.success(
