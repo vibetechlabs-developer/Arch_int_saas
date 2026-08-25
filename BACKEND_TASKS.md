@@ -407,7 +407,7 @@ Depends On
 
 ### BE-018 – Company Tests
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
