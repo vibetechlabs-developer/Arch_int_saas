@@ -381,7 +381,7 @@ Depends On
 
 ### BE-017 – Authentication Tests
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
