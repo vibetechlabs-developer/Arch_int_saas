@@ -1,0 +1,150 @@
+from drf_spectacular.utils import extend_schema, extend_schema_view
+from rest_framework import status, viewsets
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
+from rest_framework.response import Response
+
+from apps.common.pagination import StandardPagination
+from apps.common.responses import ApiResponse
+from apps.company.permissions import IsPlatformAdminOrCompanyAccess, is_platform_admin
+from apps.company.serializers import (
+    CompanyCreateSerializer,
+    CompanySerializer,
+    CompanyUpdateSerializer,
+)
+from apps.company.services import CompanyService
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Companies",
+        description="List all active tenant companies (Platform Admin only).",
+        responses={status.HTTP_200_OK: CompanySerializer(many=True)},
+        tags=["Company"],
+    ),
+    create=extend_schema(
+        summary="Create Company",
+        description="Create a new tenant company (Platform Admin only).",
+        request=CompanyCreateSerializer,
+        responses={status.HTTP_201_CREATED: CompanySerializer},
+        tags=["Company"],
+    ),
+    retrieve=extend_schema(
+        summary="Retrieve Company",
+        description="Retrieve company details by UUID.",
+        responses={status.HTTP_200_OK: CompanySerializer},
+        tags=["Company"],
+    ),
+    partial_update=extend_schema(
+        summary="Update Company",
+        description="Partially update company details by UUID.",
+        request=CompanyUpdateSerializer,
+        responses={status.HTTP_200_OK: CompanySerializer},
+        tags=["Company"],
+    ),
+    destroy=extend_schema(
+        summary="Delete Company",
+        description="Soft-delete a company tenant by UUID (Platform Admin only).",
+        responses={status.HTTP_200_OK: CompanySerializer},
+        tags=["Company"],
+    ),
+)
+class CompanyViewSet(viewsets.GenericViewSet):
+    """
+    ViewSet for Company tenant CRUD operations.
+    Enforces standard ApiResponse envelopes and permission boundaries.
+    """
+
+    permission_classes = [IsAuthenticated, IsPlatformAdminOrCompanyAccess]
+    pagination_class = StandardPagination
+    serializer_class = CompanySerializer
+
+    def list(self, request: Request) -> Response:
+        """
+        List companies with status filter and search query.
+        """
+        status_filter = request.query_params.get("status")
+        search_query = request.query_params.get("search")
+        ordering = request.query_params.get("ordering", "-created_at")
+
+        queryset = CompanyService.list_companies(
+            status=status_filter,
+            search=search_query,
+            ordering=ordering,
+        )
+
+        page = self.paginate_queryset(queryset)
+        request_id = getattr(request, "request_id", None)
+
+        if page is not None:
+            serializer = CompanySerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = CompanySerializer(queryset, many=True)
+        return ApiResponse.success(data=serializer.data, request_id=request_id)
+
+    def create(self, request: Request) -> Response:
+        """
+        Create a new tenant company.
+        """
+        serializer = CompanyCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        company = CompanyService.create_company(**serializer.validated_data)
+        response_data = CompanySerializer(company).data
+        request_id = getattr(request, "request_id", None)
+
+        return ApiResponse.created(data=response_data, request_id=request_id)
+
+    def retrieve(self, request: Request, pk: str = None) -> Response:
+        """
+        Retrieve details of a single company.
+        """
+        company = CompanyService.get_company_by_id(pk)
+        self.check_object_permissions(request, company)
+
+        response_data = CompanySerializer(company).data
+        request_id = getattr(request, "request_id", None)
+
+        return ApiResponse.success(data=response_data, request_id=request_id)
+
+    def partial_update(self, request: Request, pk: str = None) -> Response:
+        """
+        Partially update an existing company.
+        """
+        company = CompanyService.get_company_by_id(pk)
+        self.check_object_permissions(request, company)
+
+        serializer = CompanyUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        updated_company = CompanyService.update_company(
+            company_id=pk,
+            validated_data=serializer.validated_data,
+            is_platform_admin=is_platform_admin(request),
+        )
+        response_data = CompanySerializer(updated_company).data
+        request_id = getattr(request, "request_id", None)
+
+        return ApiResponse.success(data=response_data, request_id=request_id)
+
+    def update(self, request: Request, pk: str = None) -> Response:
+        """
+        Full update forwards to partial_update logic.
+        """
+        return self.partial_update(request, pk=pk)
+
+    def destroy(self, request: Request, pk: str = None) -> Response:
+        """
+        Soft-delete a company.
+        """
+        company = CompanyService.get_company_by_id(pk)
+        self.check_object_permissions(request, company)
+
+        CompanyService.soft_delete_company(pk)
+        request_id = getattr(request, "request_id", None)
+
+        return ApiResponse.success(
+            data={"message": "Company deleted successfully."},
+            request_id=request_id,
+        )

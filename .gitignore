@@ -1,0 +1,37 @@
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Environment / secrets — never commit .env, only .env.example
+.env
+.env.*
+!.env.example
+
+# Django
+backend/staticfiles/
+backend/media/
+*.sqlite3
+
+# Node / frontend (future)
+node_modules/
+dist/
+build/
+
+# Logs
+*.log

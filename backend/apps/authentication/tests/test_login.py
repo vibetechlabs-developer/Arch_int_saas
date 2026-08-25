@@ -1,0 +1,205 @@
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from rest_framework import status
+from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import UntypedToken
+
+User = get_user_model()
+
+
+class LoginEndpointTestCase(TestCase):
+    """
+    Test suite for POST /auth/login endpoint.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.url = "/auth/login"
+        self.raw_password = "SecurePassword123!"
+        self.user = User.objects.create_user(
+            email="developer@example.com",
+            name="Developer One",
+            password=self.raw_password,
+        )
+
+    def test_valid_login_returns_token_pair_and_user_profile(self):
+        """
+        Valid login returns 200 OK with accessToken, refreshToken, and camelCase user profile.
+        """
+        response = self.client.post(
+            self.url,
+            {"email": "developer@example.com", "password": self.raw_password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+
+        self.assertTrue(data["success"])
+        self.assertIn("requestId", data)
+        self.assertIn("X-Request-ID", response.headers)
+        self.assertEqual(data["requestId"], response.headers["X-Request-ID"])
+
+        payload = data["data"]
+        self.assertIn("accessToken", payload)
+        self.assertIn("refreshToken", payload)
+        self.assertIn("user", payload)
+
+        user_data = payload["user"]
+        self.assertEqual(user_data["id"], str(self.user.id))
+        self.assertEqual(user_data["email"], "developer@example.com")
+        self.assertEqual(user_data["name"], "Developer One")
+        self.assertEqual(user_data["status"], "active")
+        self.assertTrue(user_data["isActive"])
+        self.assertFalse(user_data["isStaff"])
+
+    def test_login_email_is_case_insensitive(self):
+        """
+        Login succeeds regardless of email casing.
+        """
+        response = self.client.post(
+            self.url,
+            {"email": "DEVELOPER@EXAMPLE.COM", "password": self.raw_password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.json()["success"])
+
+    def test_login_updates_last_login_timestamp(self):
+        """
+        Successful login updates user.last_login field.
+        """
+        self.assertIsNone(self.user.last_login)
+        response = self.client.post(
+            self.url,
+            {"email": "developer@example.com", "password": self.raw_password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.last_login)
+
+    def test_access_token_claims_payload_security_boundary(self):
+        """
+        Verify access token carries sub, email, token_type=company_user,
+        and strictly does NOT carry company_id or role/permissions.
+        """
+        response = self.client.post(
+            self.url,
+            {"email": "developer@example.com", "password": self.raw_password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        access_token_str = response.json()["data"]["accessToken"]
+        decoded_token = UntypedToken(access_token_str)
+
+        # Expected claims
+        self.assertEqual(decoded_token["sub"], str(self.user.id))
+        self.assertEqual(decoded_token["email"], "developer@example.com")
+        self.assertEqual(decoded_token["token_type"], "company_user")
+        self.assertIn("iat", decoded_token)
+        self.assertIn("exp", decoded_token)
+        self.assertIn("jti", decoded_token)
+
+        # Prohibited claims (05_Security/JWT.md §3)
+        self.assertNotIn("company_id", decoded_token)
+        self.assertNotIn("companyId", decoded_token)
+        self.assertNotIn("role", decoded_token)
+        self.assertNotIn("roles", decoded_token)
+        self.assertNotIn("permissions", decoded_token)
+
+    def test_invalid_password_returns_401_authentication_error(self):
+        """
+        Invalid password returns 401 with standard AUTHENTICATION_ERROR envelope.
+        """
+        response = self.client.post(
+            self.url,
+            {"email": "developer@example.com", "password": "WrongPassword!"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["error"]["code"], "AUTHENTICATION_ERROR")
+        self.assertEqual(
+            data["error"]["message"],
+            "Invalid or expired authentication credentials.",
+        )
+        self.assertIn("requestId", data)
+
+    def test_nonexistent_email_returns_identical_401_error(self):
+        """
+        Non-existent email returns identical 401 error to prevent user enumeration.
+        """
+        response = self.client.post(
+            self.url,
+            {"email": "nonexistent@example.com", "password": self.raw_password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["error"]["code"], "AUTHENTICATION_ERROR")
+        self.assertEqual(
+            data["error"]["message"],
+            "Invalid or expired authentication credentials.",
+        )
+
+    def test_inactive_user_cannot_login(self):
+        """
+        Inactive user (is_active=False) receives 401 AUTHENTICATION_ERROR.
+        """
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+
+        response = self.client.post(
+            self.url,
+            {"email": "developer@example.com", "password": self.raw_password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["error"]["code"], "AUTHENTICATION_ERROR")
+
+    def test_soft_deleted_user_cannot_login(self):
+        """
+        Soft-deleted user receives 401 AUTHENTICATION_ERROR.
+        """
+        self.user.delete()  # soft delete via SoftDeleteModel
+        self.assertTrue(self.user.is_deleted)
+
+        response = self.client.post(
+            self.url,
+            {"email": "developer@example.com", "password": self.raw_password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["error"]["code"], "AUTHENTICATION_ERROR")
+
+    def test_missing_credentials_returns_400_validation_error(self):
+        """
+        Missing email or password returns 400 VALIDATION_ERROR with field issues.
+        """
+        response = self.client.post(
+            self.url,
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["error"]["code"], "VALIDATION_ERROR")
+        details = data["error"]["details"]
+        self.assertTrue(any(d["field"] == "email" for d in details))
+        self.assertTrue(any(d["field"] == "password" for d in details))

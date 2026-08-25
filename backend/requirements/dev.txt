@@ -1,0 +1,7 @@
+# Development dependencies for INT Projects SaaS Backend
+-r base.txt
+
+# Testing & Development
+pytest>=8.3.0
+pytest-django>=4.9.0
+factory-boy>=3.3.0

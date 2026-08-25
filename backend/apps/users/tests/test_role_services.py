@@ -1,0 +1,165 @@
+import uuid
+from django.test import TestCase
+from rest_framework import exceptions as drf_exceptions
+
+from apps.common.exceptions import ConflictError
+from apps.company.models import Company, CompanyStatus
+from apps.users.models import Role
+from apps.users.services import RoleService
+
+
+class RoleServiceTestCase(TestCase):
+    """
+    Unit test suite for RoleService business logic (BE-014).
+    """
+
+    def setUp(self):
+        self.company1 = Company.objects.create(
+            name="Alpha Corp",
+            status=CompanyStatus.ACTIVE,
+        )
+        self.company2 = Company.objects.create(
+            name="Beta Corp",
+            status=CompanyStatus.ACTIVE,
+        )
+
+        self.role1 = RoleService.create_role(
+            company_id=self.company1.id,
+            name="Project Manager",
+            description="Manages projects",
+            is_active=True,
+        )
+        self.role2 = RoleService.create_role(
+            company_id=self.company1.id,
+            name="Interior Designer",
+            description="Designs interiors",
+            is_active=False,
+        )
+        self.role3 = RoleService.create_role(
+            company_id=self.company2.id,
+            name="Site Supervisor",
+            description="Supervises sites",
+            is_active=True,
+        )
+
+    def test_create_role_success(self):
+        """
+        Verify RoleService creates a role with proper fields.
+        """
+        role = RoleService.create_role(
+            company_id=self.company1.id,
+            name="3D Visualizer",
+            description="Creates 3D models",
+            is_active=True,
+        )
+        self.assertEqual(role.name, "3D Visualizer")
+        self.assertEqual(role.company_id, self.company1.id)
+        self.assertTrue(role.is_active)
+
+    def test_create_role_duplicate_name_raises_conflict(self):
+        """
+        Verify creating a role with a duplicate name within the same company raises ConflictError (409).
+        """
+        with self.assertRaises(ConflictError):
+            RoleService.create_role(
+                company_id=self.company1.id,
+                name="Project Manager",
+            )
+
+        # Case-insensitive check
+        with self.assertRaises(ConflictError):
+            RoleService.create_role(
+                company_id=self.company1.id,
+                name="project manager",
+            )
+
+    def test_create_role_nonexistent_company_raises_not_found(self):
+        """
+        Verify creating a role for non-existent company raises NotFound (404).
+        """
+        with self.assertRaises(drf_exceptions.NotFound):
+            RoleService.create_role(
+                company_id=uuid.uuid4(),
+                name="New Role",
+            )
+
+    def test_get_role_by_id_success(self):
+        """
+        Verify retrieving an active role by ID.
+        """
+        role = RoleService.get_role_by_id(self.role1.id)
+        self.assertEqual(role.id, self.role1.id)
+        self.assertEqual(role.name, "Project Manager")
+
+    def test_get_role_by_id_with_company_scoping(self):
+        """
+        Verify tenant-scoped get_role_by_id raises NotFound for cross-tenant query.
+        """
+        # Role 1 belongs to Company 1; requesting with Company 2 raises NotFound
+        with self.assertRaises(drf_exceptions.NotFound):
+            RoleService.get_role_by_id(self.role1.id, company_id=self.company2.id)
+
+    def test_get_role_by_id_nonexistent_raises_not_found(self):
+        """
+        Verify retrieving non-existent role raises NotFound (404).
+        """
+        with self.assertRaises(drf_exceptions.NotFound):
+            RoleService.get_role_by_id(uuid.uuid4())
+
+    def test_list_roles_filtering_and_search(self):
+        """
+        Verify list_roles filtering by company, active status, search, and ordering.
+        """
+        # Filter by company 1
+        roles_c1 = RoleService.list_roles(company_id=self.company1.id)
+        self.assertEqual(roles_c1.count(), 2)
+
+        # Filter by active status
+        roles_active = RoleService.list_roles(company_id=self.company1.id, is_active=True)
+        self.assertEqual(roles_active.count(), 1)
+        self.assertEqual(roles_active.first().name, "Project Manager")
+
+        # Search query
+        roles_search = RoleService.list_roles(search="Designer")
+        self.assertEqual(roles_search.count(), 1)
+        self.assertEqual(roles_search.first().name, "Interior Designer")
+
+    def test_update_role_success(self):
+        """
+        Verify updating role attributes.
+        """
+        updated = RoleService.update_role(
+            role_id=self.role1.id,
+            validated_data={
+                "name": "Senior Project Manager",
+                "description": "Updated description",
+                "is_active": False,
+            },
+        )
+        self.assertEqual(updated.name, "Senior Project Manager")
+        self.assertEqual(updated.description, "Updated description")
+        self.assertFalse(updated.is_active)
+
+    def test_update_role_duplicate_name_raises_conflict(self):
+        """
+        Verify updating role to an existing role's name raises ConflictError.
+        """
+        with self.assertRaises(ConflictError):
+            RoleService.update_role(
+                role_id=self.role1.id,
+                validated_data={"name": "Interior Designer"},
+            )
+
+    def test_soft_delete_role(self):
+        """
+        Verify soft-deleting a role removes it from active queries.
+        """
+        role_id = self.role1.id
+        RoleService.soft_delete_role(role_id)
+
+        # Subsequent retrieval raises NotFound
+        with self.assertRaises(drf_exceptions.NotFound):
+            RoleService.get_role_by_id(role_id)
+
+        # Still exists in all_objects
+        self.assertTrue(Role.all_objects.filter(id=role_id).exists())

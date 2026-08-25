@@ -1,0 +1,3 @@
+"""
+apps.company tests package
+"""

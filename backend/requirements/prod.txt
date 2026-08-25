@@ -1,0 +1,5 @@
+# Production dependencies for INT Projects SaaS Backend
+-r base.txt
+
+# Production WSGI Server
+gunicorn>=23.0.0
