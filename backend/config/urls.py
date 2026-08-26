@@ -24,8 +24,14 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
+from apps.common.views import HealthCheckView
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # BE-020: container/orchestrator liveness endpoint. Unauthenticated
+    # (HealthCheckView disables authentication_classes entirely), unprefixed
+    # to match every other route in this project.
+    path("health/", HealthCheckView.as_view(), name="health-check"),
     # BE-016: OpenAPI schema + interactive docs. Unprefixed, matching every
     # other route in this project (API_Response_Format.md §6 — unversioned
     # by default). Publicly readable (AllowAny) since the schema only

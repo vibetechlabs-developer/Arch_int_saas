@@ -1,86 +1,32 @@
 # Docker / Containerization
 
-**Status:** Draft — previously blocked on stack selection; unblocked now that `02_Architecture/Technical_Architecture.md` §2 confirms React/TS/Vite + Django/DRF + PostgreSQL.
+**Status:** Implemented (BE-020) — backend stack only. `docker-compose.yml` (repo root) and `backend/Dockerfile` are real, committed files, not indicative snippets. Frontend containerization (`web` service, an nginx-hosted static build) is deferred until `apps/web` exists in this repo — the sections below describe the backend-only stack actually running today: Nginx → Django (Gunicorn) → PostgreSQL, plus Redis → Celery Worker → Celery Beat.
 
 ---
 
 ## 1. Local Development — `docker-compose`
 
-```yaml
-# docker-compose.yml (indicative)
-services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: int_projects_dev
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports: ["5432:5432"]
-    volumes: ["pgdata:/var/lib/postgresql/data"]
+`docker-compose.yml` lives at the **repo root** (not inside `backend/`), so a future `web` service can be added without relocating it. Services: `postgres`, `redis`, `django`, `celery-worker`, `celery-beat`, `nginx`. Full definitions in the file itself — summary:
 
-  minio:                        # local object storage emulator (S3-compatible)
-    image: minio/minio
-    command: server /data --console-address ":9001"
-    ports: ["9000:9000", "9001:9001"]
-    volumes: ["miniodata:/data"]
+- **postgres** (`postgres:16-alpine`) — dev-only datastore; `07_DevOps/Production.md` §2 mandates a managed service for real environments, this container never ships there. Named volume `pgdata`, health-checked via `pg_isready`.
+- **redis** (`redis:7-alpine`) — Celery broker + result backend today (only consumer; positioned as a future cache layer, not built yet). Not host-exposed. Health-checked via `redis-cli ping`.
+- **django** — builds `backend/Dockerfile` target `dev`; bind-mounts `./backend:/app` for hot-reload; `env_file: backend/.env`; overrides `DB_HOST`/`CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND` to container-network values (service names) so the checked-in `.env`'s `localhost` defaults stay correct for non-Docker local runs. Health-checked via `GET /health/` (BE-020's liveness endpoint, `apps/common/views.py::HealthCheckView` — unauthenticated, no DB dependency).
+- **celery-worker** / **celery-beat** — same image/build as `django`, only `command:` differs (`celery -A config worker -l info` / `celery -A config beat -l info`). No tasks or schedule are registered yet — pure infra scaffolding ahead of the async workload, not a defect.
+- **nginx** (`nginx:alpine`) — reverse proxy in front of Gunicorn; serves `staticfiles`/`media` named volumes directly so Gunicorn workers aren't spending threads on file I/O; config mounted (not baked) from `backend/nginx/nginx.conf`.
 
-  api:
-    build: { context: ./apps/api, target: dev }
-    volumes: ["./apps/api:/app"]     # bind mount for hot-reload
-    ports: ["8000:8000"]
-    env_file: .env
-    depends_on: [postgres, minio]
+`docker compose up` (after `cp backend/.env.example backend/.env`, per `Development_Environment.md` §2) brings up the whole stack. Object storage (MinIO or otherwise) is **not** part of this compose file — no S3-compatible backend is wired into Django settings yet (no `django-storages`, no `AWS_*` config); `MEDIA_ROOT` stays local-filesystem until that's built.
 
-  web:
-    build: { context: ./apps/web, target: dev }
-    volumes: ["./apps/web:/app"]
-    ports: ["5173:5173"]              # Vite dev server default
-    env_file: .env
-    depends_on: [api]
+## 2. Backend Dockerfile (`backend/Dockerfile`) — Multi-Stage
 
-volumes:
-  pgdata:
-  miniodata:
-```
+Four stages: `base` (shared OS deps) → `dev` (hot-reload target, used by all three app-tier compose services locally) and, separately, `builder` (prod dependencies only) → `production` (slim runtime, no build toolchain, non-root `appuser`). See the file itself for the exact, current implementation — kept here only as a summary so this doc doesn't drift into a second source of truth:
 
-`docker compose up` is the single command a new developer runs to get Postgres, object storage, the Django API (hot-reloading via `runserver` or `gunicorn --reload` in the `dev` build target), and the Vite dev server running together — matching the module dependency chain in `09_Project/Module_Dependency_Map.md` §1, since the API needs Postgres before it can serve anything meaningful.
-
-## 2. Backend Dockerfile (`apps/api/Dockerfile`) — Multi-Stage
-
-```dockerfile
-# --- base ---
-FROM python:3.12-slim AS base
-WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev gcc && rm -rf /var/lib/apt/lists/*
-
-# --- dev target: hot-reload, dev dependencies included ---
-FROM base AS dev
-COPY requirements/dev.txt .
-RUN pip install --no-cache-dir -r dev.txt
-COPY . .
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
-
-# --- builder: production dependencies only ---
-FROM base AS builder
-COPY requirements/prod.txt .
-RUN pip install --no-cache-dir -r prod.txt
-
-# --- production runtime: slim, no build tools ---
-FROM python:3.12-slim AS production
-WORKDIR /app
-RUN useradd --create-home appuser
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY . .
-RUN python manage.py collectstatic --noinput
-USER appuser
-EXPOSE 8000
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4"]
-```
-
-- Split `requirements/dev.txt` (includes `pytest`, `factory_boy`, debugging tools) from `requirements/prod.txt` (runtime only) so the production image never ships test/dev tooling.
-- Runs as a non-root user in production (`appuser`) — a basic hardening step, not optional.
+- Split `requirements/dev.txt` (adds `pytest`, `pytest-django`, `factory-boy`) from `requirements/prod.txt` (adds only `gunicorn`) on top of the shared `requirements/base.txt`, so the production image never ships test/dev tooling.
+- `production` stage installs `libpq5`/`curl` (runtime libs + the binary the compose healthcheck uses), copies only the installed site-packages from `builder` (not the build toolchain), runs `collectstatic --noinput` while still root (before the ownership handoff, since `STATIC_ROOT` must be writable at that point), then switches to non-root `appuser` — a basic hardening step, not optional.
+- **Migrations are deliberately not run inside the Dockerfile or the container's `CMD`** — per `07_DevOps/CI_CD.md` §4, `migrate` is an explicit, isolated deploy step that runs *before* new containers receive traffic, not baked into every container start (which would race concurrent replicas running `migrate` simultaneously). Locally: `docker compose exec django python manage.py migrate`, matching `Development_Environment.md` §2 step 4 exactly.
 
 ## 3. Frontend Dockerfile (`apps/web/Dockerfile`) — Multi-Stage
+
+**Status: still indicative/draft** — no `apps/web` directory exists in this repo yet, so nothing below is implemented. Kept as the target design for whenever frontend work begins; not part of BE-020's scope or verification.
 
 ```dockerfile
 # --- dev target ---
@@ -110,8 +56,8 @@ EXPOSE 80
 
 ## 4. What's Deliberately Not Containerized
 
-- **PostgreSQL in production** — use a managed service (see `07_DevOps/Production.md` §2), not a self-hosted container; the `postgres` service above is local-dev-only.
-- **Object storage in production** — a managed S3-compatible provider, not the `minio` container above, which is a local emulator only (`02_Architecture/Technical_Architecture.md` §8 item 4).
+- **PostgreSQL in production** — use a managed service (see `07_DevOps/Production.md` §2), not a self-hosted container; the `postgres` service in §1 is local-dev-only.
+- **Object storage** — not present in this compose file at all yet (§1) since no S3-compatible backend is wired into Django settings; a local emulator (e.g. MinIO) or a managed provider is a future addition once that's built (`02_Architecture/Technical_Architecture.md` §8 item 4), not before.
 
 ## 5. Related
 

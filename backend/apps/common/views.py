@@ -1,4 +1,36 @@
 from django.http import Http404
+from rest_framework.permissions import AllowAny
+from rest_framework.request import Request
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from apps.common.responses import ApiResponse
+
+
+class HealthCheckView(APIView):
+    """
+    Unauthenticated liveness endpoint for container/orchestrator health
+    checks (BE-020; 07_DevOps/CI_CD.md §4, Docker.md). Deliberately has no
+    dependency on the database, cache, or any other service — a health
+    check that can itself fail from an unrelated outage defeats its own
+    purpose as a liveness signal.
+
+    `authentication_classes = []` means TenantJWTAuthentication never runs
+    for this view at all, regardless of whether the caller supplies a
+    Bearer token — a stronger guarantee than adding this path to
+    TenantJWTAuthentication's `exempt_paths` list (BE-016's approach for
+    /schema//docs//redoc/), and one that can't be broken by a future
+    trailing-slash mismatch in that list.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
+    def get(self, request: Request) -> Response:
+        return ApiResponse.success(
+            data={"status": "ok"},
+            request_id=getattr(request, "request_id", None),
+        )
 
 
 class ObjectPermission404Mixin:

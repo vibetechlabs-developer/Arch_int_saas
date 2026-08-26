@@ -469,7 +469,23 @@ Depends On
 
 ### BE-020 – Docker & Docker Compose
 
-**Status:** Todo
+**Status:** Review
+
+**Priority:** Critical
+
+**Owner:** Backend Team
+
+**Implementation notes:** Backend-only stack per the approved plan (no frontend containerization — no `apps/web` exists yet in this repo). `docker-compose.yml` (repo root) defines six services: `postgres` (16-alpine, named volume `pgdata`, `pg_isready` healthcheck), `redis` (7-alpine, broker/result-backend only — no cache consumer yet, `redis-cli ping` healthcheck), `django` (builds `backend/Dockerfile` target `dev`, bind-mounted for hot-reload, `env_file: backend/.env` with `DB_HOST`/`CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND` overridden to container-network service names so the checked-in `.env`'s `localhost` defaults stay correct for non-Docker runs), `celery-worker`/`celery-beat` (same image, only `command:` differs — no tasks/schedule registered yet, pure infra scaffolding ahead of the async workload, matching the plan's flagged risk), and `nginx` (alpine, reverse-proxies to `django`, serves `staticfiles`/`media` named volumes directly).
+
+`backend/Dockerfile`: four stages (`base` → `dev` / `builder` → `production`), matching `07_DevOps/Docker.md`'s design. Production stage installs only `libpq5`/`curl` runtime libs (not the build toolchain), copies site-packages from `builder`, runs `collectstatic --noinput` while still root (before the non-root `appuser` ownership handoff), then drops privileges. Migrations are deliberately **not** run inside the image or `CMD` — `07_DevOps/CI_CD.md` §4 treats `migrate` as an explicit pre-traffic deploy step, not something baked into container start (which would race concurrent replicas). `backend/.dockerignore` excludes `.venv/`, `__pycache__/`, `.env`, `media/`, `staticfiles/`, etc. `backend/nginx/nginx.conf` proxies to `django:8000`, serves `/static/`/`/media/` directly, and carries a commented-out TLS scaffold (real TLS terminates at the load balancer per `Production.md` §3, not here).
+
+**New health endpoint (`GET /health/`):** `apps/common/views.py::HealthCheckView` — unauthenticated, no DB/cache dependency, returns the standard `ApiResponse.success()` envelope. **Deviation from the approved plan, disclosed:** the plan's §12 called for adding `/health/` to `TenantJWTAuthentication`'s `exempt_paths` list (BE-016's approach for `/schema/`/`/docs/`/`/redoc/`). Implemented instead via `authentication_classes = []` directly on the view — a strictly stronger guarantee (TenantJWTAuthentication never runs for this view at all, regardless of token state) that can't be broken by a future trailing-slash mismatch in that list (a class of bug `exempt_paths` already has once, noted in BE-016). `apps/authentication/authentication.py` was therefore **not** modified — a smaller diff than planned, same outcome. 3 new tests in `apps/common/tests/test_health.py` (no auth, invalid Bearer token ignored, `X-Request-ID` header set).
+
+`07_DevOps/Docker.md` updated from "indicative/draft" to reflect the actual implementation (real paths, real service names); its frontend section (§3) explicitly marked still-draft since no frontend code exists in this repo.
+
+**Verification, disclosed honestly:** `docker compose config` parsed and fully resolved the compose file with no errors. A `docker build --target dev` run got all the way through dependency resolution and installation (`pip install` succeeded for all packages) and copying source, then failed at the final image-export step with `failed to create temp dir: ... read-only file system`. A follow-up plain `docker pull postgres:16-alpine` failed identically (`write .../meta.db: read-only file system`), confirming this is a **Docker Desktop host-level storage fault in this session's environment** (its internal containerd store is read-only), not a defect in `Dockerfile`/`docker-compose.yml` — but it means a live `docker compose up` end-to-end run could **not** be completed and verified in this session. Recommend the user run `docker compose up` themselves once Docker Desktop's storage is healthy (Docker Desktop → Troubleshoot → "Clean / Purge data", or a WSL/Docker Desktop restart) as the remaining verification step before this task can move past Review.
+
+**Tests:** `apps/common` +3 (health check). Full backend suite: **235 passed, 0 failed** (was 232 after BE-019).
 
 Depends On
 
