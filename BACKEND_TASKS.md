@@ -568,7 +568,7 @@ _(Renumbered 2026-08-27: originally BE-021–BE-044. BE-021 collided with the Sp
 - BE-028 – Project Audit Logs
 - BE-029 – CRM Tests
 
-Status: In Progress (BE-022, BE-023 Done; BE-024 in Review; BE-025–BE-029 Todo)
+Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025–BE-029 Todo)
 
 ---
 
@@ -615,7 +615,7 @@ Depends On
 
 ### BE-024 – Project Module
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
