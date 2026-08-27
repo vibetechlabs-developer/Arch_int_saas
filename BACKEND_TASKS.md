@@ -568,7 +568,28 @@ _(Renumbered 2026-08-27: originally BE-021–BE-044. BE-021 collided with the Sp
 - BE-028 – Project Audit Logs
 - BE-029 – CRM Tests
 
-Status: Todo
+Status: In Progress (BE-022 in Review; BE-023–BE-029 Todo)
+
+---
+
+### BE-022 – Client Module
+
+**Status:** Review
+
+**Priority:** Critical
+
+**Owner:** Backend Team
+
+**Implementation notes:** Client domain foundation only — no views/URLs/CRUD (BE-023's scope). New `apps.clients` app: `Client(BaseModel)` with `company` FK (CASCADE, `related_name="clients"`), required `name`, and optional `company_name`/`email`/`mobile`/`gstin`/`addresses` (JSONField, default `[]`)/`notes` (TextField, default `""`) — field set matches `Database_Schema.md`'s `client` table exactly, no invented fields (no `is_active`, no uniqueness constraint — neither is documented). `db_table = "client"` per `Naming_Standards.md`. Composite index `(company, name)` for the listing query BE-023 will need. `ClientRepository`/`ClientSerializer`/`ClientPermission` mirror `RoleRepository`/`RoleSerializer`/`RolePermission` exactly for architectural consistency. `ClientPermission` deliberately uses the same coarse tenant-membership gate as `RolePermission` — **not** fine-grained `client.view`/`create`/`edit`/`delete` permission codes, per explicit Backend Lead decision (2026-08-27): `05_Security/Permissions.md` §7 lists the canonical permission-code list as still pending client sign-off, and no `Permission`/`RolePermission` model exists in code despite Migration_Plan.md's 007/008 — building that now would be new RBAC infrastructure outside this task's scope. `selectors.py`/`validators.py` are minimal foundations (bare tenant-scoped queryset, `require_name()`) for BE-023 to extend with search/filter/create logic. Migration `0001_initial` depends only on `company`, matching `Migration_Plan.md` migration 011 (Group C).
+
+**Deferred (documented, not gaps):** the `CRM_API.md` "block delete if active projects exist" rule can't be built until BE-024 (Project) exists — Client has no reverse relation to check yet. Audit logging and the `ENTITY_FIELD_ALLOWLISTS["client"]` entry are BE-023's responsibility (no mutations happen in BE-022). A separate multi-note-with-authorship model (implied by `CRM_API.md`'s `POST .../notes` sketch) was not built — `Database_Schema.md`'s actual `client` column list has one plain `notes` field, which is what was implemented; flagged as a conscious documentation-following choice, not an oversight.
+
+**Tests:** 18 new (`apps/clients/tests/test_models.py` ×12: creation, optional-field defaults, full-field persistence, str repr, absence of uniqueness constraint, same-name-different-company, tenant isolation via FK, soft delete lifecycle, cascade delete, required-company enforcement; `test_permissions.py` ×8, unit-level only per task scope — no HTTP client/URLs involved, full endpoint-level authorization tests are BE-023's). Full backend suite: **299 passed, 0 failed** (was 281 after Sprint 1 closure). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected. `spectacular --fail-on-warn`: clean (BE-022 adds no endpoints, confirmed schema untouched).
+
+Depends On
+
+- BE-014 (Role CRUD — company/tenant patterns this mirrors)
+- BE-021 (Multi-Tenant Resolution — `request.company_id` this reuses)
 
 ---
 
