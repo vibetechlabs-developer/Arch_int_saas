@@ -50,12 +50,27 @@ if env_file.exists():
 # only (BE-001). Every real environment (staging/production) MUST set
 # DJANGO_SECRET_KEY via the platform's secrets manager — see
 # 07_DevOps/Production.md §5.
+_INSECURE_DEFAULT_SECRET_KEY = "django-insecure-fv5f2u((b)d0rj8z#hrnikk2vcg!w6c%mc7521c^s_4thv1gxg"
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # Defaults to False (secure-by-default) — local/dev environments must
 # explicitly opt in via DJANGO_DEBUG=true (see backend/.env.example).
 DEBUG = env("DJANGO_DEBUG")
+
+# A real environment (DEBUG=False) must never boot with the publicly-known
+# insecure default key — that key is checked into this repo and reproduced
+# in security audit reports, so silently falling back to it in production
+# would be a real, exploitable secret exposure. Development/test keeps
+# working unchanged since DEBUG=True there.
+if not DEBUG and SECRET_KEY == _INSECURE_DEFAULT_SECRET_KEY:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "DJANGO_SECRET_KEY must be set to a real, unique secret when DEBUG=False. "
+        "Refusing to start with the insecure development default in a "
+        "non-debug environment — see 07_DevOps/Production.md §5."
+    )
 
 ALLOWED_HOSTS = env("DJANGO_ALLOWED_HOSTS") if not DEBUG else env("DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 APPEND_SLASH = False
@@ -193,6 +208,29 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.StandardResultsSetPagination",
     "PAGE_SIZE": 25,
     "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",
+    # ScopedRateThrottle only throttles a view that declares throttle_scope
+    # (rest_framework.throttling.ScopedRateThrottle.allow_request() returns
+    # True immediately otherwise) — safe as a global default, since it
+    # leaves every view without a scope completely unthrottled.
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.ScopedRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "auth_login": "10/min",
+        "platform_auth_login": "10/min",
+        "auth_forgot_password": "5/min",
+        "auth_reset_password": "10/min",
+        "auth_refresh": "30/min",
+    },
+    # BrowsableAPIRenderer is a real, if low-severity, information-exposure
+    # surface in production (renders an interactive HTML API browser to any
+    # requester) — restrict to JSON there. DEBUG=True keeps the browsable
+    # renderer for local development, so DX is unaffected.
+    "DEFAULT_RENDERER_CLASSES": (
+        ["rest_framework.renderers.JSONRenderer", "rest_framework.renderers.BrowsableAPIRenderer"]
+        if DEBUG
+        else ["rest_framework.renderers.JSONRenderer"]
+    ),
 }
 
 

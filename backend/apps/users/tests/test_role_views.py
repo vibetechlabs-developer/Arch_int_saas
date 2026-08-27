@@ -248,3 +248,28 @@ class RoleViewSetTestCase(TestCase):
         # Subsequent retrieval returns 404
         get_resp = self.client.get(f"/roles/{self.role1.id}")
         self.assertEqual(get_resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_invalid_is_active_query_param_returns_400(self):
+        """
+        Query-param validation (RoleListQuerySerializer): an unrecognized
+        isActive value is now a 400 VALIDATION_ERROR, not silently ignored.
+        """
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.get("/roles?isActive=maybe")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
+
+    def test_invalid_ordering_query_param_returns_400(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.get("/roles?ordering=not_a_real_field")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
+
+    def test_invalid_company_id_query_param_returns_400(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        response = self.client.get("/roles?companyId=not-a-uuid")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")

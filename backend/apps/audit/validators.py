@@ -9,6 +9,10 @@ from typing import Any, Dict, Optional
 ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
     "role": {"name", "description", "is_active"},
     "company": {"name", "status", "currency", "gst_number", "settings"},
+    # Authentication events (login/logout/refresh/password reset) audit the
+    # "user" entity. Deliberately excludes password/password_hash/token
+    # fields entirely — only a non-sensitive identifier is ever persisted.
+    "user": {"email"},
 }
 
 

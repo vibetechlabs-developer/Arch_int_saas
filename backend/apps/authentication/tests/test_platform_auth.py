@@ -4,6 +4,8 @@ from rest_framework import status
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import UntypedToken
 
+from apps.audit.models import AuditLog
+
 User = get_user_model()
 
 
@@ -133,3 +135,44 @@ class PlatformAuthEndpointTestCase(TestCase):
 
         self.assertEqual(companies_res.status_code, status.HTTP_200_OK)
         self.assertTrue(companies_res.json()["success"])
+
+    def test_successful_platform_admin_login_writes_audit_log_entry(self):
+        response = self.client.post(
+            self.url,
+            {"email": "platform.admin@example.com", "password": self.password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        entry = AuditLog.objects.get(
+            entity_type="user", entity_id=self.admin_user.id, action="login_success"
+        )
+        self.assertEqual(entry.after_state["email"], self.admin_user.email)
+
+    def test_non_admin_valid_credentials_against_platform_login_writes_failure_entry(self):
+        """
+        A regular (non-admin) user with otherwise-correct credentials is
+        still rejected by /platform-auth/login — and that rejection must
+        itself be audited as a login_failure, since it's a real attempt to
+        use the platform-admin surface.
+        """
+        regular_user = User.objects.create_user(
+            email="not.admin@example.com", name="Not Admin", password="RegularPassword123!"
+        )
+
+        response = self.client.post(
+            self.url,
+            {"email": "not.admin@example.com", "password": "RegularPassword123!"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        entry = AuditLog.objects.get(
+            entity_type="user", entity_id=regular_user.id, action="login_failure"
+        )
+        self.assertEqual(entry.after_state["email"], regular_user.email)
+
+        # A denied platform-admin attempt must not mutate last_login just
+        # because the underlying credentials happened to be valid.
+        regular_user.refresh_from_db()
+        self.assertIsNone(regular_user.last_login)

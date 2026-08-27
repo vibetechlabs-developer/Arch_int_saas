@@ -24,6 +24,14 @@ class UserRepository:
         return User.objects.filter(email__iexact=email.strip()).first()
 
     @staticmethod
+    def get_by_id(user_id: Any) -> Optional[Any]:
+        # User.objects uses SoftDeleteManager (automatically filters deleted_at is null)
+        try:
+            return User.objects.filter(id=user_id).first()
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
     def touch_last_login(user: Any) -> None:
         update_last_login(None, user)
 

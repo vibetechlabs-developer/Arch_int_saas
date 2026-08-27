@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from apps.audit.models import AuditLog
 from apps.authentication.models import PasswordResetToken
 from apps.authentication.tokens import CompanyUserRefreshToken
 
@@ -259,3 +260,16 @@ class ResetPasswordTestCase(TestCase):
 
         for sensitive in ["password", "token", "raw_token", "token_hash", "hash"]:
             self.assertNotIn(sensitive, data["data"])
+
+    def test_successful_reset_writes_audit_log_entry(self):
+        response = self.client.post(
+            self.url,
+            {"token": self.raw_token, "newPassword": self.new_password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        entry = AuditLog.objects.get(
+            entity_type="user", entity_id=self.user.id, action="password_reset_completed"
+        )
+        self.assertEqual(entry.after_state["email"], self.user.email)

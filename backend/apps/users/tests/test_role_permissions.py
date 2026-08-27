@@ -122,37 +122,65 @@ class RoleSecurityAndPermissionsTestCase(TestCase):
 
     def test_cross_tenant_idor_get_role_fails(self):
         """
-        Verify User in Company 1 cannot retrieve Role in Company 2 (Cross-Tenant IDOR).
+        User in Company 1 retrieving a Company 2 role must get 404, not 403
+        — a 403 would confirm the role exists (Error_Handling.md §5
+        anti-enumeration rule). Fixed via ObjectPermission404Mixin on
+        RoleViewSet (deferred at BE-018, applied there only to
+        CompanyViewSet; closed out for Role here).
         """
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.token_c1}")
         response = self.client.get(f"/roles/{self.role_c2.id}")
 
-        self.assertIn(response.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         data = response.json()
         self.assertFalse(data["success"])
+        self.assertEqual(data["error"]["code"], "NOT_FOUND")
 
     def test_cross_tenant_idor_patch_role_fails(self):
         """
-        Verify User in Company 1 cannot update Role in Company 2 (Cross-Tenant IDOR).
+        PATCH equivalent of the GET case above — must also be 404, not 403.
         """
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.token_c1}")
         payload = {"name": "Hacked Name"}
         response = self.client.patch(f"/roles/{self.role_c2.id}", payload, format="json")
 
-        self.assertIn(response.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
         self.role_c2.refresh_from_db()
         self.assertEqual(self.role_c2.name, "C2 Role")
 
     def test_cross_tenant_idor_delete_role_fails(self):
         """
-        Verify User in Company 1 cannot delete Role in Company 2 (Cross-Tenant IDOR).
+        DELETE equivalent of the GET case above — must also be 404, not 403.
         """
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.token_c1}")
         response = self.client.delete(f"/roles/{self.role_c2.id}")
 
-        self.assertIn(response.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
         self.role_c2.refresh_from_db()
         self.assertFalse(self.role_c2.is_deleted)
+
+    def test_cross_tenant_get_role_and_nonexistent_role_are_indistinguishable(self):
+        """
+        No enumeration possible: a real role in another tenant and a
+        random/nonexistent UUID must produce the identical 404 response
+        shape, so a caller cannot use the status code to detect whether a
+        given role ID exists in some other company.
+        """
+        import uuid as _uuid
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.token_c1}")
+
+        real_cross_tenant_response = self.client.get(f"/roles/{self.role_c2.id}")
+        nonexistent_response = self.client.get(f"/roles/{_uuid.uuid4()}")
+
+        self.assertEqual(real_cross_tenant_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(nonexistent_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            real_cross_tenant_response.json()["error"]["code"],
+            nonexistent_response.json()["error"]["code"],
+        )
 
     def test_cross_tenant_company_injection_in_create_fails(self):
         """

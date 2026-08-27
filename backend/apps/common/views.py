@@ -1,10 +1,12 @@
 from django.http import Http404
+from drf_spectacular.utils import extend_schema
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.responses import ApiResponse
+from apps.common.serializers import HealthCheckResponseSerializer
 
 
 class HealthCheckView(APIView):
@@ -26,6 +28,12 @@ class HealthCheckView(APIView):
     authentication_classes: list = []
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Health Check",
+        description="Unauthenticated liveness endpoint for container/orchestrator health checks.",
+        responses={200: HealthCheckResponseSerializer},
+        tags=["Health"],
+    )
     def get(self, request: Request) -> Response:
         return ApiResponse.success(
             data={"status": "ok"},

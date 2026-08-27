@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
-from apps.users.models import User
+from apps.users.models import CompanyMembership, Role, User
+from apps.users.selectors import VALID_ORDER_FIELDS
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -53,8 +54,6 @@ class CompanyMembershipSerializer(serializers.ModelSerializer):
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
 
     class Meta:
-        from apps.users.models import CompanyMembership
-
         model = CompanyMembership
         fields = [
             "id",
@@ -93,8 +92,6 @@ class RoleSerializer(serializers.ModelSerializer):
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
 
     class Meta:
-        from apps.users.models import Role
-
         model = Role
         fields = [
             "id",
@@ -150,6 +147,22 @@ class RoleCreateSerializer(serializers.Serializer):
         if not cleaned:
             raise serializers.ValidationError("Role name cannot be blank or empty.")
         return cleaned
+
+
+class RoleListQuerySerializer(serializers.Serializer):
+    """
+    Validates ?companyId=/?isActive=/?search=/?ordering= query params for
+    GET /roles — replaces the manual string parsing that previously lived
+    in RoleViewSet.list(). An invalid value for any of these now returns
+    400 VALIDATION_ERROR instead of being silently ignored/coerced.
+    """
+
+    companyId = serializers.UUIDField(source="company_id", required=False, allow_null=True, default=None)
+    isActive = serializers.BooleanField(source="is_active", required=False, allow_null=True, default=None)
+    search = serializers.CharField(required=False, allow_blank=True, default="")
+    ordering = serializers.ChoiceField(
+        choices=sorted(VALID_ORDER_FIELDS), required=False, default="-created_at"
+    )
 
 
 class RoleUpdateSerializer(serializers.Serializer):

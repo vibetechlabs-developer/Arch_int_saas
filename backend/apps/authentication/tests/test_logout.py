@@ -3,6 +3,7 @@ from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from apps.audit.models import AuditLog
 from apps.authentication.tokens import CompanyUserRefreshToken
 
 User = get_user_model()
@@ -102,3 +103,14 @@ class LogoutEndpointTestCase(TestCase):
         data = response.json()
         self.assertFalse(data["success"])
         self.assertEqual(data["error"]["code"], "VALIDATION_ERROR")
+
+    def test_successful_logout_writes_audit_log_entry(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.access_token_str}")
+
+        response = self.client.post(
+            self.url, {"refreshToken": self.refresh_token_str}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        entry = AuditLog.objects.get(entity_type="user", entity_id=self.user.id, action="logout")
+        self.assertEqual(entry.after_state["email"], self.user.email)

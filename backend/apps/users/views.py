@@ -1,16 +1,17 @@
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework import status, viewsets
-from rest_framework import exceptions as drf_exceptions
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.common.pagination import StandardPagination
 from apps.common.responses import ApiResponse
+from apps.common.views import ObjectPermission404Mixin
 from apps.users.models import Role
 from apps.users.permissions import RolePermission, is_platform_admin
 from apps.users.serializers import (
     RoleCreateSerializer,
+    RoleListQuerySerializer,
     RoleSerializer,
     RoleUpdateSerializer,
 )
@@ -84,10 +85,14 @@ from apps.users.services import RoleService
         tags=["Role"],
     ),
 )
-class RoleViewSet(viewsets.GenericViewSet):
+class RoleViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     """
     ViewSet for Role CRUD operations.
     Enforces standard ApiResponse envelopes, pagination, and tenant isolation boundaries.
+
+    ObjectPermission404Mixin (apps/common/views.py) makes cross-tenant
+    object access return 404 instead of DRF's default 403 — deferred at
+    BE-018 (applied there only to CompanyViewSet) and closed out here.
     """
 
     permission_classes = [IsAuthenticated, RolePermission]
@@ -102,53 +107,26 @@ class RoleViewSet(viewsets.GenericViewSet):
     def list(self, request: Request) -> Response:
         """
         List roles with tenant scoping, status filter, search, and ordering.
+
+        Orchestration only — validates request shape (query params, via
+        RoleListQuerySerializer) and hands the caller's admin status +
+        resolved tenant context to RoleService.list_roles_for_viewer(),
+        which owns the actual scoping decision.
         """
-        company_id_param = request.query_params.get("companyId") or request.query_params.get("company_id")
-        is_active_param = request.query_params.get("isActive")
-        if is_active_param is None:
-            is_active_param = request.query_params.get("is_active")
+        query = RoleListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        validated = query.validated_data
 
-        is_active = None
-        if is_active_param is not None:
-            if is_active_param.lower() in ("true", "1"):
-                is_active = True
-            elif is_active_param.lower() in ("false", "0"):
-                is_active = False
+        admin_company_id_param = str(validated["company_id"]) if validated["company_id"] else None
 
-        search_query = request.query_params.get("search")
-        ordering = request.query_params.get("ordering", "-created_at")
-
-        if is_platform_admin(request):
-            queryset = RoleService.list_roles(
-                company_id=company_id_param,
-                is_active=is_active,
-                search=search_query,
-                ordering=ordering,
-            )
-        else:
-            user_company_ids = list(
-                request.user.memberships.filter(
-                    status="active",
-                    deleted_at__isnull=True,
-                ).values_list("company_id", flat=True)
-            )
-
-            if company_id_param:
-                if company_id_param not in [str(cid) for cid in user_company_ids]:
-                    raise drf_exceptions.PermissionDenied("You do not have access to this company's roles.")
-                queryset = RoleService.list_roles(
-                    company_id=company_id_param,
-                    is_active=is_active,
-                    search=search_query,
-                    ordering=ordering,
-                )
-            else:
-                queryset = RoleService.list_roles(
-                    company_ids=user_company_ids,
-                    is_active=is_active,
-                    search=search_query,
-                    ordering=ordering,
-                )
+        queryset = RoleService.list_roles_for_viewer(
+            is_platform_admin=is_platform_admin(request),
+            resolved_company_id=request.company_id,
+            admin_company_id_param=admin_company_id_param,
+            is_active=validated["is_active"],
+            search=validated["search"] or None,
+            ordering=validated["ordering"],
+        )
 
         page = self.paginate_queryset(queryset)
         request_id = getattr(request, "request_id", None)
@@ -163,40 +141,21 @@ class RoleViewSet(viewsets.GenericViewSet):
     def create(self, request: Request) -> Response:
         """
         Create a new role within a tenant company.
+
+        Orchestration only — validates input (serializer) and hands the
+        caller's admin status + resolved tenant context + any client-
+        supplied companyId to RoleService.resolve_create_target_company_id(),
+        which owns the authorization decision, before delegating persistence
+        to RoleService.create_role().
         """
         serializer = RoleCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        if is_platform_admin(request):
-            target_company_id = (
-                serializer.validated_data.get("company_id")
-                or request.data.get("companyId")
-                or request.data.get("company_id")
-            )
-            if not target_company_id:
-                raise drf_exceptions.ValidationError({"companyId": ["companyId is required for platform admin role creation."]})
-        else:
-            supplied_company_id = (
-                serializer.validated_data.get("company_id")
-                or request.data.get("companyId")
-                or request.data.get("company_id")
-            )
-            if supplied_company_id:
-                if not request.user.memberships.filter(
-                    company_id=supplied_company_id,
-                    status="active",
-                    deleted_at__isnull=True,
-                ).exists():
-                    raise drf_exceptions.PermissionDenied("You do not have permission to create roles for this company.")
-                target_company_id = supplied_company_id
-            else:
-                membership = request.user.memberships.filter(
-                    status="active",
-                    deleted_at__isnull=True,
-                ).first()
-                if not membership:
-                    raise drf_exceptions.PermissionDenied("You do not belong to an active company.")
-                target_company_id = membership.company_id
+        target_company_id = RoleService.resolve_create_target_company_id(
+            is_platform_admin=is_platform_admin(request),
+            resolved_company_id=request.company_id,
+            supplied_company_id=serializer.validated_data.get("company_id"),
+        )
 
         role = RoleService.create_role(
             company_id=target_company_id,

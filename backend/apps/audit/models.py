@@ -6,15 +6,27 @@ from apps.common.models import UUIDModel
 
 class AuditAction(models.TextChoices):
     """
-    Action taxonomy for AuditLog entries — matches 03_Database/Database_Schema.md's
-    documented audit_log.action value set exactly (create/update/delete/approve).
-    A status change is recorded as an UPDATE with the status field visible in
-    before_state/after_state, not a separate action value.
+    Action taxonomy for AuditLog entries. The original four values match
+    03_Database/Database_Schema.md's documented audit_log.action set exactly
+    (create/update/delete/approve); a status change is recorded as an
+    UPDATE with the status field visible in before_state/after_state, not a
+    separate action value.
+
+    The six auth-event values below were added to extend audit coverage to
+    authentication (previously only Role/Company mutations were audited).
+    `choices` is a plain CharField's Python-level metadata — no DB check
+    constraint backs it, so adding values here needed no migration.
     """
     CREATE = "create", _("Create")
     UPDATE = "update", _("Update")
     DELETE = "delete", _("Delete")
     APPROVE = "approve", _("Approve")
+    LOGIN_SUCCESS = "login_success", _("Login Success")
+    LOGIN_FAILURE = "login_failure", _("Login Failure")
+    LOGOUT = "logout", _("Logout")
+    TOKEN_REFRESH = "token_refresh", _("Token Refresh")
+    PASSWORD_RESET_REQUESTED = "password_reset_requested", _("Password Reset Requested")
+    PASSWORD_RESET_COMPLETED = "password_reset_completed", _("Password Reset Completed")
 
 
 class AuditLog(UUIDModel):
@@ -65,7 +77,10 @@ class AuditLog(UUIDModel):
         help_text=_("Primary key of the affected record. Not a FK — spans many entity tables."),
     )
     action = models.CharField(
-        max_length=20,
+        # Widened from 20 to fit the longest auth-event action value
+        # ("password_reset_requested"/"_completed", 24 chars) — see
+        # migration 0002_alter_auditlog_action.
+        max_length=30,
         choices=AuditAction.choices,
         db_index=True,
     )

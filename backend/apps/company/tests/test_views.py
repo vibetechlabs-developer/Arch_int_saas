@@ -376,3 +376,22 @@ class CompanyViewSetTestCase(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
+
+    def test_invalid_status_query_param_returns_400(self):
+        """
+        Query-param validation (CompanyListQuerySerializer): an
+        unrecognized status value is now a 400 VALIDATION_ERROR, not
+        silently passed through as a filter that matches nothing.
+        """
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        response = self.client.get("/companies?status=not_a_real_status")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
+
+    def test_invalid_ordering_query_param_returns_400(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        response = self.client.get("/companies?ordering=not_a_real_field")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")

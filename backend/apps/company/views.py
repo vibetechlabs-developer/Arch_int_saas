@@ -11,6 +11,7 @@ from apps.company.models import Company
 from apps.company.permissions import IsPlatformAdminOrCompanyAccess, is_platform_admin
 from apps.company.serializers import (
     CompanyCreateSerializer,
+    CompanyListQuerySerializer,
     CompanySerializer,
     CompanyUpdateSerializer,
 )
@@ -70,14 +71,13 @@ class CompanyViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         """
         List companies with status filter and search query.
         """
-        status_filter = request.query_params.get("status")
-        search_query = request.query_params.get("search")
-        ordering = request.query_params.get("ordering", "-created_at")
+        query = CompanyListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
 
         queryset = CompanyService.list_companies(
-            status=status_filter,
-            search=search_query,
-            ordering=ordering,
+            status=query.validated_data["status"],
+            search=query.validated_data["search"] or None,
+            ordering=query.validated_data["ordering"],
         )
 
         page = self.paginate_queryset(queryset)

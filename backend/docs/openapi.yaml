@@ -1,0 +1,1013 @@
+openapi: 3.0.3
+info:
+  title: INT Projects SaaS API
+  version: 1.0.0
+  description: Multi-Tenant Architecture & Interior Management SaaS API
+paths:
+  /auth/forgot-password/:
+    post:
+      operationId: auth_forgot_password_create
+      description: Trigger password reset email if account exists.
+      summary: Forgot Password
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPassword'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ForgotPassword'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ForgotPassword'
+        required: true
+      security:
+      - TenantJWTAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+          description: ''
+  /auth/login/:
+    post:
+      operationId: auth_login_create
+      description: Authenticate a company user with email and password.
+      summary: Company User Login
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Login'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Login'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Login'
+        required: true
+      security:
+      - TenantJWTAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+          description: ''
+  /auth/logout/:
+    post:
+      operationId: auth_logout_create
+      description: Invalidate/blacklist the current session refresh token.
+      summary: User Logout
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Logout'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Logout'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Logout'
+        required: true
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+          description: ''
+  /auth/me/:
+    get:
+      operationId: auth_me_retrieve
+      description: Retrieve the authenticated user identity.
+      summary: Current User Identity
+      tags:
+      - Authentication
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /auth/refresh/:
+    post:
+      operationId: auth_refresh_create
+      description: Exchange a refresh token for new access and rotated refresh tokens.
+      summary: Refresh Access Token
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+        required: true
+      security:
+      - TenantJWTAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefreshResponse'
+          description: ''
+  /auth/reset-password/:
+    post:
+      operationId: auth_reset_password_create
+      description: Complete password reset with secure token.
+      summary: Reset Password
+      tags:
+      - Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPassword'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ResetPassword'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ResetPassword'
+        required: true
+      security:
+      - TenantJWTAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+          description: ''
+  /companies/:
+    get:
+      operationId: companies_list
+      description: List all active tenant companies (Platform Admin only).
+      summary: List Companies
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: pageSize
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - Company
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCompanyList'
+          description: ''
+    post:
+      operationId: companies_create
+      description: Create a new tenant company (Platform Admin only).
+      summary: Create Company
+      tags:
+      - Company
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompanyCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CompanyCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CompanyCreate'
+        required: true
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Company'
+          description: ''
+  /companies/{id}/:
+    get:
+      operationId: companies_retrieve
+      description: Retrieve company details by UUID.
+      summary: Retrieve Company
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F-]{36}$
+        required: true
+      tags:
+      - Company
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Company'
+          description: ''
+    put:
+      operationId: companies_update
+      description: Full update forwards to partial_update logic.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F-]{36}$
+        required: true
+      tags:
+      - companies
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Company'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Company'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Company'
+        required: true
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Company'
+          description: ''
+    patch:
+      operationId: companies_partial_update
+      description: Partially update company details by UUID.
+      summary: Update Company
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F-]{36}$
+        required: true
+      tags:
+      - Company
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCompanyUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCompanyUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCompanyUpdate'
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Company'
+          description: ''
+    delete:
+      operationId: companies_destroy
+      description: Soft-delete a company tenant by UUID (Platform Admin only).
+      summary: Delete Company
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F-]{36}$
+        required: true
+      tags:
+      - Company
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Company'
+          description: ''
+  /health/:
+    get:
+      operationId: health_retrieve
+      description: Unauthenticated liveness endpoint for container/orchestrator health
+        checks.
+      summary: Health Check
+      tags:
+      - Health
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+          description: ''
+  /platform-auth/login/:
+    post:
+      operationId: platform_auth_login_create
+      description: Authenticate a platform super admin with email and password.
+      summary: Platform Super Admin Login
+      tags:
+      - Platform Authentication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Login'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Login'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Login'
+        required: true
+      security:
+      - TenantJWTAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+          description: ''
+  /roles/:
+    get:
+      operationId: roles_list
+      description: List tenant roles with search, status filtering, and pagination.
+      summary: List Roles
+      parameters:
+      - in: query
+        name: companyId
+        schema:
+          type: string
+        description: Filter by Company UUID (Platform Admin only or verified member
+          company).
+      - in: query
+        name: isActive
+        schema:
+          type: boolean
+        description: Filter by active status (true/false).
+      - in: query
+        name: ordering
+        schema:
+          type: string
+        description: Ordering field (e.g. name, -name, created_at, -created_at).
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: pageSize
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Search roles by name or description.
+      tags:
+      - Role
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRoleList'
+          description: ''
+    post:
+      operationId: roles_create
+      description: Create a new role for a company tenant.
+      summary: Create Role
+      tags:
+      - Role
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RoleCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RoleCreate'
+        required: true
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+          description: ''
+  /roles/{id}/:
+    get:
+      operationId: roles_retrieve
+      description: Retrieve role details by UUID.
+      summary: Retrieve Role
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F-]{36}$
+        required: true
+      tags:
+      - Role
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+          description: ''
+    put:
+      operationId: roles_update
+      description: Update role details by UUID.
+      summary: Full Update Role
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F-]{36}$
+        required: true
+      tags:
+      - Role
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RoleUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RoleUpdate'
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+          description: ''
+    patch:
+      operationId: roles_partial_update
+      description: Partially update role details by UUID.
+      summary: Update Role
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F-]{36}$
+        required: true
+      tags:
+      - Role
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedRoleUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedRoleUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedRoleUpdate'
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+          description: ''
+    delete:
+      operationId: roles_destroy
+      description: Soft-delete a role by UUID.
+      summary: Delete Role
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          pattern: ^[0-9a-fA-F-]{36}$
+        required: true
+      tags:
+      - Role
+      security:
+      - TenantJWTAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+          description: ''
+components:
+  schemas:
+    AuthResponse:
+      type: object
+      description: Response serializer for successful authentication endpoints.
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+      required:
+      - accessToken
+      - refreshToken
+    Company:
+      type: object
+      description: Serializer for Company model with camelCase JSON fields.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          description: Company trading or legal name.
+          maxLength: 255
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusEnum'
+          description: |-
+            Subscription lifecycle status.
+
+            * `trial` - Trial
+            * `active` - Active
+            * `suspended` - Suspended
+        currency:
+          type: string
+          description: Default currency code (e.g. INR, USD).
+          maxLength: 10
+        gstNumber:
+          type: string
+          nullable: true
+        settings:
+          description: Tenant-specific configuration and preferences.
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - createdAt
+      - id
+      - name
+      - updatedAt
+    CompanyCreate:
+      type: object
+      description: Input serializer for creating a new Company tenant.
+      properties:
+        name:
+          type: string
+          description: Company trading or legal name.
+          maxLength: 255
+        currency:
+          type: string
+          default: INR
+          description: Default currency code (e.g. INR, USD).
+          maxLength: 10
+        gstNumber:
+          type: string
+          nullable: true
+          description: Goods and Services Tax Identification Number.
+          maxLength: 15
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusEnum'
+          default: trial
+          description: |-
+            Tenant lifecycle status.
+
+            * `trial` - Trial
+            * `active` - Active
+            * `suspended` - Suspended
+        settings:
+          description: Tenant configuration and preferences dictionary.
+      required:
+      - name
+    ForgotPassword:
+      type: object
+      description: Serializer for requesting a password reset email.
+      properties:
+        email:
+          type: string
+          format: email
+          description: User's registered email address.
+      required:
+      - email
+    HealthCheckResponse:
+      type: object
+      description: |-
+        Response body for GET /health/ (BE-020) — the "data" payload inside the
+        standard ApiResponse envelope.
+      properties:
+        status:
+          type: string
+      required:
+      - status
+    Login:
+      type: object
+      description: Serializer for user login credentials.
+      properties:
+        email:
+          type: string
+          format: email
+          description: User's registered email address.
+        password:
+          type: string
+          writeOnly: true
+          description: User's plaintext password.
+      required:
+      - email
+      - password
+    Logout:
+      type: object
+      description: Serializer for invalidating/blacklisting a refresh token on logout.
+      properties:
+        refreshToken:
+          type: string
+          description: The refresh token to be revoked/blacklisted.
+      required:
+      - refreshToken
+    LogoutResponse:
+      type: object
+      description: Response serializer for logout endpoint.
+      properties:
+        message:
+          type: string
+      required:
+      - message
+    MessageResponse:
+      type: object
+      description: Standard message response serializer.
+      properties:
+        message:
+          type: string
+      required:
+      - message
+    PaginatedCompanyList:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Company'
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+              example: 1
+            pageSize:
+              type: integer
+              example: 25
+            totalItems:
+              type: integer
+              example: 100
+            totalPages:
+              type: integer
+              example: 4
+          required:
+          - page
+          - pageSize
+          - totalItems
+          - totalPages
+        requestId:
+          type: string
+          example: req_9f2c81a7b3d4
+      required:
+      - success
+      - data
+      - pagination
+      - requestId
+    PaginatedRoleList:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+              example: 1
+            pageSize:
+              type: integer
+              example: 25
+            totalItems:
+              type: integer
+              example: 100
+            totalPages:
+              type: integer
+              example: 4
+          required:
+          - page
+          - pageSize
+          - totalItems
+          - totalPages
+        requestId:
+          type: string
+          example: req_9f2c81a7b3d4
+      required:
+      - success
+      - data
+      - pagination
+      - requestId
+    PatchedCompanyUpdate:
+      type: object
+      description: Input serializer for updating an existing Company tenant.
+      properties:
+        name:
+          type: string
+          description: Company trading or legal name.
+          maxLength: 255
+        currency:
+          type: string
+          description: Default currency code (e.g. INR, USD).
+          maxLength: 10
+        gstNumber:
+          type: string
+          nullable: true
+          description: Goods and Services Tax Identification Number.
+          maxLength: 15
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusEnum'
+          description: |-
+            Tenant lifecycle status.
+
+            * `trial` - Trial
+            * `active` - Active
+            * `suspended` - Suspended
+        settings:
+          description: Tenant configuration and preferences dictionary.
+    PatchedRoleUpdate:
+      type: object
+      description: Input serializer for updating an existing Role.
+      properties:
+        name:
+          type: string
+          description: Human-readable role name, unique per company.
+          maxLength: 100
+        description:
+          type: string
+          description: Optional free-form description of the role's purpose.
+        isActive:
+          type: boolean
+          description: Indicates whether the role is currently usable.
+    ResetPassword:
+      type: object
+      description: Serializer for resetting password using a secure reset token.
+      properties:
+        token:
+          type: string
+          writeOnly: true
+          description: Cryptographically secure password reset token.
+        newPassword:
+          type: string
+          writeOnly: true
+          description: The new password meeting complexity requirements.
+      required:
+      - newPassword
+      - token
+    Role:
+      type: object
+      description: Serializer for Role model with camelCase JSON fields.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          description: Human-readable role name, unique per company.
+          maxLength: 100
+        description:
+          type: string
+          description: Optional free-form description of the role's purpose.
+        companyId:
+          type: string
+          format: uuid
+          readOnly: true
+        companyName:
+          type: string
+          readOnly: true
+        isActive:
+          type: boolean
+          default: true
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - companyId
+      - companyName
+      - createdAt
+      - id
+      - name
+      - updatedAt
+    RoleCreate:
+      type: object
+      description: Input serializer for creating a new Role.
+      properties:
+        name:
+          type: string
+          description: Human-readable role name, unique per company.
+          maxLength: 100
+        description:
+          type: string
+          default: ''
+          description: Optional free-form description of the role's purpose.
+        isActive:
+          type: boolean
+          default: true
+          description: Indicates whether the role is currently usable.
+        companyId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Company UUID for platform admins. Ignored/overridden for company
+            users.
+      required:
+      - name
+    RoleUpdate:
+      type: object
+      description: Input serializer for updating an existing Role.
+      properties:
+        name:
+          type: string
+          description: Human-readable role name, unique per company.
+          maxLength: 100
+        description:
+          type: string
+          description: Optional free-form description of the role's purpose.
+        isActive:
+          type: boolean
+          description: Indicates whether the role is currently usable.
+    StatusEnum:
+      enum:
+      - trial
+      - active
+      - suspended
+      type: string
+      description: |-
+        * `trial` - Trial
+        * `active` - Active
+        * `suspended` - Suspended
+    TokenRefresh:
+      type: object
+      description: Serializer for exchanging a refresh token for new access and refresh
+        tokens.
+      properties:
+        refreshToken:
+          type: string
+          description: The valid JWT refresh token string.
+      required:
+      - refreshToken
+    TokenRefreshResponse:
+      type: object
+      description: Response serializer for token refresh endpoint.
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+      required:
+      - accessToken
+      - refreshToken
+    User:
+      type: object
+      description: |-
+        Standard serializer for User model representation with camelCase fields.
+        Excludes sensitive credentials and internal permission mappings.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+          description: User's primary email address and login identifier.
+        name:
+          type: string
+          description: User's full name.
+          maxLength: 255
+        status:
+          type: string
+          readOnly: true
+        isActive:
+          type: boolean
+          readOnly: true
+        isStaff:
+          type: boolean
+          readOnly: true
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - createdAt
+      - email
+      - id
+      - isActive
+      - isStaff
+      - name
+      - status
+      - updatedAt
+  securitySchemes:
+    TenantJWTAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Bearer JWT issued by POST /auth/login or POST /platform-auth/login.
+        Company-user tokens resolve tenant scope server-side from the caller's active
+        CompanyMembership records (never from a client-supplied company ID); platform-admin
+        tokens bypass tenant resolution. See 05_Security/Tenant.md.

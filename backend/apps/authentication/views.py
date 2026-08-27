@@ -28,6 +28,7 @@ class LoginView(APIView):
     """
 
     permission_classes = [AllowAny]
+    throttle_scope = "auth_login"
 
     @extend_schema(
         summary="Company User Login",
@@ -45,6 +46,7 @@ class LoginView(APIView):
         result = AuthenticationService.login_company_user(
             email=serializer.validated_data["email"],
             password=serializer.validated_data["password"],
+            request=request,
         )
 
         user_data = UserSerializer(result["user"]).data
@@ -64,6 +66,7 @@ class PlatformLoginView(APIView):
     """
 
     permission_classes = [AllowAny]
+    throttle_scope = "platform_auth_login"
 
     @extend_schema(
         summary="Platform Super Admin Login",
@@ -81,6 +84,7 @@ class PlatformLoginView(APIView):
         result = AuthenticationService.login_platform_admin(
             email=serializer.validated_data["email"],
             password=serializer.validated_data["password"],
+            request=request,
         )
 
         user_data = UserSerializer(result["user"]).data
@@ -100,6 +104,7 @@ class TokenRefreshView(APIView):
     """
 
     permission_classes = [AllowAny]
+    throttle_scope = "auth_refresh"
 
     @extend_schema(
         summary="Refresh Access Token",
@@ -116,6 +121,7 @@ class TokenRefreshView(APIView):
 
         result = AuthenticationService.refresh_token(
             refresh_token_str=serializer.validated_data["refreshToken"],
+            request=request,
         )
 
         request_id = getattr(request, "request_id", None)
@@ -145,6 +151,7 @@ class LogoutView(APIView):
 
         AuthenticationService.logout(
             refresh_token_str=serializer.validated_data["refreshToken"],
+            request=request,
         )
 
         request_id = getattr(request, "request_id", None)
@@ -183,6 +190,7 @@ class ForgotPasswordView(APIView):
     """
 
     permission_classes = [AllowAny]
+    throttle_scope = "auth_forgot_password"
 
     @extend_schema(
         summary="Forgot Password",
@@ -199,6 +207,7 @@ class ForgotPasswordView(APIView):
 
         message = AuthenticationService.request_password_reset(
             email=serializer.validated_data["email"],
+            request=request,
         )
 
         request_id = getattr(request, "request_id", None)
@@ -215,6 +224,7 @@ class ResetPasswordView(APIView):
     """
 
     permission_classes = [AllowAny]
+    throttle_scope = "auth_reset_password"
 
     @extend_schema(
         summary="Reset Password",
@@ -232,6 +242,7 @@ class ResetPasswordView(APIView):
         message = AuthenticationService.reset_password(
             token=serializer.validated_data["token"],
             new_password=serializer.validated_data["newPassword"],
+            request=request,
         )
 
         request_id = getattr(request, "request_id", None)

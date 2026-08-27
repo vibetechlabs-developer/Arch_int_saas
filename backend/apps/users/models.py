@@ -143,10 +143,10 @@ class Role(BaseModel):
         help_text="Indicates whether the role is currently usable.",
     )
 
-    # Managers for soft-delete handling
-    objects = SoftDeleteManager()
-    all_objects = SoftDeleteAllManager()
-    deleted_objects = SoftDeleteDeletedManager()
+    # objects/all_objects/deleted_objects are inherited unchanged from
+    # BaseModel/SoftDeleteModel — no override needed (unlike User, which
+    # overrides objects with a UserManager for create_user()/
+    # create_superuser()).
 
     class Meta:
         db_table = "role"

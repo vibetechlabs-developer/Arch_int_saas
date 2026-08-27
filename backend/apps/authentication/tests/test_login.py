@@ -1,8 +1,12 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import UntypedToken
+
+from apps.audit.models import AuditLog
 
 User = get_user_model()
 
@@ -203,3 +207,63 @@ class LoginEndpointTestCase(TestCase):
         details = data["error"]["details"]
         self.assertTrue(any(d["field"] == "email" for d in details))
         self.assertTrue(any(d["field"] == "password" for d in details))
+
+    def test_successful_login_writes_audit_log_entry(self):
+        response = self.client.post(
+            self.url,
+            {"email": "developer@example.com", "password": self.raw_password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        entry = AuditLog.objects.get(
+            entity_type="user", entity_id=self.user.id, action="login_success"
+        )
+        self.assertEqual(entry.after_state["email"], self.user.email)
+
+    def test_failed_login_for_existing_user_writes_audit_log_entry(self):
+        response = self.client.post(
+            self.url,
+            {"email": "developer@example.com", "password": "WrongPassword!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        entry = AuditLog.objects.get(
+            entity_type="user", entity_id=self.user.id, action="login_failure"
+        )
+        self.assertEqual(entry.after_state["email"], self.user.email)
+
+    def test_failed_login_for_nonexistent_email_writes_no_audit_log_entry(self):
+        """
+        There is no user record to attach an audit entry to for a
+        completely unknown email — this must not create an entry with a
+        fabricated/placeholder entity_id.
+        """
+        response = self.client.post(
+            self.url,
+            {"email": "nonexistent@example.com", "password": self.raw_password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(AuditLog.objects.filter(action="login_failure").count(), 0)
+
+    def test_unknown_email_still_runs_password_hasher_for_timing_parity(self):
+        """
+        Timing-attack mitigation: a login attempt against an email that
+        doesn't exist must still pay the password-hashing cost, mirroring
+        Django's own ModelBackend.authenticate() — otherwise response
+        timing distinguishes "no such account" from "wrong password" for
+        an existing account, leaking which emails are registered.
+        """
+        with patch(
+            "apps.authentication.services.User.set_password", autospec=True
+        ) as mocked_set_password:
+            response = self.client.post(
+                self.url,
+                {"email": "definitely-not-registered@example.com", "password": "whatever123"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        mocked_set_password.assert_called_once()

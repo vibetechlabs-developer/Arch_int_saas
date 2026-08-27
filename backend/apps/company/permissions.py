@@ -41,10 +41,9 @@ class IsPlatformAdminOrCompanyAccess(permissions.BasePermission):
         if is_platform_admin(request):
             return True
 
-        # Check active company membership for the user
-        user = request.user
-        return user.memberships.filter(
-            company=obj,
-            status="active",
-            deleted_at__isnull=True,
-        ).exists()
+        # obj IS the tenant here (Company), so the object-level check is a
+        # direct comparison against the single company TenantJWTAuthentication
+        # already resolved for this request — never re-derived from
+        # request.user.memberships (BE-021: that duplicated, and could
+        # diverge from, the authentication layer's own resolution).
+        return str(getattr(request, "company_id", None)) == str(obj.id)

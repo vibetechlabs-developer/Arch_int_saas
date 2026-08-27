@@ -1,5 +1,9 @@
 # BACKEND_TASKS.md
 
+## Sprint 1 Closure — 2026-08-27
+
+Sprint 1 (Foundation) is **Done**. All 21 tasks (BE-001–BE-021, including the Epic 11 stabilization/hardening work) are approved and closed. Full backend test suite: **281 passed, 0 failed**. BE-020's Docker stack was subsequently verified end-to-end (2026-08-27): `docker compose up` brings up all 6 services healthy (postgres, redis, django, celery-worker, celery-beat, nginx), with `/health/` reachable through both django directly and the nginx reverse proxy — a real `curl`-missing-in-dev-stage bug was found and fixed in the process (see BE-020). No open Docker verification gap remains. Sprint 2 (CRM: Client/Project modules) has not started and requires explicit instruction to begin, per this repo's build-order and phasing rules.
+
 ## Setup Audit — 2026-08-25
 
 A full setup audit was run against the actual codebase (not just this file). Findings and fixes, beyond the per-task status corrections below:
@@ -53,7 +57,7 @@ It tracks every backend engineering task, its status, ownership, dependencies, p
 
 ### BE-001 – Initialize Django Project
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -65,7 +69,7 @@ It tracks every backend engineering task, its status, ownership, dependencies, p
 
 ### BE-002 – Configure Project Settings
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -79,7 +83,7 @@ It tracks every backend engineering task, its status, ownership, dependencies, p
 
 ### BE-003 – Install Core Dependencies
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -130,7 +134,7 @@ Acceptance Criteria
 
 ### BE-005 – Global API Response
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -146,7 +150,7 @@ Depends On
 
 ### BE-006 – Global Exception Handler
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -164,7 +168,7 @@ Depends On
 
 ### BE-007 – Custom User Model
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -180,7 +184,7 @@ Depends On
 
 ### BE-008 – JWT Authentication
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -203,7 +207,7 @@ Acceptance Criteria
 
 ### BE-009 – Password Reset
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -229,7 +233,7 @@ Acceptance Criteria
 
 ### BE-010 – Company Model
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -254,7 +258,7 @@ Acceptance Criteria
 
 ### BE-011 – Company CRUD
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -281,7 +285,7 @@ Acceptance Criteria
 
 ### BE-012 – Role Model
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -298,7 +302,7 @@ Depends On
 
 ### BE-013 – Permission System
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -314,7 +318,7 @@ Depends On
 
 ### BE-014 – Role CRUD
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -332,7 +336,7 @@ Depends On
 
 ### BE-015 – Tenant Middleware
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -351,7 +355,7 @@ Depends On
 
 ### BE-016 – Swagger Configuration
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -469,7 +473,7 @@ Depends On
 
 ### BE-020 – Docker & Docker Compose
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -483,7 +487,9 @@ Depends On
 
 `07_DevOps/Docker.md` updated from "indicative/draft" to reflect the actual implementation (real paths, real service names); its frontend section (§3) explicitly marked still-draft since no frontend code exists in this repo.
 
-**Verification, disclosed honestly:** `docker compose config` parsed and fully resolved the compose file with no errors. A `docker build --target dev` run got all the way through dependency resolution and installation (`pip install` succeeded for all packages) and copying source, then failed at the final image-export step with `failed to create temp dir: ... read-only file system`. A follow-up plain `docker pull postgres:16-alpine` failed identically (`write .../meta.db: read-only file system`), confirming this is a **Docker Desktop host-level storage fault in this session's environment** (its internal containerd store is read-only), not a defect in `Dockerfile`/`docker-compose.yml` — but it means a live `docker compose up` end-to-end run could **not** be completed and verified in this session. Recommend the user run `docker compose up` themselves once Docker Desktop's storage is healthy (Docker Desktop → Troubleshoot → "Clean / Purge data", or a WSL/Docker Desktop restart) as the remaining verification step before this task can move past Review.
+**Verification, disclosed honestly:** an earlier attempt hit a Docker Desktop host-level storage fault (read-only containerd store) that blocked both `docker build` and `docker pull` — unrelated to this repo's code. On retry (2026-08-27) that host fault had cleared, which surfaced a **real, second bug**: the `dev` build stage (used by `django`/`celery-worker`/`celery-beat`) never installed `curl`, but `django`'s healthcheck runs `curl -f http://localhost:8000/health/` — the healthcheck failed on a missing binary every time, marking `django` permanently unhealthy and blocking `nginx` (which `depends_on: django: condition: service_healthy`) from ever starting. Fixed by adding `curl` to the shared `base` stage (`backend/Dockerfile` line 17) so both `dev` and `production` lineages have it.
+
+**Verified end-to-end (2026-08-27), full `docker compose up -d`:** all 6 services reached a running state — `postgres` healthy, `redis` healthy, `django` healthy, `celery-worker` connected to Redis and ready, `celery-beat` scheduler started, `nginx` up and proxying. `GET /health/` returned `200 {"status": "ok"}` through both `http://localhost:8000/health/` (direct) and `http://localhost/health/` (via nginx reverse proxy). Stack torn down cleanly afterward with `docker compose down`. This closes the previously-open verification gap — Docker is now confirmed working, not just reviewed.
 
 **Tests:** `apps/common` +3 (health check). Full backend suite: **235 passed, 0 failed** (was 232 after BE-019).
 
@@ -493,16 +499,74 @@ Depends On
 
 ---
 
+## Epic 11 – Stabilization & Hardening
+
+### BE-021 – Multi-Tenant Resolution, RoleViewSet Cleanup & Security Hardening
+
+**Status:** Done
+
+**Priority:** Critical
+
+**Owner:** Backend Team
+
+**Implementation notes:** A full architecture review and a full security audit were each conducted against the Sprint 1 codebase, and every finding from both was resolved in this task — no finding remains open except two explicitly documented, deliberate exceptions (below). No new business features were introduced; this is a stabilization/hardening task only.
+
+**1. Single source of truth for tenant resolution.** `TenantJWTAuthentication` was already resolving `request.company_id`, but `CompanyViewSet`/`RoleViewSet` and their permission classes independently re-derived tenant scope from `request.user.memberships`, producing duplicated, divergent logic and blocking multi-company users from most endpoints unless they happened to satisfy both independent checks. `apps/company/permissions.py::IsPlatformAdminOrCompanyAccess.has_object_permission` and `apps/users/permissions.py::RolePermission.has_permission/has_object_permission` now compare directly against `request.company_id` — no membership re-query. `RoleViewSet.list()`'s dead/spec-violating "list across all my companies" branch (Tenant.md §4 explicitly forbids this for a non-admin on a company-scoped resource) was removed along with the now-unreachable `company_ids` (plural) parameter across `RoleService.list_roles`/`selectors.list_roles`. 12 new integration tests (`apps/users/tests/test_multi_company_tenant_resolution.py`, `apps/company/tests/test_multi_company_tenant_resolution.py`) exercise a genuinely multi-membership user against the real `/roles` and `/companies` endpoints (not the BE-017 diagnostic-only endpoint) — single membership, multiple memberships, explicit companyId, omitted companyId (correctly rejected as ambiguous per Tenant.md §4), invalid companyId, and unauthorized companyId are all covered.
+
+**2. RoleViewSet business logic moved to the service layer.** `list()`/`create()` previously computed target-company/authorization decisions inline. `RoleService.list_roles_for_viewer()` and `RoleService.resolve_create_target_company_id()` now own those decisions; the view only validates input and orchestrates. Zero behavior change (no test needed modification for this step — confirmed the refactor was behavior-preserving before layering in the query-param-validation changes below).
+
+**3. Query-param validation via serializers.** `RoleListQuerySerializer`/`CompanyListQuerySerializer` (new) validate `companyId`/`isActive`/`status`/`search`/`ordering` — an invalid value (bad UUID, unrecognized boolean, unknown ordering field/status) now returns 400 `VALIDATION_ERROR` instead of being silently ignored or coerced to a default. `ordering`'s choices are drawn directly from each app's existing `VALID_ORDER_FIELDS` set (selectors.py) so the two can't drift apart.
+
+**4. Role uniqueness race condition.** `RoleService.create_role`/`update_role`'s check-then-insert pattern is a TOCTOU race under concurrent requests; the DB's `unique_active_role_per_company` constraint is the real backstop, but a concurrent collision previously raised an unhandled `IntegrityError` → 500. Both methods now wrap the risky operation in a nested `transaction.atomic()` (savepoint) and catch `IntegrityError`, converting it to the same `ConflictError` (409) the pre-check raises — the outer transaction (and the audit-log write after it) stays usable. Two deterministic concurrency tests (`apps/users/tests/test_role_concurrency.py`, `TransactionTestCase` + real threads against Postgres, mocking the pre-check to force the race window open) verified stable across 5 repeated runs.
+
+**5. Refresh token privilege re-verification.** `AuthenticationService.refresh_token` previously trusted the incoming token's own `user_type` claim to decide whether to re-mint a `platform_admin` access token — a refresh token issued before an admin's privileges were revoked could keep minting valid admin access tokens until the refresh token itself expired. It now re-queries the user's current `is_active`/`is_superuser`/`is_staff` state on every refresh (`UserRepository.get_by_id`, new) and rejects outright if the claimed admin privilege no longer holds current DB state, rather than re-minting from the stale claim.
+
+**6. Rate limiting.** DRF `ScopedRateThrottle` is now the default throttle class (`config/settings.py`); it only throttles a view that declares `throttle_scope`, so every other endpoint is unaffected. `LoginView`/`PlatformLoginView`/`ForgotPasswordView`/`ResetPasswordView`/`TokenRefreshView` each got a distinct scope (`auth_login` 10/min, `platform_auth_login` 10/min, `auth_forgot_password` 5/min, `auth_reset_password` 10/min, `auth_refresh` 30/min). A `Throttled` exception already mapped to the standard 429 envelope (BE-006) — no response-shape change needed. New `backend/conftest.py` autouse fixture clears Django's cache before/after every test, since `ScopedRateThrottle`'s cache-backed counters otherwise persist across test methods within a run (a real gotcha this surfaced — 4 existing tests briefly failed with spurious 429s until this fixture was added).
+
+**7. `SECRET_KEY` hardening.** `config/settings.py` now raises `ImproperlyConfigured` at startup if `DEBUG=False` and `SECRET_KEY` still equals the checked-in insecure development default — closing the gap where a misconfigured production deploy could silently boot with a publicly-known key. `DEBUG=True` local/dev behavior is unchanged.
+
+**8. Authentication audit logging.** `AuditAction` gained six new values (`login_success`, `login_failure`, `logout`, `token_refresh`, `password_reset_requested`, `password_reset_completed` — migration `0002_alter_auditlog_action.py` widens `action` to `max_length=30` to fit them; adding `choices` values itself needed no migration, since Django's `CharField.choices` isn't a DB-level constraint). `apps.audit.validators.ENTITY_FIELD_ALLOWLISTS` gained a `"user": {"email"}` entry — deliberately excludes password/token fields entirely. Every `AuthenticationService` method now calls the existing `AuditLogService.record()` (no parallel/duplicate logging path) for its corresponding event; a login failure against a completely unknown email writes no entry (no real entity to attach it to — doesn't affect response timing, since that path already runs the dummy password hasher per Part 10 either way).
+
+**9. Timing-attack mitigation.** `AuthenticationService._verify_credentials` now runs `User().set_password(password)` against a throwaway instance when the email doesn't match any user — mirroring Django's own `ModelBackend.authenticate()` (issue #20760) — so response timing no longer distinguishes "no such account" from "wrong password for a real account."
+
+**10. Password reset email failures.** `PasswordResetEmailService.send_password_reset_email`'s bare `except Exception: pass` now logs via `logger.exception(...)` (new `apps.authentication` logger) before continuing — the client-visible response is completely unchanged (still generic, still prevents enumeration), but an SMTP outage is no longer completely invisible server-side.
+
+**11. `BrowsableAPIRenderer` restricted in production.** `DEFAULT_RENDERER_CLASSES` now includes `BrowsableAPIRenderer` only when `DEBUG=True`; a `DEBUG=False` environment serves `JSONRenderer` only. Local developer experience is unchanged.
+
+**12. `RoleViewSet` enumeration fix.** `RoleViewSet` now inherits `ObjectPermission404Mixin` (`apps/company/views.py`'s `CompanyViewSet` already had it since BE-018) — cross-tenant access to a role by ID returns 404, not 403. A real cross-tenant role and a random nonexistent UUID now produce byte-for-byte identical 404 responses (new regression test asserts this explicitly).
+
+**13. Cleanups.** `Role`'s redundant `objects`/`all_objects`/`deleted_objects` manager redeclaration removed (identical to what it already inherits from `BaseModel`; `CompanyMembership` never had this redundancy). Local `from apps.users.models import Role/CompanyMembership` imports inside two serializer `Meta` classes moved to the module top alongside the existing `User` import (no circular-import reason existed for them being local). `apps.users.validators.parse_is_active_query_param` (added mid-arc, superseded by Part 3's serializer-based validation) removed before it could ship as dead code.
+
+**Deliberately assessed, not changed (disclosed, not silently skipped):**
+- `CompanyMembershipSerializer` (`apps/users/serializers.py`) — flagged as unused-by-any-view in the architecture review, but it has real, dedicated test coverage (`test_membership_serializer_camel_case`) and is reasonable forward-compatibility scaffolding for a CompanyMembership management API that doesn't exist yet (out of scope — "no new business features"). Removing it would mean also removing/rewriting its test, a larger and riskier change than this task's "maintain backward compatibility wherever possible" instruction supports for a low-value cleanup.
+- PUT/PATCH semantics (`CompanyViewSet.update`/`RoleViewSet.update` both forward to `partial_update`) — no test or known caller relies on strict PUT (full-replacement) semantics, but none currently exercises PUT with a partial payload either, so there's no evidence either way about a real caller's expectations. Left unchanged rather than risk silently breaking an undocumented caller, per the explicit "maintain backward compatibility wherever possible" instruction.
+
+**Security review (Part 14 — SQL Injection / Object Injection / Mass Assignment / Cross-Tenant Leakage / Sensitive Data Exposure / Permission Escalation / Authentication Bypass / JWT Forgery / Broken Audit Trail):** no new instance of any of these was introduced or discovered while implementing the above; the two categories directly targeted by this task (Permission Escalation via stale refresh-token privilege, and the Cross-Tenant/enumeration gaps in Role) are now closed.
+
+**Tests:** 12 new multi-company tenant-resolution integration tests, 2 new concurrency tests, 5 new settings-hardening tests, 6 new throttling tests, ~20 new authentication tests (audit logging, timing mitigation, refresh hardening, email-failure logging) spread across existing files, plus query-param-validation and 404-enumeration regression tests. Full backend suite: **281 passed, 0 failed** (was 235 after BE-020).
+
+Depends On
+
+- BE-001
+- BE-011
+- BE-014
+- BE-015
+- BE-019
+
+---
+
 # Sprint 2 – CRM
 
-- BE-021 – Client Module
-- BE-022 – Client CRUD
-- BE-023 – Project Module
-- BE-024 – Project Members
-- BE-025 – Project Workflow
-- BE-026 – Project Filters
-- BE-027 – Project Audit Logs
-- BE-028 – CRM Tests
+_(Renumbered 2026-08-27: originally BE-021–BE-044. BE-021 collided with the Sprint 1 Epic 11 hardening task of the same number — shifted every ID in Sprints 2–6 forward by one. No other document references these IDs.)_
+
+- BE-022 – Client Module
+- BE-023 – Client CRUD
+- BE-024 – Project Module
+- BE-025 – Project Members
+- BE-026 – Project Workflow
+- BE-027 – Project Filters
+- BE-028 – Project Audit Logs
+- BE-029 – CRM Tests
 
 Status: Todo
 
@@ -510,11 +574,11 @@ Status: Todo
 
 # Sprint 3 – Product Catalog
 
-- BE-029 – Categories
-- BE-030 – Subcategories
-- BE-031 – Products
-- BE-032 – Units
-- BE-033 – Catalog APIs
+- BE-030 – Categories
+- BE-031 – Subcategories
+- BE-032 – Products
+- BE-033 – Units
+- BE-034 – Catalog APIs
 
 Status: Todo
 
@@ -522,10 +586,10 @@ Status: Todo
 
 # Sprint 4 – BOQ
 
-- BE-034 – BOQ Module
-- BE-035 – BOQ Items
-- BE-036 – BOQ Calculations
-- BE-037 – BOQ APIs
+- BE-035 – BOQ Module
+- BE-036 – BOQ Items
+- BE-037 – BOQ Calculations
+- BE-038 – BOQ APIs
 
 Status: Todo
 
@@ -533,9 +597,9 @@ Status: Todo
 
 # Sprint 5 – Quotation
 
-- BE-038 – Quotation
-- BE-039 – Versioning
-- BE-040 – Approval Workflow
+- BE-039 – Quotation
+- BE-040 – Versioning
+- BE-041 – Approval Workflow
 
 Status: Todo
 
@@ -543,10 +607,10 @@ Status: Todo
 
 # Sprint 6 – Finance
 
-- BE-041 – Invoice
-- BE-042 – Payment
-- BE-043 – Expense
-- BE-044 – Financial Reports
+- BE-042 – Invoice
+- BE-043 – Payment
+- BE-044 – Expense
+- BE-045 – Financial Reports
 
 Status: Todo
 

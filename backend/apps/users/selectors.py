@@ -1,5 +1,5 @@
 import uuid
-from typing import Iterable, Optional
+from typing import Optional
 
 from django.db.models import Q, QuerySet
 
@@ -20,7 +20,6 @@ VALID_ORDER_FIELDS = {
 
 def list_roles(
     company_id: Optional[str | uuid.UUID] = None,
-    company_ids: Optional[Iterable[str | uuid.UUID]] = None,
     is_active: Optional[bool] = None,
     search: Optional[str] = None,
     ordering: str = "-created_at",
@@ -32,8 +31,6 @@ def list_roles(
 
     if company_id:
         queryset = queryset.filter(company_id=company_id)
-    elif company_ids is not None:
-        queryset = queryset.filter(company_id__in=company_ids)
 
     if is_active is not None:
         queryset = queryset.filter(is_active=is_active)

@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
-from apps.company.models import Company
+from apps.company.models import Company, CompanyStatus
+from apps.company.selectors import VALID_ORDER_FIELDS
 
 
 class CompanySerializer(serializers.ModelSerializer):
@@ -83,6 +84,23 @@ class CompanyCreateSerializer(serializers.Serializer):
         if not cleaned:
             raise serializers.ValidationError("Company name cannot be blank or empty.")
         return cleaned
+
+
+class CompanyListQuerySerializer(serializers.Serializer):
+    """
+    Validates ?status=/?search=/?ordering= query params for GET /companies —
+    replaces the manual query-param reads that previously lived directly in
+    CompanyViewSet.list(). An invalid value for any of these now returns
+    400 VALIDATION_ERROR instead of being silently ignored/coerced.
+    """
+
+    status = serializers.ChoiceField(
+        choices=CompanyStatus.choices, required=False, allow_null=True, default=None
+    )
+    search = serializers.CharField(required=False, allow_blank=True, default="")
+    ordering = serializers.ChoiceField(
+        choices=sorted(VALID_ORDER_FIELDS), required=False, default="-created_at"
+    )
 
 
 class CompanyUpdateSerializer(serializers.Serializer):

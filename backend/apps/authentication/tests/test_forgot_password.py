@@ -1,4 +1,6 @@
 from datetime import timedelta
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import TestCase
@@ -6,6 +8,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from apps.audit.models import AuditLog
 from apps.authentication.models import PasswordResetToken
 
 User = get_user_model()
@@ -181,3 +184,40 @@ class ForgotPasswordTestCase(TestCase):
         self.assertFalse(data["success"])
         self.assertEqual(data["error"]["code"], "VALIDATION_ERROR")
         self.assertTrue(any(d["field"] == "email" for d in data["error"]["details"]))
+
+    def test_existing_user_request_writes_audit_log_entry(self):
+        response = self.client.post(self.url, {"email": self.email}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        entry = AuditLog.objects.get(
+            entity_type="user", entity_id=self.user.id, action="password_reset_requested"
+        )
+        self.assertEqual(entry.after_state["email"], self.user.email)
+
+    def test_nonexistent_email_writes_no_audit_log_entry(self):
+        response = self.client.post(
+            self.url, {"email": "unknown.user@example.com"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(AuditLog.objects.filter(action="password_reset_requested").count(), 0)
+
+    def test_smtp_failure_is_logged_but_response_is_unchanged(self):
+        """
+        An SMTP/email-backend failure must never crash the request or
+        change the client-visible response (still the identical generic
+        200 message) — but it must be logged server-side, not silently
+        swallowed with zero trace.
+        """
+        with patch(
+            "django.core.mail.send_mail", side_effect=RuntimeError("SMTP connection refused")
+        ), self.assertLogs("apps.authentication", level="ERROR") as logs:
+            response = self.client.post(self.url, {"email": self.email}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.json()["data"]["message"],
+            "If the email is registered and active, password reset instructions have been sent.",
+        )
+        self.assertTrue(
+            any("Failed to send password reset email" in message for message in logs.output)
+        )

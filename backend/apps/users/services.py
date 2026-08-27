@@ -1,7 +1,7 @@
 import logging
 import uuid
-from typing import Any, Dict, Iterable, Optional
-from django.db import transaction
+from typing import Any, Dict, Optional
+from django.db import IntegrityError, transaction
 from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
@@ -28,7 +28,6 @@ class RoleService:
     def list_roles(
         cls,
         company_id: Optional[str | uuid.UUID] = None,
-        company_ids: Optional[Iterable[str | uuid.UUID]] = None,
         is_active: Optional[bool] = None,
         search: Optional[str] = None,
         ordering: str = "-created_at",
@@ -36,14 +35,93 @@ class RoleService:
         """
         List active (non-soft-deleted) roles with optional tenant scoping,
         status filtering, search, and ordering.
+
+        company_id=None means "no tenant filter" — reachable only from the
+        Platform Admin surface (RoleViewSet never calls this without a
+        resolved request.company_id for a non-admin, per BE-021 and
+        Tenant.md §4's ban on a "list across companies" mode for a
+        company-scoped resource).
         """
         return selectors.list_roles(
             company_id=company_id,
-            company_ids=company_ids,
             is_active=is_active,
             search=search,
             ordering=ordering,
         )
+
+    @classmethod
+    def list_roles_for_viewer(
+        cls,
+        is_platform_admin: bool,
+        resolved_company_id: Optional[str | uuid.UUID],
+        admin_company_id_param: Optional[str],
+        is_active: Optional[bool] = None,
+        search: Optional[str] = None,
+        ordering: str = "-created_at",
+    ) -> QuerySet[Role]:
+        """
+        Resolve which company_id list_roles() filters by, given the caller's
+        admin status (RoleViewSet.list() orchestrates only — this decision
+        used to live inline in the view).
+
+        Platform Admin: filters by whatever companyId query param was
+        supplied (None = every company, the one case where "no tenant
+        filter" is legitimate — the Platform Admin surface is structurally
+        separate per Tenant.md §6).
+
+        Non-admin: always resolved_company_id — the single company
+        TenantJWTAuthentication already resolved and validated for this
+        request (BE-021). Never re-derived from anything else.
+        """
+        if is_platform_admin:
+            return cls.list_roles(
+                company_id=admin_company_id_param,
+                is_active=is_active,
+                search=search,
+                ordering=ordering,
+            )
+
+        return cls.list_roles(
+            company_id=resolved_company_id,
+            is_active=is_active,
+            search=search,
+            ordering=ordering,
+        )
+
+    @classmethod
+    def resolve_create_target_company_id(
+        cls,
+        is_platform_admin: bool,
+        resolved_company_id: Optional[str | uuid.UUID],
+        supplied_company_id: Optional[str | uuid.UUID],
+    ) -> str | uuid.UUID:
+        """
+        Resolve which company a new Role is created in, given the caller's
+        admin status and any client-supplied companyId (RoleViewSet.create()
+        orchestrates only — this decision used to live inline in the view).
+
+        Platform Admin: companyId is required and explicit (no request-
+        resolved company exists for an admin token).
+
+        Non-admin: always resolved_company_id — the single company
+        TenantJWTAuthentication already resolved and validated for this
+        request (BE-021). A client-supplied companyId is never trusted as
+        the authorization boundary (Tenant.md §4): if present, it must
+        match resolved_company_id exactly, or the request is rejected
+        outright rather than silently overridden.
+        """
+        if is_platform_admin:
+            if not supplied_company_id:
+                raise drf_exceptions.ValidationError(
+                    {"companyId": ["companyId is required for platform admin role creation."]}
+                )
+            return supplied_company_id
+
+        if supplied_company_id and str(supplied_company_id) != str(resolved_company_id):
+            raise drf_exceptions.PermissionDenied(
+                "You do not have permission to create roles for this company."
+            )
+        return resolved_company_id
 
     @classmethod
     def get_role_by_id(
@@ -75,6 +153,16 @@ class RoleService:
         """
         Create a new Role within a Company tenant.
         Enforces name uniqueness per company among active records and transaction atomicity.
+
+        The name_exists_for_company() check above is a TOCTOU race under
+        concurrent requests — two callers can both pass it before either
+        commits. The database's own unique_active_role_per_company
+        constraint (apps/users/models.py) is the real backstop: a
+        concurrent collision raises IntegrityError here, which is caught
+        and converted to the same ConflictError (409) the pre-check raises,
+        instead of propagating as an unhandled 500. Scoped to a nested
+        atomic() (savepoint) so the failed insert rolls back on its own
+        without aborting the outer transaction this method already runs in.
         """
         with transaction.atomic():
             company = RoleRepository.get_company_by_id(company_id)
@@ -83,12 +171,18 @@ class RoleService:
             if RoleRepository.name_exists_for_company(company.id, cleaned_name):
                 raise ConflictError("A role with this name already exists for this company.")
 
-            role = RoleRepository.create(
-                company=company,
-                name=cleaned_name,
-                description=validators.clean_role_description(description),
-                is_active=is_active,
-            )
+            try:
+                with transaction.atomic():
+                    role = RoleRepository.create(
+                        company=company,
+                        name=cleaned_name,
+                        description=validators.clean_role_description(description),
+                        is_active=is_active,
+                    )
+            except IntegrityError as exc:
+                raise ConflictError(
+                    "A role with this name already exists for this company."
+                ) from exc
 
             AuditLogService.record(
                 action=AuditAction.CREATE,
@@ -118,6 +212,12 @@ class RoleService:
         """
         Update an existing Role within a Company tenant.
         Enforces name uniqueness and transaction atomicity.
+
+        Same TOCTOU race as create_role() applies to a concurrent rename:
+        the name_exists_for_company() pre-check can pass for two concurrent
+        callers before either commits. The database constraint is the real
+        backstop; a concurrent collision raises IntegrityError, caught here
+        and converted to the same ConflictError (409) the pre-check raises.
         """
         with transaction.atomic():
             role = cls.get_role_by_id(role_id, company_id=company_id)
@@ -146,7 +246,13 @@ class RoleService:
             if "is_active" in validated_data:
                 fields["is_active"] = validated_data["is_active"]
 
-            role = RoleRepository.save(role, fields)
+            try:
+                with transaction.atomic():
+                    role = RoleRepository.save(role, fields)
+            except IntegrityError as exc:
+                raise ConflictError(
+                    "A role with this name already exists for this company."
+                ) from exc
 
             AuditLogService.record(
                 action=AuditAction.UPDATE,
