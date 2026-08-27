@@ -5,6 +5,7 @@ from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
 from apps.clients.models import Client
+from apps.company.models import Company
 
 
 class ClientRepository:
@@ -40,3 +41,10 @@ class ClientRepository:
     @staticmethod
     def soft_delete(client: Client) -> None:
         client.delete()
+
+    @staticmethod
+    def get_company_by_id(company_id: str | uuid.UUID) -> Company:
+        try:
+            return Company.objects.get(id=company_id)
+        except (Company.DoesNotExist, ValueError):
+            raise drf_exceptions.NotFound("The specified company was not found.")

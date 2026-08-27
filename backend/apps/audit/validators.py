@@ -13,6 +13,11 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
     # "user" entity. Deliberately excludes password/password_hash/token
     # fields entirely — only a non-sensitive identifier is ever persisted.
     "user": {"email"},
+    # Deliberate MVP payload scope, not a permanent product rule (BE-023):
+    # `addresses`/`notes` are excluded for now as a privacy/payload-size
+    # choice, since they're free-form/structured content rather than
+    # simple identifiers — can be added later if audit review needs them.
+    "client": {"name", "company_name", "email", "mobile", "gstin"},
 }
 
 

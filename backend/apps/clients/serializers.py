@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.clients.models import Client
+from apps.clients.selectors import VALID_ORDER_FIELDS
 
 
 class ClientSerializer(serializers.ModelSerializer):
@@ -45,3 +46,141 @@ class ClientSerializer(serializers.ModelSerializer):
             "createdAt",
             "updatedAt",
         ]
+
+
+class ClientCreateSerializer(serializers.Serializer):
+    """
+    Input serializer for creating a new Client.
+    """
+
+    name = serializers.CharField(
+        max_length=255,
+        required=True,
+        help_text="Client's primary contact/individual name.",
+    )
+    companyName = serializers.CharField(
+        source="company_name",
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="The client's own business/trading name, if applicable.",
+    )
+    email = serializers.EmailField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Client's primary contact email address.",
+    )
+    mobile = serializers.CharField(
+        max_length=20,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Client's primary contact mobile number.",
+    )
+    gstin = serializers.CharField(
+        max_length=15,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Client's GST Identification Number (GSTIN), if applicable.",
+    )
+    addresses = serializers.JSONField(
+        required=False,
+        default=list,
+        help_text="List of address records for this client (shape not standardized).",
+    )
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Free-form internal notes about this client.",
+    )
+    companyId = serializers.UUIDField(
+        source="company_id",
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text="Company UUID for platform admins. Ignored/overridden for company users.",
+    )
+
+    def validate_name(self, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError("Client name cannot be blank or empty.")
+        return cleaned
+
+    def validate_addresses(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("addresses must be a list.")
+        return value
+
+
+class ClientUpdateSerializer(serializers.Serializer):
+    """
+    Input serializer for updating an existing Client. All fields optional
+    (partial update semantics — see apps/clients/views.py::update()).
+    """
+
+    name = serializers.CharField(
+        max_length=255,
+        required=False,
+        help_text="Client's primary contact/individual name.",
+    )
+    companyName = serializers.CharField(
+        source="company_name",
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        help_text="The client's own business/trading name, if applicable.",
+    )
+    email = serializers.EmailField(
+        required=False,
+        allow_blank=True,
+        help_text="Client's primary contact email address.",
+    )
+    mobile = serializers.CharField(
+        max_length=20,
+        required=False,
+        allow_blank=True,
+        help_text="Client's primary contact mobile number.",
+    )
+    gstin = serializers.CharField(
+        max_length=15,
+        required=False,
+        allow_blank=True,
+        help_text="Client's GST Identification Number (GSTIN), if applicable.",
+    )
+    addresses = serializers.JSONField(
+        required=False,
+        help_text="List of address records for this client (shape not standardized).",
+    )
+    notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="Free-form internal notes about this client.",
+    )
+
+    def validate_name(self, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError("Client name cannot be blank or empty.")
+        return cleaned
+
+    def validate_addresses(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("addresses must be a list.")
+        return value
+
+
+class ClientListQuerySerializer(serializers.Serializer):
+    """
+    Validates ?search=/?ordering= query params for GET /clients. No status/
+    isActive filter — Client has no such field (unlike Role/Company).
+    """
+
+    search = serializers.CharField(required=False, allow_blank=True, default="")
+    ordering = serializers.ChoiceField(
+        choices=sorted(VALID_ORDER_FIELDS), required=False, default="-created_at"
+    )

@@ -568,7 +568,7 @@ _(Renumbered 2026-08-27: originally BE-021–BE-044. BE-021 collided with the Sp
 - BE-028 – Project Audit Logs
 - BE-029 – CRM Tests
 
-Status: In Progress (BE-022 Done; BE-023–BE-029 Todo)
+Status: In Progress (BE-022 Done; BE-023 in Review; BE-024–BE-029 Todo)
 
 ---
 
@@ -590,6 +590,26 @@ Depends On
 
 - BE-014 (Role CRUD — company/tenant patterns this mirrors)
 - BE-021 (Multi-Tenant Resolution — `request.company_id` this reuses)
+
+---
+
+### BE-023 – Client CRUD
+
+**Status:** Review
+
+**Priority:** Critical
+
+**Owner:** Backend Team
+
+**Implementation notes:** Full Client CRUD, mirroring `RoleViewSet`/`RoleService`/`RoleSerializer` architecture exactly. Flat endpoints `GET/POST /clients`, `GET/PATCH/PUT/DELETE /clients/{id}` (not `CRM_API.md`'s nested `/companies/{companyId}/clients` sketch — that draft contradicts the already-implemented "never trust a path-supplied companyId" pattern). `ClientViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet)` — pure orchestration, all logic in `ClientService`. `ClientService.resolve_create_target_company_id()`/`list_clients_for_viewer()` mirror `RoleService`'s exactly: non-admin's `request.company_id` is the only tenant source; a mismatched client-supplied `companyId` is rejected (403), never silently overridden; platform admin requires an explicit `companyId` on create, and sees all companies' clients on list (no `companyId` list filter was added — not part of approved scope, this is the same Platform Admin list-everything exception Tenant.md §4 permits, not a gap). `ClientPermission` (from BE-022, unchanged) continues as the coarse tenant-membership gate — no fine-grained `client.*` codes. Search (`?search=`) covers `name`/`company_name`/`email`/`mobile` via `icontains` (documented fields only); no other filters. `PUT` forwards to `partial_update`, matching the existing `RoleViewSet` convention, not a Client-specific full-replace semantic. `AuditLogService.record()` wired into create/update/delete with `entity_type="client"`; `ENTITY_FIELD_ALLOWLISTS["client"] = {"name", "company_name", "email", "mobile", "gstin"}` added to `apps/audit/validators.py` — `addresses`/`notes` deliberately excluded as an MVP privacy/payload-size choice, not a permanent product rule. Unlike Role, `ClientService.create_client`/`update_client` need no `IntegrityError`→`ConflictError` handling — Client has no uniqueness constraint (BE-022 decision), a genuine simplification. Full `@extend_schema_view` coverage for all 6 actions, tagged `"Client"`.
+
+**Deferred (documented, not gaps):** `soft_delete_client()` is unconditional — the "block delete if active projects exist" rule (`CRM_API.md`) cannot be built until BE-024 (Project) exists; will be added as a follow-up guard then.
+
+**Tests:** 51 new. `test_services.py` ×18: create/get/list/update/soft-delete success and cross-tenant-scoping paths, no-uniqueness-constraint confirmation, `resolve_create_target_company_id`/`list_clients_for_viewer` admin vs. non-admin branches, audit row creation on create/update/delete including confirmation that `addresses`/`notes` are excluded from the audit payload. `test_views.py` ×33: 401 unauthenticated, 403 no-membership/revoked-membership, list scoping (member vs. platform admin sees all), search (name/email), ordering, invalid-ordering 400, pagination shape, empty list shape, soft-deleted exclusion from list, create success (member and admin-with-companyId), admin-without-companyId 400, company-injection-by-member 403, validation 400 (blank name, invalid email, non-list addresses), retrieve success, cross-tenant GET/PATCH/DELETE 404 (+ indistinguishable-from-nonexistent-ID), platform-admin cross-tenant retrieve/update/delete allowed, update success, PUT-behaves-like-PATCH confirmation, delete soft-deletes and excludes from subsequent GET. Full backend suite: **350 passed, 0 failed** (was 299 after BE-022). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected (no schema change in this task). `spectacular --fail-on-warn`: clean; confirmed `/clients/` and `/clients/{id}/` present in the generated schema.
+
+Depends On
+
+- BE-022 (Client Module)
 
 ---
 
