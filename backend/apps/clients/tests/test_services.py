@@ -5,7 +5,9 @@ from rest_framework import exceptions as drf_exceptions
 from apps.audit.models import AuditLog
 from apps.clients.models import Client
 from apps.clients.services import ClientService
+from apps.common.exceptions import ConflictError
 from apps.company.models import Company, CompanyStatus
+from apps.projects.models import Project, ProjectStatus
 
 
 class ClientServiceTestCase(TestCase):
@@ -195,3 +197,120 @@ class ClientServiceTestCase(TestCase):
         entry = AuditLog.objects.get(entity_type="client", entity_id=client_id, action="delete")
         self.assertEqual(entry.before_state["name"], "Jane Doe")
         self.assertIsNone(entry.after_state)
+
+
+class ClientDeleteGuardTestCase(TestCase):
+    """
+    BE-024: resolves the BE-022/BE-023 deferral. A Client with any Project
+    not in a terminal status (completed/cancelled) must not be
+    soft-deleted. Terminal/blocking status sets per Backend Lead decision
+    (2026-08-27).
+    """
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Guard Co", status=CompanyStatus.ACTIVE)
+        self.client_obj = Client.objects.create(company=self.company, name="Guarded Client")
+
+    def _make_project(self, status: str) -> Project:
+        return Project.objects.create(
+            company=self.company, client=self.client_obj, name=f"Project {status}", status=status
+        )
+
+    def test_delete_succeeds_with_zero_projects(self):
+        ClientService.soft_delete_client(self.client_obj.id)
+        self.client_obj.refresh_from_db()
+        self.assertTrue(self.client_obj.is_deleted)
+
+    def test_delete_succeeds_with_completed_only(self):
+        self._make_project(ProjectStatus.COMPLETED)
+        ClientService.soft_delete_client(self.client_obj.id)
+        self.client_obj.refresh_from_db()
+        self.assertTrue(self.client_obj.is_deleted)
+
+    def test_delete_succeeds_with_cancelled_only(self):
+        self._make_project(ProjectStatus.CANCELLED)
+        ClientService.soft_delete_client(self.client_obj.id)
+        self.client_obj.refresh_from_db()
+        self.assertTrue(self.client_obj.is_deleted)
+
+    def test_delete_succeeds_with_completed_and_cancelled(self):
+        self._make_project(ProjectStatus.COMPLETED)
+        self._make_project(ProjectStatus.CANCELLED)
+        ClientService.soft_delete_client(self.client_obj.id)
+        self.client_obj.refresh_from_db()
+        self.assertTrue(self.client_obj.is_deleted)
+
+    def test_delete_blocked_by_draft_project(self):
+        self._make_project(ProjectStatus.DRAFT)
+        with self.assertRaises(ConflictError):
+            ClientService.soft_delete_client(self.client_obj.id)
+
+    def test_delete_blocked_by_planning_project(self):
+        self._make_project(ProjectStatus.PLANNING)
+        with self.assertRaises(ConflictError):
+            ClientService.soft_delete_client(self.client_obj.id)
+
+    def test_delete_blocked_by_design_project(self):
+        self._make_project(ProjectStatus.DESIGN)
+        with self.assertRaises(ConflictError):
+            ClientService.soft_delete_client(self.client_obj.id)
+
+    def test_delete_blocked_by_quotation_project(self):
+        self._make_project(ProjectStatus.QUOTATION)
+        with self.assertRaises(ConflictError):
+            ClientService.soft_delete_client(self.client_obj.id)
+
+    def test_delete_blocked_by_approved_project(self):
+        self._make_project(ProjectStatus.APPROVED)
+        with self.assertRaises(ConflictError):
+            ClientService.soft_delete_client(self.client_obj.id)
+
+    def test_delete_blocked_by_execution_project(self):
+        self._make_project(ProjectStatus.EXECUTION)
+        with self.assertRaises(ConflictError):
+            ClientService.soft_delete_client(self.client_obj.id)
+
+    def test_delete_blocked_by_quality_check_project(self):
+        self._make_project(ProjectStatus.QUALITY_CHECK)
+        with self.assertRaises(ConflictError):
+            ClientService.soft_delete_client(self.client_obj.id)
+
+    def test_delete_blocked_by_handover_project(self):
+        self._make_project(ProjectStatus.HANDOVER)
+        with self.assertRaises(ConflictError):
+            ClientService.soft_delete_client(self.client_obj.id)
+
+    def test_delete_blocked_by_on_hold_project(self):
+        self._make_project(ProjectStatus.ON_HOLD)
+        with self.assertRaises(ConflictError):
+            ClientService.soft_delete_client(self.client_obj.id)
+
+    def test_blocked_delete_leaves_client_undeleted(self):
+        self._make_project(ProjectStatus.DRAFT)
+        with self.assertRaises(ConflictError):
+            ClientService.soft_delete_client(self.client_obj.id)
+
+        self.client_obj.refresh_from_db()
+        self.assertFalse(self.client_obj.is_deleted)
+        self.assertIsNone(self.client_obj.deleted_at)
+
+    def test_blocked_delete_does_not_write_delete_audit_entry(self):
+        self._make_project(ProjectStatus.DRAFT)
+        with self.assertRaises(ConflictError):
+            ClientService.soft_delete_client(self.client_obj.id)
+
+        self.assertFalse(
+            AuditLog.objects.filter(
+                entity_type="client", entity_id=self.client_obj.id, action="delete"
+            ).exists()
+        )
+
+    def test_successful_delete_still_writes_audit_entry(self):
+        self._make_project(ProjectStatus.COMPLETED)
+        ClientService.soft_delete_client(self.client_obj.id)
+
+        self.assertTrue(
+            AuditLog.objects.filter(
+                entity_type="client", entity_id=self.client_obj.id, action="delete"
+            ).exists()
+        )

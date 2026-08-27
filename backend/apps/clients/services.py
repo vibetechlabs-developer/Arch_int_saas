@@ -9,6 +9,8 @@ from apps.audit.services import AuditLogService
 from apps.clients import selectors, validators
 from apps.clients.models import Client
 from apps.clients.repositories import ClientRepository
+from apps.common.exceptions import ConflictError
+from apps.projects.selectors import ProjectSelector
 
 
 AUDITED_FIELDS = ("name", "company_name", "email", "mobile", "gstin")
@@ -218,13 +220,25 @@ class ClientService:
         """
         Soft-delete a Client by setting deleted_at timestamp.
 
-        Deferred (BE-024): CRM_API.md's "block delete if active projects
-        exist" rule cannot be implemented until the Project model exists —
-        Client has no reverse relation to check against yet. This is an
-        unconditional soft-delete for now.
+        Resolves the BE-022/BE-023 deferral: a Client with any Project not
+        in a terminal status (completed/cancelled — see
+        apps.projects.models.TERMINAL_PROJECT_STATUSES) may not be
+        deleted. Raises ConflictError (409) instead, per
+        00_Development_Standards/Error_Handling.md's taxonomy ("Request
+        conflicts with current state"). The check is delegated to
+        ProjectSelector (apps.projects.selectors) rather than done here
+        with a raw query, so this module owns zero knowledge of Project
+        status semantics — Backend Lead architecture decision, 2026-08-27.
         """
         with transaction.atomic():
             client = cls.get_client_by_id(client_id, company_id=company_id)
+
+            if ProjectSelector.has_blocking_projects_for_client(client.id):
+                raise ConflictError(
+                    "This client has one or more projects that are not "
+                    "completed or cancelled, and cannot be deleted."
+                )
+
             client_id_val = client.id
             company_id_val = client.company_id
             before_state = _audit_state(client)
