@@ -5,7 +5,7 @@ from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
 from apps.company.models import Company
-from apps.products.models import ProductCategory
+from apps.products.models import ProductCategory, ProductSubcategory
 
 
 class ProductCategoryRepository:
@@ -49,3 +49,40 @@ class ProductCategoryRepository:
             return Company.objects.get(id=company_id)
         except (Company.DoesNotExist, ValueError):
             raise drf_exceptions.NotFound("The specified company was not found.")
+
+
+class ProductSubcategoryRepository:
+    """
+    Data-access layer for ProductSubcategory (BE-032). Mirrors
+    ProductCategoryRepository's shape exactly.
+    """
+
+    @staticmethod
+    def all() -> QuerySet[ProductSubcategory]:
+        return ProductSubcategory.objects.select_related("company", "category").all()
+
+    @staticmethod
+    def get_by_id(subcategory_id: str | uuid.UUID) -> ProductSubcategory:
+        try:
+            return ProductSubcategory.objects.select_related("company", "category").get(
+                id=subcategory_id
+            )
+        except (ProductSubcategory.DoesNotExist, ValueError):
+            raise drf_exceptions.NotFound("The requested product subcategory was not found.")
+
+    @staticmethod
+    def create(**fields: Any) -> ProductSubcategory:
+        return ProductSubcategory.objects.create(**fields)
+
+    @staticmethod
+    def save(
+        subcategory: ProductSubcategory, fields: Optional[Dict[str, Any]] = None
+    ) -> ProductSubcategory:
+        for field, value in (fields or {}).items():
+            setattr(subcategory, field, value)
+        subcategory.save()
+        return subcategory
+
+    @staticmethod
+    def soft_delete(subcategory: ProductSubcategory) -> None:
+        subcategory.delete()

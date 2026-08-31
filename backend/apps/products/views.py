@@ -3,19 +3,24 @@ from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.common.pagination import StandardPagination
 from apps.common.responses import ApiResponse
 from apps.common.views import ObjectPermission404Mixin
-from apps.products.models import ProductCategory
+from apps.products.models import ProductCategory, ProductSubcategory
 from apps.products.permissions import ProductCategoryPermission
 from apps.products.serializers import (
     ProductCategoryCreateSerializer,
     ProductCategoryListQuerySerializer,
     ProductCategorySerializer,
     ProductCategoryUpdateSerializer,
+    ProductSubcategoryCreateSerializer,
+    ProductSubcategoryListQuerySerializer,
+    ProductSubcategorySerializer,
+    ProductSubcategoryUpdateSerializer,
 )
-from apps.products.services import ProductCategoryService
+from apps.products.services import ProductCategoryService, ProductSubcategoryService
 from apps.users.permissions import is_platform_admin
 
 
@@ -169,4 +174,161 @@ class ProductCategoryViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         return ApiResponse.success(
             data={"message": "Product category deleted successfully."},
             request_id=request_id,
+        )
+
+
+class ProductSubcategoryListCreateView(ObjectPermission404Mixin, APIView):
+    """
+    `GET`/`POST /product-categories/{categoryId}/subcategories` (BE-032),
+    matching BOQ_API.md's nested endpoint shape exactly. Reuses
+    ProductCategoryPermission directly (its object-level check only
+    inspects `obj.company_id`, so it works unchanged against the parent
+    Category here) — mirrors ProjectTeamView's reasoning for not building
+    a separate permission class for a check that's identical either way.
+    """
+
+    permission_classes = [IsAuthenticated, ProductCategoryPermission]
+
+    @extend_schema(
+        summary="List Product Subcategories",
+        description="List the subcategories under one product category.",
+        parameters=[
+            OpenApiParameter(
+                name="ordering",
+                description="Ordering field (e.g. name, -name, created_at, -created_at).",
+                required=False,
+                type=str,
+            ),
+        ],
+        responses={status.HTTP_200_OK: ProductSubcategorySerializer(many=True)},
+        tags=["Product Catalog"],
+    )
+    def get(self, request: Request, category_id: str = None) -> Response:
+        category = ProductCategoryService.get_category_by_id(category_id)
+        self.check_object_permissions(request, category)
+
+        query = ProductSubcategoryListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+
+        subcategories = ProductSubcategoryService.list_subcategories_for_category(
+            category, ordering=query.validated_data["ordering"]
+        )
+        serializer = ProductSubcategorySerializer(subcategories, many=True)
+        return ApiResponse.success(
+            data=serializer.data, request_id=getattr(request, "request_id", None)
+        )
+
+    @extend_schema(
+        summary="Create Product Subcategory",
+        description="Create a new subcategory under one product category.",
+        request=ProductSubcategoryCreateSerializer,
+        responses={status.HTTP_201_CREATED: ProductSubcategorySerializer},
+        tags=["Product Catalog"],
+    )
+    def post(self, request: Request, category_id: str = None) -> Response:
+        category = ProductCategoryService.get_category_by_id(category_id)
+        self.check_object_permissions(request, category)
+
+        serializer = ProductSubcategoryCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        subcategory = ProductSubcategoryService.create_subcategory(
+            category=category,
+            name=serializer.validated_data["name"],
+            actor_user=request.user,
+            request=request,
+        )
+
+        response_data = ProductSubcategorySerializer(subcategory).data
+        return ApiResponse.created(
+            data=response_data, request_id=getattr(request, "request_id", None)
+        )
+
+
+@extend_schema_view(
+    retrieve=extend_schema(
+        summary="Retrieve Product Subcategory",
+        description="Retrieve product subcategory details by UUID.",
+        responses={status.HTTP_200_OK: ProductSubcategorySerializer},
+        tags=["Product Catalog"],
+    ),
+    partial_update=extend_schema(
+        summary="Update Product Subcategory",
+        description="Partially update product subcategory details by UUID.",
+        request=ProductSubcategoryUpdateSerializer,
+        responses={status.HTTP_200_OK: ProductSubcategorySerializer},
+        tags=["Product Catalog"],
+    ),
+    update=extend_schema(
+        summary="Full Update Product Subcategory",
+        description="Update forwards to partial_update logic.",
+        request=ProductSubcategoryUpdateSerializer,
+        responses={status.HTTP_200_OK: ProductSubcategorySerializer},
+        tags=["Product Catalog"],
+    ),
+    destroy=extend_schema(
+        summary="Delete Product Subcategory",
+        description="Soft-delete a product subcategory by UUID.",
+        responses={status.HTTP_200_OK: ProductSubcategorySerializer},
+        tags=["Product Catalog"],
+    ),
+)
+class ProductSubcategoryViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
+    """
+    Flat detail-only actions for ProductSubcategory
+    (`/product-subcategories/{id}`, BE-032) — list/create are nested under
+    Category (ProductSubcategoryListCreateView above), matching
+    BOQ_API.md's documented shape; only retrieve/update/delete use the
+    subcategory's own id directly, the same split ProjectTeamView/
+    ProjectViewSet use for Project Members.
+    """
+
+    permission_classes = [IsAuthenticated, ProductCategoryPermission]
+    serializer_class = ProductSubcategorySerializer
+    queryset = ProductSubcategory.objects.none()
+
+    def retrieve(self, request: Request, pk: str = None) -> Response:
+        subcategory = ProductSubcategoryService.get_subcategory_by_id(pk)
+        self.check_object_permissions(request, subcategory)
+
+        response_data = ProductSubcategorySerializer(subcategory).data
+        return ApiResponse.success(
+            data=response_data, request_id=getattr(request, "request_id", None)
+        )
+
+    def partial_update(self, request: Request, pk: str = None) -> Response:
+        subcategory = ProductSubcategoryService.get_subcategory_by_id(pk)
+        self.check_object_permissions(request, subcategory)
+
+        serializer = ProductSubcategoryUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        updated_subcategory = ProductSubcategoryService.update_subcategory(
+            subcategory_id=pk,
+            validated_data=serializer.validated_data,
+            actor_user=request.user,
+            request=request,
+        )
+        response_data = ProductSubcategorySerializer(updated_subcategory).data
+        return ApiResponse.success(
+            data=response_data, request_id=getattr(request, "request_id", None)
+        )
+
+    def update(self, request: Request, pk: str = None) -> Response:
+        """
+        Full update forwards to partial_update logic — matching the
+        existing convention.
+        """
+        return self.partial_update(request, pk=pk)
+
+    def destroy(self, request: Request, pk: str = None) -> Response:
+        subcategory = ProductSubcategoryService.get_subcategory_by_id(pk)
+        self.check_object_permissions(request, subcategory)
+
+        ProductSubcategoryService.soft_delete_subcategory(
+            pk, actor_user=request.user, request=request
+        )
+        return ApiResponse.success(
+            data={"message": "Product subcategory deleted successfully."},
+            request_id=getattr(request, "request_id", None),
         )

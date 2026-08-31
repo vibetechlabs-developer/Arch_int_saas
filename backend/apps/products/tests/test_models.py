@@ -2,7 +2,7 @@ import uuid
 from django.test import TestCase
 
 from apps.company.models import Company, CompanyStatus
-from apps.products.models import ProductCategory
+from apps.products.models import ProductCategory, ProductSubcategory
 
 
 class ProductCategoryModelTestCase(TestCase):
@@ -79,3 +79,111 @@ class ProductCategoryModelTestCase(TestCase):
     def test_category_company_name_composite_index_exists(self):
         index_names = {index.name for index in ProductCategory._meta.indexes}
         self.assertIn("product_cat_comp_name_idx", index_names)
+
+
+class ProductSubcategoryModelTestCase(TestCase):
+    """
+    Unit test suite for ProductSubcategory domain model (BE-032).
+    """
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Test Company", status=CompanyStatus.ACTIVE)
+        self.other_company = Company.objects.create(name="Other Company", status=CompanyStatus.ACTIVE)
+        self.category = ProductCategory.objects.create(company=self.company, name="Flooring")
+
+    def test_subcategory_creation_with_required_fields(self):
+        subcategory = ProductSubcategory.objects.create(
+            company=self.company, category=self.category, name="Tiles"
+        )
+        self.assertIsInstance(subcategory.id, uuid.UUID)
+        self.assertEqual(subcategory.name, "Tiles")
+        self.assertEqual(subcategory.company, self.company)
+        self.assertEqual(subcategory.category, self.category)
+        self.assertFalse(subcategory.is_deleted)
+
+    def test_subcategory_str_representation(self):
+        subcategory = ProductSubcategory.objects.create(
+            company=self.company, category=self.category, name="Tiles"
+        )
+        self.assertEqual(str(subcategory), f"Tiles ({self.category.name})")
+
+    def test_subcategory_no_uniqueness_constraint_on_name(self):
+        sub1 = ProductSubcategory.objects.create(
+            company=self.company, category=self.category, name="Tiles"
+        )
+        sub2 = ProductSubcategory.objects.create(
+            company=self.company, category=self.category, name="Tiles"
+        )
+        self.assertNotEqual(sub1.id, sub2.id)
+
+    def test_subcategory_tenant_isolation_via_company_fk(self):
+        other_category = ProductCategory.objects.create(
+            company=self.other_company, name="Lighting"
+        )
+        ProductSubcategory.objects.create(company=self.company, category=self.category, name="Tiles")
+        ProductSubcategory.objects.create(
+            company=self.other_company, category=other_category, name="Bulbs"
+        )
+
+        company_subcats = ProductSubcategory.objects.filter(company=self.company)
+        self.assertEqual(company_subcats.count(), 1)
+        self.assertEqual(company_subcats.first().name, "Tiles")
+
+    def test_subcategory_soft_delete_lifecycle(self):
+        subcategory = ProductSubcategory.objects.create(
+            company=self.company, category=self.category, name="Tiles"
+        )
+        subcategory_id = subcategory.id
+
+        subcategory.delete()
+        self.assertTrue(subcategory.is_deleted)
+
+        self.assertFalse(ProductSubcategory.objects.filter(id=subcategory_id).exists())
+        self.assertTrue(ProductSubcategory.all_objects.filter(id=subcategory_id).exists())
+
+        subcategory.restore()
+        self.assertTrue(ProductSubcategory.objects.filter(id=subcategory_id).exists())
+
+    def test_subcategory_category_cascade_delete(self):
+        """
+        category uses CASCADE (not PROTECT, unlike Project.client) — hard
+        deleting the Category removes its Subcategories.
+        """
+        subcategory = ProductSubcategory.objects.create(
+            company=self.company, category=self.category, name="Tiles"
+        )
+        subcategory_id = subcategory.id
+        self.category.delete(hard=True)
+        self.assertFalse(ProductSubcategory.all_objects.filter(id=subcategory_id).exists())
+
+    def test_subcategory_company_cascade_delete(self):
+        subcategory = ProductSubcategory.objects.create(
+            company=self.company, category=self.category, name="Tiles"
+        )
+        subcategory_id = subcategory.id
+        self.company.delete(hard=True)
+        self.assertFalse(ProductSubcategory.all_objects.filter(id=subcategory_id).exists())
+
+    def test_subcategory_requires_category(self):
+        with self.assertRaises(Exception):
+            ProductSubcategory.objects.create(company=self.company, name="Orphan Subcategory")
+
+    def test_subcategory_reverse_accessor_from_category(self):
+        ProductSubcategory.objects.create(company=self.company, category=self.category, name="Tiles")
+        self.assertEqual(self.category.subcategories.count(), 1)
+
+    def test_category_soft_delete_leaves_subcategory_fk_untouched(self):
+        """
+        SoftDeleteModel.delete() never calls super().delete() (BE-024's
+        finding), so soft-deleting the parent Category never triggers the
+        `category` FK's on_delete behavior — the Subcategory row and its
+        FK stay intact and resolvable.
+        """
+        subcategory = ProductSubcategory.objects.create(
+            company=self.company, category=self.category, name="Tiles"
+        )
+        self.category.delete()
+
+        subcategory.refresh_from_db()
+        self.assertEqual(subcategory.category_id, self.category.id)
+        self.assertFalse(subcategory.is_deleted)

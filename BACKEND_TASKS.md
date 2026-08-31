@@ -809,7 +809,7 @@ _(Renumbered 2026-08-31, Sprint 3 planning: dropped the standalone "BE-034 – U
 - BE-033 – Products
 - BE-034 – Catalog APIs
 
-Status: In Progress (BE-031 Review; BE-032–BE-034 Todo)
+Status: In Progress (BE-031, BE-032 Review; BE-033–BE-034 Todo)
 
 ---
 
@@ -834,6 +834,30 @@ Status: In Progress (BE-031 Review; BE-032–BE-034 Todo)
 Depends On
 
 - BE-021 (Multi-Tenant Resolution — reused directly, Product Catalog has no dependency on Client/Project per `Module_Dependency_Map.md`'s own note that "Product may be started in parallel... since Product's only real dependency is `company`")
+
+---
+
+### BE-032 – Subcategories
+
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Implementation notes:** New `ProductSubcategory(BaseModel)` in the same `apps.products` app: `company` FK (CASCADE, required — its own column per `Database_Schema.md`'s `product_subcategory(id, company_id, category_id FK, name)`, not merely derived through `category`), `category` FK (**CASCADE**, required), `name` (required). `category` uses CASCADE rather than PROTECT — unlike `Project.client`, no doc names Category→Subcategory as an example requiring hard-delete protection the way `Naming_Standards.md` §4 explicitly did for Client→Project; a plain catalog parent/child hierarchy defaults to the more common CASCADE convention already used by `CompanyMembership`/`ProjectMember`. Composite index `(company, category)`, named `prod_subcat_comp_cat_idx` (same Django 30-character index-name limit as BE-031's category index).
+
+**Endpoints match `BOQ_API.md`'s nested shape, split the same way Project Team was (BE-026):** `GET/POST /product-categories/{categoryId}/subcategories` (`ProductSubcategoryListCreateView`, a plain `APIView` — fetches the parent Category via `ProductCategoryService.get_category_by_id` + `check_object_permissions`, the same cross-tenant-404 pattern every nested endpoint in this codebase uses) for list/create, and flat `GET/PATCH/PUT/DELETE /product-subcategories/{id}` (`ProductSubcategoryViewSet`, detail-actions only — no `list`/`create` wired to this path) for individual-record operations, since `BOQ_API.md` never documents a nested single-subcategory path at all. Both reuse `ProductCategoryPermission` directly (its object-level check only inspects `obj.company_id`, identical either way) — no separate `ProductSubcategoryPermission` class, mirroring `ProjectTeamView`'s reasoning exactly.
+
+**Resolves BE-031's deferred guard:** `ProductCategoryService.soft_delete_category()` now checks `selectors.has_active_subcategories_for_category()` before deleting and raises `ConflictError` (409) if the category has any non-deleted Subcategory — mirrors the Client-cannot-delete-while-active-Projects-exist guard exactly. **Architecture difference from that precedent, noted deliberately:** Client/Project needed a dedicated `ProjectSelector` class specifically to avoid a cross-*app* domain-ownership violation (Client and Project are separate Django apps). Category and Subcategory live in the **same** app (`apps.products`), so the identical cross-app concern doesn't exist here — the guard is a plain module-level selector function, not a class, and the query lives directly alongside Category's own selectors without indirection for its own sake.
+
+**Own guard deferred in turn (documented, not a gap):** `soft_delete_subcategory()` is unconditional in this task — the "block delete if active Products exist" guard can't be built until BE-033 (`Product`) exists. BE-033 adds it, continuing the same chain BE-031 started.
+
+**Tests:** 40 new. `apps/products/tests/test_models.py` +11: required-field creation, str repr, no-uniqueness-constraint, tenant isolation via FK, soft-delete lifecycle + restore, Category `CASCADE` hard-delete removes Subcategory, Company `CASCADE` hard-delete removes Subcategory, required-category enforcement, reverse accessor from `category.subcategories`, Category **soft**-delete leaves Subcategory's FK untouched (verifies `SoftDeleteModel.delete()` never triggers the FK's `on_delete`, the same BE-024 finding applied here). `apps/products/tests/test_services.py` +21: `ProductCategoryService` guard tests (blocked-by-active-subcategory, blocked-delete-writes-no-audit-entry, succeeds-with-zero-subcategories, succeeds-when-subcategory-already-deleted) plus full `ProductSubcategoryService` coverage (create/get/list/update/soft-delete success and cross-tenant paths, blank-name-rejected, audit row creation on create/update/delete including `category_id` stringification). `apps/products/tests/test_views.py` +9 (`ProductSubcategoryViewTestCase`) plus 1 added to the Category test case (`test_delete_category_blocked_by_active_subcategory_returns_409`): 401/403, cross-tenant category 404 on nested list/create, list-for-category, create success/validation-400/cross-tenant-404, platform-admin-cross-tenant-create-allowed, flat retrieve/update/delete success and cross-tenant-404. Full `apps/products` suite: **91 passed** (was 51 after BE-031). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected after generating `0002_productsubcategory.py`. `spectacular --fail-on-warn`: clean; confirmed `/product-categories/{category_id}/subcategories/` and `/product-subcategories/{id}/` present in the generated schema.
+
+Depends On
+
+- BE-031 (Categories)
 
 ---
 

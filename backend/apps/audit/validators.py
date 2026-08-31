@@ -42,6 +42,11 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
     "project_member": {"project_id", "user_id", "assigned_by_id"},
     # BE-031: Category has exactly one field beyond company/id.
     "product_category": {"name"},
+    # BE-032: category_id is stringified by
+    # apps.products.services._subcategory_audit_state before reaching
+    # here (same reasoning as Project's FK ids — this JSONField has no
+    # custom encoder and can't serialize a raw uuid.UUID).
+    "product_subcategory": {"name", "category_id"},
 }
 
 

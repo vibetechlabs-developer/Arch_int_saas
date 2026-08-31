@@ -6,7 +6,7 @@ from rest_framework.test import APIClient
 
 from apps.authentication.tokens import CompanyUserAccessToken, PlatformAdminAccessToken
 from apps.company.models import Company, CompanyStatus
-from apps.products.models import ProductCategory
+from apps.products.models import ProductCategory, ProductSubcategory
 from apps.users.models import CompanyMembership, CompanyMembershipStatus
 
 User = get_user_model()
@@ -259,3 +259,165 @@ class ProductCategoryViewSetTestCase(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
         response = self.client.delete(f"/product-categories/{self.category_c2.id}")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_delete_category_blocked_by_active_subcategory_returns_409(self):
+        ProductSubcategory.objects.create(
+            company=self.company1, category=self.category1, name="Tiles"
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.delete(f"/product-categories/{self.category1.id}")
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.category1.refresh_from_db()
+        self.assertFalse(self.category1.is_deleted)
+
+
+class ProductSubcategoryViewTestCase(TestCase):
+    """
+    Integration test suite for ProductSubcategory endpoints (BE-032).
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+        self.superadmin = User.objects.create_superuser(
+            email="superadmin2@example.com", name="Super Admin", password="StrongPassword123!"
+        )
+        self.superadmin_token = str(PlatformAdminAccessToken.for_user(self.superadmin))
+
+        self.member_user = User.objects.create_user(
+            email="alice2@company1.com", name="Alice Member", password="StrongPassword123!"
+        )
+        self.member_token = str(CompanyUserAccessToken.for_user(self.member_user))
+
+        self.non_member_user = User.objects.create_user(
+            email="bob2@outsider.com", name="Bob Outsider", password="StrongPassword123!"
+        )
+        self.non_member_token = str(CompanyUserAccessToken.for_user(self.non_member_user))
+
+        self.company1 = Company.objects.create(name="Studio One", status=CompanyStatus.ACTIVE)
+        self.company2 = Company.objects.create(name="Studio Two", status=CompanyStatus.ACTIVE)
+
+        CompanyMembership.objects.create(
+            company=self.company1, user=self.member_user, status=CompanyMembershipStatus.ACTIVE
+        )
+
+        self.category1 = ProductCategory.objects.create(company=self.company1, name="Flooring")
+        self.category_c2 = ProductCategory.objects.create(company=self.company2, name="Furniture")
+
+        self.subcategory1 = ProductSubcategory.objects.create(
+            company=self.company1, category=self.category1, name="Tiles"
+        )
+        self.subcategory_c2 = ProductSubcategory.objects.create(
+            company=self.company2, category=self.category_c2, name="Sofas"
+        )
+
+    def _list_url(self, category_id):
+        return f"/product-categories/{category_id}/subcategories"
+
+    def _detail_url(self, subcategory_id):
+        return f"/product-subcategories/{subcategory_id}"
+
+    # --- Authentication / Authorization ---------------------------------
+
+    def test_unauthenticated_requests_fail_401(self):
+        response = self.client.get(self._list_url(self.category1.id))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_non_member_denied_403(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.non_member_token}")
+        response = self.client.get(self._list_url(self.category1.id))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_cross_tenant_category_returns_404_not_403(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.get(self._list_url(self.category_c2.id))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    # --- List / Create -------------------------------------------------------
+
+    def test_list_subcategories_for_category(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.get(self._list_url(self.category1.id))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()["data"]
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["name"], "Tiles")
+        self.assertEqual(data[0]["categoryId"], str(self.category1.id))
+
+    def test_create_subcategory_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.post(
+            self._list_url(self.category1.id), {"name": "Carpets"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.json()["data"]
+        self.assertEqual(data["name"], "Carpets")
+        self.assertEqual(data["categoryId"], str(self.category1.id))
+
+    def test_create_subcategory_validation_error_400(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.post(self._list_url(self.category1.id), {"name": "   "}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_subcategory_cross_tenant_category_404(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.post(
+            self._list_url(self.category_c2.id), {"name": "Injected"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_platform_admin_can_create_cross_tenant(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        response = self.client.post(
+            self._list_url(self.category1.id), {"name": "Admin Created"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    # --- Retrieve / Update / Delete (flat) --------------------------------
+
+    def test_get_subcategory_detail_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.get(self._detail_url(self.subcategory1.id))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["data"]["name"], "Tiles")
+
+    def test_cross_tenant_idor_get_subcategory_fails(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.get(self._detail_url(self.subcategory_c2.id))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_update_subcategory_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.patch(
+            self._detail_url(self.subcategory1.id), {"name": "Renamed"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["data"]["name"], "Renamed")
+
+    def test_cross_tenant_idor_patch_subcategory_fails(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.patch(
+            self._detail_url(self.subcategory_c2.id), {"name": "Hacked"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.subcategory_c2.refresh_from_db()
+        self.assertEqual(self.subcategory_c2.name, "Sofas")
+
+    def test_delete_subcategory_soft_deletes(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.delete(self._detail_url(self.subcategory1.id))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.subcategory1.refresh_from_db()
+        self.assertTrue(self.subcategory1.is_deleted)
+
+    def test_cross_tenant_idor_delete_subcategory_fails(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.delete(self._detail_url(self.subcategory_c2.id))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.subcategory_c2.refresh_from_db()
+        self.assertFalse(self.subcategory_c2.is_deleted)
