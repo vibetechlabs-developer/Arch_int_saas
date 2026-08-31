@@ -114,6 +114,28 @@ class ProjectListFilterServiceTestCase(TestCase):
         result = ProjectService.list_projects(company_id=self.company.id, ordering="not_a_field")
         self.assertCountEqual(list(result), [self.project_draft, self.project_planning])
 
+    def test_ordering_is_deterministic_when_created_at_ties(self):
+        """
+        Regression test (BE-030) forcing the exact collision that caused
+        the original flake: two rows sharing an identical created_at
+        (bypassing auto_now_add via .update(), since the normal create
+        path can't reliably reproduce an OS-clock-resolution collision).
+        Without the "id" tie-breaker selectors.list_projects added in
+        BE-028, this ordering would be undefined and could vary per call.
+        """
+        tied_timestamp = self.project_draft.created_at
+        Project.objects.filter(
+            id__in=[self.project_draft.id, self.project_planning.id]
+        ).update(created_at=tied_timestamp)
+
+        first_call = list(ProjectService.list_projects(company_id=self.company.id))
+        second_call = list(ProjectService.list_projects(company_id=self.company.id))
+
+        self.assertEqual(first_call, second_call)
+        self.assertEqual(
+            {p.id for p in first_call}, {self.project_draft.id, self.project_planning.id}
+        )
+
 
 class ProjectListFilterEndpointTestCase(TestCase):
     """

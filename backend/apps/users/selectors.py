@@ -42,4 +42,9 @@ def list_roles(
         )
 
     order_field = ordering if ordering in VALID_ORDER_FIELDS else "-created_at"
-    return queryset.order_by(order_field)
+    # "id" tie-breaker (BE-030, mirrors the identical fix apps.projects
+    # made in BE-028): without it, two rows whose order_field value ties
+    # (most commonly created_at, which can collide under coarse OS clock
+    # resolution) have no defined relative order and can come back
+    # differently across calls.
+    return queryset.order_by(order_field, "id")

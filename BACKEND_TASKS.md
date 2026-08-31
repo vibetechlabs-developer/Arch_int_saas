@@ -571,7 +571,7 @@ _(Renumbered 2026-08-27: originally BE-021–BE-044. BE-021 collided with the Sp
 
 _(Renumbered again 2026-08-27, BE-025 onward: inserted "BE-025 – Project CRUD" — Sprint 2 had given Client both a Module task (BE-022) and a separate CRUD task (BE-023), but Project only got Module (BE-024) with no CRUD task before jumping to Members. Project Members cannot be meaningfully built without Project creation/retrieval existing first. Every ID from the old BE-025 onward shifted forward by one to make room; Sprints 3–6 shifted by one accordingly (Sprint 3 now starts at BE-031, Sprint 6 now ends at BE-046). No code references any of the shifted IDs — confirmed by search before renumbering.)_
 
-Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025, BE-026, BE-027, BE-028, BE-029 Review; BE-030 Todo)
+Status: In Progress — all tasks implemented (BE-022, BE-023, BE-024 Done; BE-025–BE-030 Review, awaiting Backend Lead approval)
 
 ---
 
@@ -771,6 +771,32 @@ Depends On
 Depends On
 
 - BE-028 (Project Filters)
+
+---
+
+### BE-030 – CRM Tests
+
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Scope:** the final Sprint 2 stabilization pass across Client + Project — no doc gives "CRM Tests" a more specific scope than its title, so this task was scoped conservatively as verification/hardening, not new features: (1) fix the one concrete defect flagged during BE-028 and (2) run the full backend suite as a final sign-off gate for the sprint. No new endpoints, no new business rules.
+
+**Real bug fixed across three more modules:** BE-028 found and fixed a missing ordering tie-breaker in `apps/projects/selectors.py::list_projects` (`order_by(order_field)` with no secondary key means two rows whose `order_field` value ties — most commonly `created_at`, which can collide under coarse OS clock resolution — have no defined relative order and can come back differently across calls) and flagged that `apps/clients/selectors.py::list_clients` and `apps/users/selectors.py::list_roles` shared the identical pattern. Grepped the full backend for every other occurrence of the same `order_by(order_field)` call and found one more: `apps/company/selectors.py::list_companies`. Fixed all three the same way — append `"id"` as an unconditional secondary sort key. Zero behavior change for the normal case (distinct `order_field` values); only affects the previously-undefined tie case.
+
+**Regression coverage added for the fix, not just the original flake:** rather than rely on naturally-occurring timestamp collisions (as the original BE-028 flake did), each new test forces the exact collision via `.update(created_at=<shared value>)` (bypassing `auto_now_add`, which only fires on `.create()`/`.save()`) and asserts the same query returns the same result twice — `apps/clients/tests/test_ordering_tiebreak.py`, `apps/users/tests/test_role_ordering_tiebreak.py`, `apps/company/tests/test_ordering_tiebreak.py`, plus one added to `apps/projects/tests/test_filters.py` for Project itself (BE-028 never got a deterministic forced-tie test of its own — only the accidental flake that led to the fix).
+
+**No other findings from the stabilization pass:** re-ran `manage.py check`, `makemigrations --check --dry-run`, and `spectacular --fail-on-warn` — all clean, no drift accumulated across BE-022–029. Full backend suite re-verified green end-to-end as the sprint-closing gate.
+
+**Sprint 2 status:** every task BE-022–BE-030 is now implemented, tested, and documented at **Review** status. Per this file's standing rule ("never self-mark Done — only the user can approve a task to Done"), Sprint 2 itself is not marked closed here; that requires explicit Backend Lead review and approval of the outstanding Review-status tasks, the same as every individual task above.
+
+**Tests:** 4 new (one per affected app, listed above). Full backend suite: **512 passed, 0 failed** (was 508 after BE-029). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected (ordering is a query-time concern, no schema change). `spectacular --fail-on-warn`: clean (no endpoint changes in this task).
+
+Depends On
+
+- BE-029 (Project Audit Logs)
 
 ---
 

@@ -37,4 +37,7 @@ def list_companies(
         )
 
     order_field = ordering if ordering in VALID_ORDER_FIELDS else "-created_at"
-    return queryset.order_by(order_field)
+    # "id" tie-breaker (BE-030 stabilization pass, same class of bug found
+    # and fixed in apps.projects during BE-028): without it, two rows
+    # whose order_field value ties have no defined relative order.
+    return queryset.order_by(order_field, "id")
