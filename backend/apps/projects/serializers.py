@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.projects.models import Project, ProjectMember
+from apps.projects.models import Project, ProjectMember, ProjectStatus
 
 
 class ProjectSerializer(serializers.ModelSerializer):
@@ -88,6 +88,18 @@ class ProjectCreateSerializer(serializers.Serializer):
         if not cleaned:
             raise serializers.ValidationError("Project name cannot be blank or empty.")
         return cleaned
+
+
+class ProjectStatusTransitionSerializer(serializers.Serializer):
+    """
+    Input serializer for `PATCH /projects/{projectId}/status` (BE-027).
+    Only validates that `status` is one of the 11 documented
+    ProjectStatus values — whether that specific transition is reachable
+    from the project's *current* status is ProjectService.transition_status's
+    job (a 409 state conflict, not a 400 validation error).
+    """
+
+    status = serializers.ChoiceField(choices=ProjectStatus.choices, required=True)
 
 
 class ProjectMemberSerializer(serializers.ModelSerializer):

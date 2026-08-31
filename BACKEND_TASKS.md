@@ -571,7 +571,7 @@ _(Renumbered 2026-08-27: originally BE-021–BE-044. BE-021 collided with the Sp
 
 _(Renumbered again 2026-08-27, BE-025 onward: inserted "BE-025 – Project CRUD" — Sprint 2 had given Client both a Module task (BE-022) and a separate CRUD task (BE-023), but Project only got Module (BE-024) with no CRUD task before jumping to Members. Project Members cannot be meaningfully built without Project creation/retrieval existing first. Every ID from the old BE-025 onward shifted forward by one to make room; Sprints 3–6 shifted by one accordingly (Sprint 3 now starts at BE-031, Sprint 6 now ends at BE-046). No code references any of the shifted IDs — confirmed by search before renumbering.)_
 
-Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025, BE-026 Review; BE-027–BE-030 Todo)
+Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025, BE-026, BE-027 Review; BE-028–BE-030 Todo)
 
 ---
 
@@ -697,6 +697,32 @@ Depends On
 Depends On
 
 - BE-025 (Project CRUD)
+
+---
+
+### BE-027 – Project Workflow
+
+**Status:** Review
+
+**Priority:** Critical
+
+**Owner:** Backend Team
+
+**Open documentation gap, resolved via Backend Lead decision (AskUserQuestion, 2026-08-31):** neither `CLAUDE.md` nor `Project_API.md` specify whether the status chain allows backward moves or step-skipping, which statuses can side-transition to On Hold/Cancelled, or what a resumed-from-On-Hold project transitions back to — only `Project_API.md`'s note that transitions "should be validated server-side against the allowed lifecycle graph... not freely settable to any value." Backend Lead decided: (1) the main chain (`Draft→Planning→Design→Quotation→Approved→Execution→Quality Check→Handover→Completed`) is **forward-only, one step at a time** — no skipping, no backward moves; (2) **On Hold and Cancelled are reachable from any non-terminal status**, including from Draft and from each other (On Hold→Cancelled); (3) **On Hold resumes only to the exact status the project was in immediately before it was put on hold** — not to any arbitrary caller-chosen status.
+
+**Implementation notes:** The transition graph is a pure function, `get_allowed_next_statuses(current_status, status_before_hold="")` in `apps/projects/models.py`, built from a `MAIN_CHAIN_STATUSES` tuple and a derived `NEXT_MAIN_CHAIN_STATUS` map — no DB access, directly unit-testable. `TERMINAL_PROJECT_STATUSES` (COMPLETED, CANCELLED, from BE-024) have no outgoing transitions at all. A new `Project.status_before_hold` field (`CharField`, blank/default `""`, **not exposed in `ProjectSerializer`** — internal bookkeeping only, not part of `Project_API.md`'s documented response shape) records the pre-hold status; `ProjectService.transition_status()` sets it when entering `ON_HOLD` and clears it when leaving `ON_HOLD` (to any target, including Cancelled). Migration `apps/projects/migrations/0003_project_status_before_hold.py`.
+
+**Endpoint:** `PATCH /projects/{id}/status`, matching `Project_API.md` exactly (minus the `/companies/{companyId}` prefix, same established deviation as every other endpoint). Implemented as `ProjectViewSet.status_transition`, a DRF `@action` on the existing ViewSet (fits cleanly since it needs only the existing `pk` lookup, unlike BE-026's team endpoints) — manually wired in `urls.py` (this project doesn't use a DRF router). `ProjectStatusTransitionSerializer` validates `status` is one of the 11 documented enum values (400 if not); `ProjectService.transition_status()` then checks reachability from the project's *current* status and raises `ConflictError` (409, per `Error_Handling.md`'s state-conflict taxonomy) if the requested transition isn't in the allowed set — a deliberately different status code from "bad input", since the same target value can be valid or invalid depending on where the project currently is. Reuses `ProjectPermission`/`ObjectPermission404Mixin` unchanged — cross-tenant `projectId` 404s, matching every other Project endpoint.
+
+**No audit logging in this task:** mirrors every prior Project task's deferral — transition audit logging (an explicit item in `CLAUDE.md`'s Audit Trail section) is BE-029's scope.
+
+**Doc corrections made in passing:** `ProjectStatus`'s docstring still said "the allowed-transition graph... [is] BE-027's responsibility, not implemented here" as a forward reference — updated to point at `get_allowed_next_statuses` now that it exists.
+
+**Tests:** 25 new, all in `apps/projects/tests/test_workflow.py`. `GetAllowedNextStatusesTestCase` ×9 (pure function, no DB): terminal statuses have zero transitions, Draft's exact allowed set, no-skip-ahead, no-backward-move, Handover→Completed reachable, every main-chain status can reach Cancelled, On-Hold-without-recorded-prior only allows Cancelled, On-Hold-with-recorded-prior allows exactly {that status, Cancelled}, On-Hold cannot resume to an unrecorded status. `ProjectTransitionServiceTestCase` ×9: valid forward transition, skip-ahead rejected (409), backward-move rejected (409), terminal-status rejects everything, hold-then-resume round-trip (asserts `status_before_hold` set then cleared), hold-cannot-resume-to-different-status, hold-can-be-cancelled, Draft-can-be-held-and-resumed, cross-tenant transition raises `NotFound`. `ProjectStatusEndpointTestCase` ×7: 401 unauthenticated, valid transition 200, invalid transition 409, garbage status value 400, missing status 400, cross-tenant project 404, full hold/resume round-trip via the HTTP endpoint. Full `apps/projects` suite: **119 passed** (was 94 after BE-026). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected after generating `0003_project_status_before_hold.py`. `spectacular --fail-on-warn`: clean; confirmed `/projects/{id}/status/` present in the generated schema.
+
+Depends On
+
+- BE-026 (Project Members)
 
 ---
 

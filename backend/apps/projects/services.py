@@ -7,7 +7,7 @@ from rest_framework import exceptions as drf_exceptions
 from apps.clients.services import ClientService
 from apps.common.exceptions import ConflictError
 from apps.projects import selectors, validators
-from apps.projects.models import Project, ProjectMember
+from apps.projects.models import Project, ProjectMember, ProjectStatus, get_allowed_next_statuses
 from apps.projects.repositories import ProjectMemberRepository, ProjectRepository
 
 
@@ -185,6 +185,41 @@ class ProjectService:
         with transaction.atomic():
             project = cls.get_project_by_id(project_id, company_id=company_id)
             ProjectRepository.soft_delete(project)
+
+    @classmethod
+    def transition_status(
+        cls,
+        project_id: str | uuid.UUID,
+        target_status: str,
+        company_id: Optional[str | uuid.UUID] = None,
+    ) -> Project:
+        """
+        Transition a Project's status per the BE-027 transition graph
+        (get_allowed_next_statuses). Raises ConflictError (409) if
+        target_status is not reachable from the project's current status
+        -- this is a state-conflict, not a bad-input error (target_status
+        itself is already validated as a real ProjectStatus value by
+        ProjectStatusTransitionSerializer before this is called).
+        """
+        with transaction.atomic():
+            project = cls.get_project_by_id(project_id, company_id=company_id)
+            current_status = project.status
+
+            allowed = get_allowed_next_statuses(current_status, project.status_before_hold)
+            if target_status not in allowed:
+                raise ConflictError(
+                    f"Cannot transition project from '{current_status}' to '{target_status}'."
+                )
+
+            fields: Dict[str, Any] = {"status": target_status}
+            if target_status == ProjectStatus.ON_HOLD:
+                fields["status_before_hold"] = current_status
+            elif current_status == ProjectStatus.ON_HOLD:
+                fields["status_before_hold"] = ""
+
+            project = ProjectRepository.save(project, fields)
+
+            return project
 
 
 class ProjectMemberService:

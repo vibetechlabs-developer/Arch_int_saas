@@ -7,9 +7,9 @@ from apps.common.models import BaseModel
 class ProjectStatus(models.TextChoices):
     """
     Project lifecycle status (01_Business/FRS.md §10, CLAUDE.md "Project
-    Status Lifecycle"). BE-024 defines this enum and its default only —
-    the allowed-transition graph, transition authorization, and transition
-    audit logging are BE-027's responsibility, not implemented here.
+    Status Lifecycle"). BE-024 defined this enum and its default only;
+    the allowed-transition graph is `get_allowed_next_statuses` below
+    (BE-027). Transition audit logging is BE-029's responsibility.
     """
 
     DRAFT = "draft", _("Draft")
@@ -31,6 +31,64 @@ class ProjectStatus(models.TextChoices):
 # other module duplicates these string literals (apps.clients.services
 # imports this, not the other way around — see apps/projects/selectors.py).
 TERMINAL_PROJECT_STATUSES = (ProjectStatus.COMPLETED, ProjectStatus.CANCELLED)
+
+# The documented forward chain (CLAUDE.md "Project Status Lifecycle",
+# 01_Business/FRS.md §10). ON_HOLD and CANCELLED are side-states, not part
+# of this chain — see get_allowed_next_statuses below.
+MAIN_CHAIN_STATUSES = (
+    ProjectStatus.DRAFT,
+    ProjectStatus.PLANNING,
+    ProjectStatus.DESIGN,
+    ProjectStatus.QUOTATION,
+    ProjectStatus.APPROVED,
+    ProjectStatus.EXECUTION,
+    ProjectStatus.QUALITY_CHECK,
+    ProjectStatus.HANDOVER,
+    ProjectStatus.COMPLETED,
+)
+
+NEXT_MAIN_CHAIN_STATUS = {
+    MAIN_CHAIN_STATUSES[i]: MAIN_CHAIN_STATUSES[i + 1]
+    for i in range(len(MAIN_CHAIN_STATUSES) - 1)
+}
+
+
+def get_allowed_next_statuses(current_status: str, status_before_hold: str = "") -> set:
+    """
+    The BE-027 status transition graph (Backend Lead decisions,
+    2026-08-31, made via AskUserQuestion since neither CLAUDE.md nor
+    Project_API.md specify backward moves, step-skipping, or how On Hold
+    resumes):
+
+    1. Terminal statuses (COMPLETED, CANCELLED) have no outgoing
+       transitions at all.
+    2. Any other status may move to CANCELLED directly (side-transition
+       reachable from any non-terminal status, including ON_HOLD itself).
+    3. Every MAIN_CHAIN_STATUSES status except ON_HOLD may also move one
+       step forward to its documented successor — forward-only, one step
+       at a time; no skipping, no backward moves.
+    4. Every non-ON_HOLD, non-terminal status may also move to ON_HOLD.
+    5. From ON_HOLD, the only non-CANCELLED target allowed is
+       `status_before_hold` — the exact status the project was in
+       immediately before it was put on hold (recorded by
+       ProjectService.transition_status when entering ON_HOLD). ON_HOLD
+       does not expose "resume to any status".
+    """
+    if current_status in TERMINAL_PROJECT_STATUSES:
+        return set()
+
+    allowed = {ProjectStatus.CANCELLED}
+
+    if current_status == ProjectStatus.ON_HOLD:
+        if status_before_hold:
+            allowed.add(status_before_hold)
+    else:
+        allowed.add(ProjectStatus.ON_HOLD)
+        next_status = NEXT_MAIN_CHAIN_STATUS.get(current_status)
+        if next_status:
+            allowed.add(next_status)
+
+    return allowed
 
 
 class Project(BaseModel):
@@ -89,6 +147,22 @@ class Project(BaseModel):
         default=ProjectStatus.DRAFT,
         db_index=True,
         help_text="Project lifecycle status.",
+    )
+    status_before_hold = models.CharField(
+        max_length=20,
+        choices=ProjectStatus.choices,
+        blank=True,
+        default="",
+        help_text=(
+            "Internal bookkeeping only (not part of the documented API "
+            "surface) — the status this project was in immediately before "
+            "it was last moved to ON_HOLD. ProjectService.transition_status "
+            "(BE-027) sets this on entering ON_HOLD and clears it on "
+            "leaving ON_HOLD; it is the only valid resume target per "
+            "get_allowed_next_statuses above (Backend Lead decision, "
+            "2026-08-31: On Hold resumes only to its exact prior status, "
+            "not to an arbitrary caller-chosen one)."
+        ),
     )
     priority = models.CharField(
         max_length=50,

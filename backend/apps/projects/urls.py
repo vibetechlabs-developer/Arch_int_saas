@@ -18,12 +18,23 @@ project_detail = ProjectViewSet.as_view(
     }
 )
 
+project_status = ProjectViewSet.as_view(
+    {
+        "patch": "status_transition",
+    }
+)
+
 urlpatterns = [
     re_path(r"^projects/?$", project_list, name="project-list"),
     re_path(
         r"^projects/(?P<pk>[0-9a-fA-F-]{36})/?$",
         project_detail,
         name="project-detail",
+    ),
+    re_path(
+        r"^projects/(?P<pk>[0-9a-fA-F-]{36})/status/?$",
+        project_status,
+        name="project-status",
     ),
     re_path(
         r"^projects/(?P<project_id>[0-9a-fA-F-]{36})/team/?$",

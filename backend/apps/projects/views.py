@@ -1,5 +1,6 @@
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -15,6 +16,7 @@ from apps.projects.serializers import (
     ProjectMemberCreateSerializer,
     ProjectMemberSerializer,
     ProjectSerializer,
+    ProjectStatusTransitionSerializer,
     ProjectUpdateSerializer,
 )
 from apps.projects.services import ProjectMemberService, ProjectService
@@ -64,11 +66,11 @@ from apps.users.permissions import is_platform_admin
 )
 class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     """
-    ViewSet for Project CRUD operations (BE-025). Mirrors
-    apps.clients.views.ClientViewSet exactly — orchestration only, all
-    business logic lives in ProjectService. No status-transition endpoint
-    here (BE-027), no search/filter query params here (BE-028), no audit
-    calls here (BE-029). Team/member endpoints (BE-026) live below in
+    ViewSet for Project CRUD operations (BE-025), plus the status
+    transition action (BE-027). Mirrors apps.clients.views.ClientViewSet —
+    orchestration only, all business logic lives in ProjectService. No
+    search/filter query params here (BE-028), no audit calls here
+    (BE-029). Team/member endpoints (BE-026) live below in
     ProjectTeamView/ProjectTeamMemberView — not on this ViewSet, since
     their compound URL (`/projects/{projectId}/team/{userId}`) doesn't fit
     a single-lookup-field @action.
@@ -165,6 +167,35 @@ class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         return ApiResponse.success(
             data={"message": "Project deleted successfully."},
             request_id=request_id,
+        )
+
+    @extend_schema(
+        summary="Transition Project Status",
+        description=(
+            "Transition a project to a new lifecycle status. Only "
+            "transitions reachable per the documented status graph are "
+            "allowed (409 if not); freely setting any status is not "
+            "supported (Project_API.md's own documented constraint)."
+        ),
+        request=ProjectStatusTransitionSerializer,
+        responses={status.HTTP_200_OK: ProjectSerializer},
+        tags=["Project"],
+    )
+    @action(detail=True, methods=["patch"], url_path="status")
+    def status_transition(self, request: Request, pk: str = None) -> Response:
+        project = ProjectService.get_project_by_id(pk)
+        self.check_object_permissions(request, project)
+
+        serializer = ProjectStatusTransitionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        updated_project = ProjectService.transition_status(
+            project_id=pk,
+            target_status=serializer.validated_data["status"],
+        )
+        response_data = ProjectSerializer(updated_project).data
+        return ApiResponse.success(
+            data=response_data, request_id=getattr(request, "request_id", None)
         )
 
 
