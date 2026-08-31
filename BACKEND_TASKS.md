@@ -571,7 +571,7 @@ _(Renumbered 2026-08-27: originally BE-021–BE-044. BE-021 collided with the Sp
 
 _(Renumbered again 2026-08-27, BE-025 onward: inserted "BE-025 – Project CRUD" — Sprint 2 had given Client both a Module task (BE-022) and a separate CRUD task (BE-023), but Project only got Module (BE-024) with no CRUD task before jumping to Members. Project Members cannot be meaningfully built without Project creation/retrieval existing first. Every ID from the old BE-025 onward shifted forward by one to make room; Sprints 3–6 shifted by one accordingly (Sprint 3 now starts at BE-031, Sprint 6 now ends at BE-046). No code references any of the shifted IDs — confirmed by search before renumbering.)_
 
-Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025 Review; BE-026–BE-030 Todo)
+Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025, BE-026 Review; BE-027–BE-030 Todo)
 
 ---
 
@@ -669,6 +669,34 @@ Depends On
 Depends On
 
 - BE-024 (Project Module)
+
+---
+
+### BE-026 – Project Members
+
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Implementation notes:** New `ProjectMember(BaseModel)` model and full team management, implementing the documented deviation approved in BE-025 planning (see `03_Database/Migration_Plan.md` "Deviations From This Plan"). Fields: `company` FK (CASCADE, required, denormalized from `project.company` for tenant-scoped queries without a join — same reasoning `CompanyMembership` already applies to every tenant-owned table), `project` FK (CASCADE, required, `related_name="members"`), `user` FK (**SET_NULL**, nullable — preserves historical membership rows if a user is ever hard-deleted, mirroring `Project.assigned_to`'s own SET_NULL choice), `assigned_by` FK (SET_NULL, nullable — records who added the member, if known). No project-specific role field — not documented anywhere in `01_Business/FRS.md`/`Database_Schema.md`/`Project_API.md`, so not invented. Soft-delete-aware `UniqueConstraint(project, user, condition=deleted_at__isnull=True)` — mirrors `CompanyMembership.unique_active_company_user_membership` exactly — prevents duplicate active memberships while still allowing a removed-then-re-added member to get a fresh row. `db_table = "project_member"`. Migration `apps/projects/migrations/0002_projectmember.py`.
+
+**Additive to `assigned_to`, not a replacement (Backend Lead decision, BE-025/026 planning):** `Project.assigned_to` remains the single documented point-of-contact field; `ProjectMember` is the separate multi-user "Team" concept `Project_API.md`'s `/team` endpoints imply. The two are entirely independent — adding/removing a team member never touches `assigned_to`, and changing `assigned_to` never touches team membership (verified by a dedicated test).
+
+**Endpoints:** `GET/POST /projects/{projectId}/team`, `DELETE /projects/{projectId}/team/{userId}` — matches `Project_API.md`'s Team table exactly, minus the `/companies/{companyId}` prefix (same established deviation as every other module: path-supplied `companyId` is never trusted). Implemented as two plain `APIView` classes (`ProjectTeamView`, `ProjectTeamMemberView`), not `@action`s on `ProjectViewSet` — a `/team/{userId}` DELETE has a second path parameter that doesn't fit DRF's single-lookup-field `@action` routing. Both reuse `ProjectPermission` directly (no new `ProjectMemberPermission` class) since object-level authorization here is exactly "does the caller belong to this Project's company" — the identical check `ProjectViewSet` already performs; a duplicate permission class would add no behavior. Both views fetch the parent Project via `ProjectService.get_project_by_id(project_id)` (no company filter) then call `self.check_object_permissions(request, project)`, the same pattern `ProjectViewSet.retrieve` uses — a cross-tenant `projectId` 404s instead of 403ing (`Error_Handling.md` §5), verified by tests.
+
+**Validation reuses BE-025's assignee invariant:** adding a team member calls the same `validators.validate_assignee_company_membership(user_id, project.company_id)` BE-025 built for `assigned_to` — a team member must be an ACTIVE `CompanyMembership` of the project's company; wrong-company or revoked-membership users are rejected with 400. Duplicate active membership is a 409 `ConflictError` (state conflict, not bad input) with the same pre-check-plus-`IntegrityError`-backstop pattern `RoleService.create_role` established for its own uniqueness constraint (TOCTOU-safe). Removing a nonexistent membership is 404, not a silent no-op.
+
+**No audit logging in this task:** mirrors BE-024/025's deferral — Project's own audit integration (including membership changes) is BE-029's explicit scope.
+
+**Doc corrections made in passing:** `apps/projects/models.py`'s BE-024-era docstrings still referenced the pre-second-renumbering task IDs (e.g. "transition logging is BE-026's" when Workflow is now BE-027) — corrected while touching this file, no behavior change.
+
+**Tests:** 35 new. `apps/projects/tests/test_models.py` +11 (`ProjectMemberModelTestCase`): full-field creation, `assigned_by` optional, str repr, duplicate-active-membership `IntegrityError`, re-add-after-soft-delete succeeds, soft-delete lifecycle, `user`/`assigned_by` SET_NULL on hard delete, Project cascade-delete removes membership rows, reverse accessor from `project.members`. `apps/projects/tests/test_members.py` (new) ×24: service-level (add success with/without `assigned_by`, wrong-company/revoked-membership/nonexistent-user rejected, duplicate-active `ConflictError`, re-add-after-removal, list, remove success, remove-nonexistent `NotFound`, assigned_to/team independence) and endpoint-level (401/403, cross-tenant project 404 on list/add/remove, empty list, add success response shape, add-then-list, wrong-company 400, duplicate 409, missing `userId` 400, platform-admin cross-tenant allowed, remove success and post-removal list reflects it, remove-nonexistent 404). Full `apps/projects` suite: **94 passed** (was 59 after BE-025). Full backend suite: **460 passed, 0 failed** (was 425 after BE-025). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected after generating `0002_projectmember.py`. `spectacular --fail-on-warn`: clean.
+
+Depends On
+
+- BE-025 (Project CRUD)
 
 ---
 

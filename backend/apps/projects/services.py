@@ -1,13 +1,14 @@
 import uuid
 from typing import Any, Dict, Optional
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
 from apps.clients.services import ClientService
+from apps.common.exceptions import ConflictError
 from apps.projects import selectors, validators
-from apps.projects.models import Project
-from apps.projects.repositories import ProjectRepository
+from apps.projects.models import Project, ProjectMember
+from apps.projects.repositories import ProjectMemberRepository, ProjectRepository
 
 
 class ProjectService:
@@ -184,3 +185,76 @@ class ProjectService:
         with transaction.atomic():
             project = cls.get_project_by_id(project_id, company_id=company_id)
             ProjectRepository.soft_delete(project)
+
+
+class ProjectMemberService:
+    """
+    Business logic for Project team membership (BE-026). Tenant/object
+    authorization for the parent Project is enforced at the view layer
+    (ProjectService.get_project_by_id + ObjectPermission404Mixin, the same
+    pattern ProjectViewSet already uses) — every method here takes an
+    already-authorized `project` instance, not a bare ID, so this service
+    never needs its own tenant-resolution logic. No AuditLogService calls
+    here — Project's audit integration (including membership changes) is
+    BE-029's explicit scope.
+    """
+
+    @classmethod
+    def list_members(cls, project: Project) -> QuerySet[ProjectMember]:
+        return ProjectMemberRepository.list_for_project(project.id)
+
+    @classmethod
+    def add_member(
+        cls,
+        project: Project,
+        user_id: str | uuid.UUID,
+        assigned_by_id: Optional[str | uuid.UUID] = None,
+    ) -> ProjectMember:
+        """
+        Add a user to the project's team.
+
+        Reuses validators.validate_assignee_company_membership — the same
+        invariant Project.assigned_to already enforces (BE-025): a team
+        member must be an ACTIVE CompanyMembership of the project's
+        company. Duplicate active membership is a 409 ConflictError, not a
+        validation error, since it's a state conflict rather than bad
+        input (mirrors RoleService.create_role's uniqueness handling,
+        including the IntegrityError backstop for the TOCTOU race).
+        """
+        with transaction.atomic():
+            validators.validate_assignee_company_membership(user_id, project.company_id)
+            user = ProjectMemberRepository.get_user_by_id(user_id)
+
+            if ProjectMemberRepository.active_membership_exists(project.id, user.id):
+                raise ConflictError("This user is already a member of this project's team.")
+
+            assigned_by = (
+                ProjectMemberRepository.get_user_by_id(assigned_by_id) if assigned_by_id else None
+            )
+
+            try:
+                with transaction.atomic():
+                    member = ProjectMemberRepository.create(
+                        company=project.company,
+                        project=project,
+                        user=user,
+                        assigned_by=assigned_by,
+                    )
+            except IntegrityError as exc:
+                raise ConflictError(
+                    "This user is already a member of this project's team."
+                ) from exc
+
+            return member
+
+    @classmethod
+    def remove_member(cls, project: Project, user_id: str | uuid.UUID) -> None:
+        """
+        Remove (soft-delete) a user from the project's team. Raises
+        NotFound if no active membership exists for this user on this
+        project — matching Error_Handling.md's 404 taxonomy for "acting on
+        something that isn't there", not a 409.
+        """
+        with transaction.atomic():
+            member = ProjectMemberRepository.get_active_membership(project.id, user_id)
+            ProjectMemberRepository.soft_delete(member)

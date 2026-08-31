@@ -3,6 +3,7 @@ from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.common.pagination import StandardPagination
 from apps.common.responses import ApiResponse
@@ -11,10 +12,12 @@ from apps.projects.models import Project
 from apps.projects.permissions import ProjectPermission
 from apps.projects.serializers import (
     ProjectCreateSerializer,
+    ProjectMemberCreateSerializer,
+    ProjectMemberSerializer,
     ProjectSerializer,
     ProjectUpdateSerializer,
 )
-from apps.projects.services import ProjectService
+from apps.projects.services import ProjectMemberService, ProjectService
 from apps.users.permissions import is_platform_admin
 
 
@@ -64,8 +67,11 @@ class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     ViewSet for Project CRUD operations (BE-025). Mirrors
     apps.clients.views.ClientViewSet exactly — orchestration only, all
     business logic lives in ProjectService. No status-transition endpoint
-    here (BE-027), no team/member endpoints here (BE-026), no
-    search/filter query params here (BE-028), no audit calls here (BE-029).
+    here (BE-027), no search/filter query params here (BE-028), no audit
+    calls here (BE-029). Team/member endpoints (BE-026) live below in
+    ProjectTeamView/ProjectTeamMemberView — not on this ViewSet, since
+    their compound URL (`/projects/{projectId}/team/{userId}`) doesn't fit
+    a single-lookup-field @action.
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
@@ -159,4 +165,86 @@ class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         return ApiResponse.success(
             data={"message": "Project deleted successfully."},
             request_id=request_id,
+        )
+
+
+class ProjectTeamView(ObjectPermission404Mixin, APIView):
+    """
+    `GET`/`POST /projects/{projectId}/team` (BE-026). Reuses
+    ProjectPermission directly — object-level authorization here is
+    fundamentally "does the caller belong to this Project's company",
+    the same check ProjectViewSet already performs; a separate
+    ProjectMemberPermission class would just duplicate it. Fetches the
+    parent Project exactly like ProjectViewSet.retrieve does (bare
+    get_project_by_id + check_object_permissions), so a cross-tenant
+    projectId 404s instead of 403ing, per Error_Handling.md §5.
+    """
+
+    permission_classes = [IsAuthenticated, ProjectPermission]
+
+    @extend_schema(
+        summary="List Project Team",
+        description="List the users assigned to this project's team.",
+        responses={status.HTTP_200_OK: ProjectMemberSerializer(many=True)},
+        tags=["Project"],
+    )
+    def get(self, request: Request, project_id: str = None) -> Response:
+        project = ProjectService.get_project_by_id(project_id)
+        self.check_object_permissions(request, project)
+
+        members = ProjectMemberService.list_members(project)
+        serializer = ProjectMemberSerializer(members, many=True)
+        return ApiResponse.success(
+            data=serializer.data, request_id=getattr(request, "request_id", None)
+        )
+
+    @extend_schema(
+        summary="Add Project Team Member",
+        description="Assign a user to this project's team. The user must be an active member of the project's company.",
+        request=ProjectMemberCreateSerializer,
+        responses={status.HTTP_201_CREATED: ProjectMemberSerializer},
+        tags=["Project"],
+    )
+    def post(self, request: Request, project_id: str = None) -> Response:
+        project = ProjectService.get_project_by_id(project_id)
+        self.check_object_permissions(request, project)
+
+        serializer = ProjectMemberCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        member = ProjectMemberService.add_member(
+            project=project,
+            user_id=serializer.validated_data["user_id"],
+            assigned_by_id=getattr(request.user, "id", None),
+        )
+
+        response_data = ProjectMemberSerializer(member).data
+        return ApiResponse.created(
+            data=response_data, request_id=getattr(request, "request_id", None)
+        )
+
+
+class ProjectTeamMemberView(ObjectPermission404Mixin, APIView):
+    """
+    `DELETE /projects/{projectId}/team/{userId}` (BE-026). Same
+    parent-Project authorization pattern as ProjectTeamView.
+    """
+
+    permission_classes = [IsAuthenticated, ProjectPermission]
+
+    @extend_schema(
+        summary="Remove Project Team Member",
+        description="Remove a user from this project's team.",
+        responses={status.HTTP_200_OK: None},
+        tags=["Project"],
+    )
+    def delete(self, request: Request, project_id: str = None, user_id: str = None) -> Response:
+        project = ProjectService.get_project_by_id(project_id)
+        self.check_object_permissions(request, project)
+
+        ProjectMemberService.remove_member(project=project, user_id=user_id)
+
+        return ApiResponse.success(
+            data={"message": "Team member removed successfully."},
+            request_id=getattr(request, "request_id", None),
         )

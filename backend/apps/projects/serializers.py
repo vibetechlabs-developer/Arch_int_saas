@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.projects.models import Project
+from apps.projects.models import Project, ProjectMember
 
 
 class ProjectSerializer(serializers.ModelSerializer):
@@ -88,6 +88,51 @@ class ProjectCreateSerializer(serializers.Serializer):
         if not cleaned:
             raise serializers.ValidationError("Project name cannot be blank or empty.")
         return cleaned
+
+
+class ProjectMemberSerializer(serializers.ModelSerializer):
+    """
+    Serializer for ProjectMember (BE-026), camelCase, matching
+    ProjectSerializer's `assignedToName`-style read-only display
+    convenience pattern for `userName`/`assignedByName`.
+    """
+
+    projectId = serializers.UUIDField(source="project_id", read_only=True)
+    userId = serializers.UUIDField(source="user_id", read_only=True, allow_null=True)
+    userName = serializers.CharField(
+        source="user.name", read_only=True, allow_null=True, default=None
+    )
+    userEmail = serializers.CharField(
+        source="user.email", read_only=True, allow_null=True, default=None
+    )
+    assignedById = serializers.UUIDField(source="assigned_by_id", read_only=True, allow_null=True)
+    assignedByName = serializers.CharField(
+        source="assigned_by.name", read_only=True, allow_null=True, default=None
+    )
+    createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+
+    class Meta:
+        model = ProjectMember
+        fields = [
+            "id",
+            "projectId",
+            "userId",
+            "userName",
+            "userEmail",
+            "assignedById",
+            "assignedByName",
+            "createdAt",
+        ]
+        read_only_fields = fields
+
+
+class ProjectMemberCreateSerializer(serializers.Serializer):
+    """
+    Input serializer for adding a user to a project's team
+    (`POST /projects/{projectId}/team`, BE-026).
+    """
+
+    userId = serializers.UUIDField(source="user_id", required=True)
 
 
 class ProjectUpdateSerializer(serializers.Serializer):

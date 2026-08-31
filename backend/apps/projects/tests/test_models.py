@@ -1,11 +1,12 @@
 import uuid
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 from django.test import TestCase
 
 from apps.clients.models import Client
 from apps.company.models import Company, CompanyStatus
-from apps.projects.models import Project, ProjectStatus
+from apps.projects.models import Project, ProjectMember, ProjectStatus
 from apps.users.models import User
 
 
@@ -211,3 +212,105 @@ class ProjectModelTestCase(TestCase):
             i for i in Project._meta.indexes if i.name == "project_company_status_idx"
         )
         self.assertEqual(matching_index.fields, ["company", "status"])
+
+
+class ProjectMemberModelTestCase(TestCase):
+    """
+    Unit test suite for the ProjectMember domain model (BE-026).
+    """
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Test Company", status=CompanyStatus.ACTIVE)
+        self.client_obj = Client.objects.create(company=self.company, name="Jane Doe")
+        self.project = Project.objects.create(
+            company=self.company, client=self.client_obj, name="Kitchen Remodel"
+        )
+        self.user = User.objects.create_user(
+            email="member@example.com", name="Team Member", password="StrongPassword123!"
+        )
+        self.adder = User.objects.create_user(
+            email="adder@example.com", name="Adder", password="StrongPassword123!"
+        )
+
+    def test_membership_creation_with_all_fields(self):
+        member = ProjectMember.objects.create(
+            company=self.company, project=self.project, user=self.user, assigned_by=self.adder
+        )
+        self.assertIsInstance(member.id, uuid.UUID)
+        self.assertEqual(member.company_id, self.company.id)
+        self.assertEqual(member.project_id, self.project.id)
+        self.assertEqual(member.user_id, self.user.id)
+        self.assertEqual(member.assigned_by_id, self.adder.id)
+
+    def test_assigned_by_is_optional(self):
+        member = ProjectMember.objects.create(
+            company=self.company, project=self.project, user=self.user
+        )
+        self.assertIsNone(member.assigned_by)
+
+    def test_str_repr(self):
+        member = ProjectMember.objects.create(
+            company=self.company, project=self.project, user=self.user
+        )
+        self.assertEqual(str(member), f"{self.user.id} on {self.project.id}")
+
+    def test_duplicate_active_membership_raises_integrity_error(self):
+        ProjectMember.objects.create(company=self.company, project=self.project, user=self.user)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                ProjectMember.objects.create(
+                    company=self.company, project=self.project, user=self.user
+                )
+
+    def test_readding_after_soft_delete_succeeds(self):
+        first = ProjectMember.objects.create(
+            company=self.company, project=self.project, user=self.user
+        )
+        first.delete()
+
+        second = ProjectMember.objects.create(
+            company=self.company, project=self.project, user=self.user
+        )
+        self.assertIsNotNone(second.id)
+        self.assertNotEqual(first.id, second.id)
+
+    def test_soft_delete_lifecycle(self):
+        member = ProjectMember.objects.create(
+            company=self.company, project=self.project, user=self.user
+        )
+        member_id = member.id
+        member.delete()
+
+        self.assertFalse(ProjectMember.objects.filter(id=member_id).exists())
+        self.assertTrue(ProjectMember.all_objects.filter(id=member_id).exists())
+
+    def test_user_set_null_on_user_hard_delete(self):
+        member = ProjectMember.objects.create(
+            company=self.company, project=self.project, user=self.user
+        )
+        self.user.delete(hard=True)
+
+        member.refresh_from_db()
+        self.assertIsNone(member.user)
+
+    def test_assigned_by_set_null_on_user_hard_delete(self):
+        member = ProjectMember.objects.create(
+            company=self.company, project=self.project, user=self.user, assigned_by=self.adder
+        )
+        self.adder.delete(hard=True)
+
+        member.refresh_from_db()
+        self.assertIsNone(member.assigned_by)
+
+    def test_project_cascade_delete_removes_member(self):
+        member = ProjectMember.objects.create(
+            company=self.company, project=self.project, user=self.user
+        )
+        member_id = member.id
+        self.project.delete(hard=True)
+
+        self.assertFalse(ProjectMember.all_objects.filter(id=member_id).exists())
+
+    def test_reverse_accessor_from_project(self):
+        ProjectMember.objects.create(company=self.company, project=self.project, user=self.user)
+        self.assertEqual(self.project.members.count(), 1)

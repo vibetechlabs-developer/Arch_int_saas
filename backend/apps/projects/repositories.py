@@ -5,7 +5,7 @@ from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
 from apps.company.models import Company
-from apps.projects.models import Project
+from apps.projects.models import Project, ProjectMember
 from apps.users.models import User
 
 
@@ -61,3 +61,45 @@ class ProjectRepository:
             return User.objects.get(id=user_id)
         except (User.DoesNotExist, ValueError):
             raise drf_exceptions.ValidationError({"assignedTo": ["assignedTo user was not found."]})
+
+
+class ProjectMemberRepository:
+    """
+    Data-access layer for ProjectMember (BE-026). Mirrors ProjectRepository's
+    shape — a plain CRUD surface, all business rules (duplicate-membership
+    guard, company-membership validation) live in ProjectMemberService.
+    """
+
+    @staticmethod
+    def list_for_project(project_id: str | uuid.UUID) -> QuerySet[ProjectMember]:
+        return (
+            ProjectMember.objects.select_related("user", "assigned_by")
+            .filter(project_id=project_id)
+            .order_by("-created_at")
+        )
+
+    @staticmethod
+    def active_membership_exists(project_id: str | uuid.UUID, user_id: str | uuid.UUID) -> bool:
+        return ProjectMember.objects.filter(project_id=project_id, user_id=user_id).exists()
+
+    @staticmethod
+    def get_active_membership(project_id: str | uuid.UUID, user_id: str | uuid.UUID) -> ProjectMember:
+        try:
+            return ProjectMember.objects.get(project_id=project_id, user_id=user_id)
+        except (ProjectMember.DoesNotExist, ValueError):
+            raise drf_exceptions.NotFound("The specified team member was not found on this project.")
+
+    @staticmethod
+    def create(**fields: Any) -> ProjectMember:
+        return ProjectMember.objects.create(**fields)
+
+    @staticmethod
+    def soft_delete(member: ProjectMember) -> None:
+        member.delete()
+
+    @staticmethod
+    def get_user_by_id(user_id: str | uuid.UUID) -> User:
+        try:
+            return User.objects.get(id=user_id)
+        except (User.DoesNotExist, ValueError):
+            raise drf_exceptions.ValidationError({"userId": ["userId user was not found."]})
