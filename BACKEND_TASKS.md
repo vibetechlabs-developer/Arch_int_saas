@@ -802,22 +802,47 @@ Depends On
 
 # Sprint 3 – Product Catalog
 
+_(Renumbered 2026-08-31, Sprint 3 planning: dropped the standalone "BE-034 – Units" task — Migration_Plan.md's 013–015 (Group D) only cover product_category/product_subcategory/product; there is no separate `unit` table anywhere in the 27-migration plan, and FRS.md §11's `unit` is just a plain field on `product` with a documented 8-value enum. Backend Lead decided (AskUserQuestion, 2026-08-31) to fold the Unit enum into BE-033 (Products) rather than keep a task with no domain/table of its own. Every ID from the old BE-035 onward shifted back by one to close the gap; Sprints 4–6 shifted accordingly (Sprint 4 now BE-035–038, Sprint 5 now BE-039–041, Sprint 6 now BE-042–045). Confirmed via grep that no code references any of the old BE-034–046 IDs before renumbering.)_
+
 - BE-031 – Categories
 - BE-032 – Subcategories
 - BE-033 – Products
-- BE-034 – Units
-- BE-035 – Catalog APIs
+- BE-034 – Catalog APIs
 
-Status: Todo
+Status: In Progress (BE-031 Review; BE-032–BE-034 Todo)
+
+---
+
+### BE-031 – Categories
+
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Pre-implementation documentation audit (AskUserQuestion, 2026-08-31) found three real gaps, resolved by Backend Lead decision before any code was written:** (1) the tracker's standalone "BE-034 – Units" task had no corresponding table anywhere in `Migration_Plan.md` — folded into BE-033 as a `TextChoices` enum, Sprint 3 renumbered to 4 tasks (see the renumbering note above); (2) `BOQ_API.md`'s Product Catalog sketch documents no DELETE endpoint for Category/Subcategory/Product — decided to add standard soft-delete DELETE endpoints to all three anyway, consistent with every other module built in this codebase (Role/Client/Project all got one regardless of how thin their own API doc sketch was); (3) `Product.status` has zero documented values anywhere (unlike Company/Project's documented enums) — decided it will be an Active/Inactive `TextChoices` enum, to be built in BE-033. A fourth decision (block Category/Subcategory delete while active children exist, mirroring the Client-Project guard) is recorded here for BE-032/BE-033 to implement, since Category has no children of its own to guard against yet.
+
+**Implementation notes:** New `apps.products` app (per `00_Development_Standards/Folder_Structure.md` §2a — Categories, Subcategories, and Products all live in this one app, not three separate ones). `ProductCategory(BaseModel)`: `company` FK (CASCADE, required), `name` (required) — field set matches `Database_Schema.md`'s `product_category(id, company_id, name)` exactly, no invented uniqueness constraint (mirrors the Client precedent — not documented). Composite index `(company, name)`, named `product_cat_comp_name_idx` (Django's cross-DB 30-character index-name limit — `models.E034` — forced a shorter name than the `<table>_company_name_idx` pattern used elsewhere). Full CRUD mirroring `ClientViewSet`/`ClientService`/`ClientSerializer` exactly: flat `GET/POST /product-categories`, `GET/PATCH/PUT/DELETE /product-categories/{id}` (matching `BOQ_API.md`'s literal path, no `/companies/{companyId}` prefix per the established deviation). `ProductCategoryPermission` is the same coarse tenant-membership gate as every other module (`product.view`/`product.manage` permission codes are documented but no `Permission`/`RolePermission` model exists yet — standing Backend Lead decision, unchanged). Ordering (`?ordering=name/-name/created_at/-created_at/updated_at/-updated_at`) ships in this same task (unlike Project, which split CRUD/Filters into two tasks) — matches the Client/Role/Company precedent of including basic ordering in the CRUD task itself; the `"id"` tie-breaker (BE-030's finding) is applied from day one here, not retrofitted after a flake. No `search` param — Category has only one field (`name`), so a dedicated search would just duplicate an exact/`icontains` filter, and it isn't documented anyway.
+
+**Audit logging wired inline, not deferred:** unlike Project (which got its own dedicated BE-029 task), Sprint 3's task list has no separate "Product Audit Logs" task — this follows Client's BE-023 precedent instead, wiring `AuditLogService.record()` directly into create/update/delete within this same task. `ENTITY_FIELD_ALLOWLISTS["product_category"] = {"name"}` added to `apps/audit/validators.py`.
+
+**Deferred (documented, not a gap, mirrors BE-022/023/024's identical Client→Project deferral):** the "block delete if active Subcategories exist" guard can't be built until BE-032 (`ProductSubcategory`) exists — `soft_delete_category()` is unconditional in this task. BE-032 adds the guard the same way BE-024 added Client's.
+
+**Tests:** 51 new. `apps/products/tests/test_models.py` ×9: required-field creation, str repr, no-uniqueness-constraint confirmation, same-name-different-company allowed, tenant isolation via FK, soft-delete lifecycle + restore, cascade delete with Company, required-company enforcement, composite index exists. `test_services.py` ×17: create/get/list/update/soft-delete success and cross-tenant-scoping paths, duplicate-name-allowed, `resolve_create_target_company_id`/`list_categories_for_viewer` admin vs. non-admin branches, blank-name-rejected, audit row creation on create/update/delete. `test_views.py` ×25: 401/403 (including revoked membership), list scoping (member vs. platform-admin-sees-all), ordering, invalid-ordering 400, empty-list shape, soft-deleted exclusion, create (member/admin-with-companyId/admin-without-companyId-400/company-injection-403/validation-400), retrieve (success/cross-tenant-404/indistinguishable-from-nonexistent/admin-allowed), update (success/PUT-behaves-like-PATCH/cross-tenant-404/admin-allowed), delete (soft-deletes/cross-tenant-404/admin-allowed). Full `apps/products` suite: **51 passed, 0 failed**. `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected after generating `0001_initial.py`. `spectacular --fail-on-warn`: clean; confirmed `/product-categories/` and `/product-categories/{id}/` present in the generated schema, tagged "Product Catalog".
+
+Depends On
+
+- BE-021 (Multi-Tenant Resolution — reused directly, Product Catalog has no dependency on Client/Project per `Module_Dependency_Map.md`'s own note that "Product may be started in parallel... since Product's only real dependency is `company`")
 
 ---
 
 # Sprint 4 – BOQ
 
-- BE-036 – BOQ Module
-- BE-037 – BOQ Items
-- BE-038 – BOQ Calculations
-- BE-039 – BOQ APIs
+- BE-035 – BOQ Module
+- BE-036 – BOQ Items
+- BE-037 – BOQ Calculations
+- BE-038 – BOQ APIs
 
 Status: Todo
 
@@ -825,9 +850,9 @@ Status: Todo
 
 # Sprint 5 – Quotation
 
-- BE-040 – Quotation
-- BE-041 – Versioning
-- BE-042 – Approval Workflow
+- BE-039 – Quotation
+- BE-040 – Versioning
+- BE-041 – Approval Workflow
 
 Status: Todo
 
@@ -835,10 +860,10 @@ Status: Todo
 
 # Sprint 6 – Finance
 
-- BE-043 – Invoice
-- BE-044 – Payment
-- BE-045 – Expense
-- BE-046 – Financial Reports
+- BE-042 – Invoice
+- BE-043 – Payment
+- BE-044 – Expense
+- BE-045 – Financial Reports
 
 Status: Todo
 

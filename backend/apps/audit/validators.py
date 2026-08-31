@@ -40,6 +40,8 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
     # a join, matching how every other audited entity's state is a
     # snapshot of its own fields.
     "project_member": {"project_id", "user_id", "assigned_by_id"},
+    # BE-031: Category has exactly one field beyond company/id.
+    "product_category": {"name"},
 }
 
 
