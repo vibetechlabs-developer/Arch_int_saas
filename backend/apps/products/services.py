@@ -397,22 +397,31 @@ class ProductSubcategoryService:
 class ProductService:
     """
     Business logic and orchestration service for Product management
-    (BE-033). Mirrors ProjectService's structure (BE-025) for the
+    (BE-033/034). Mirrors ProjectService's structure (BE-025) for the
     subcategory-tenant-invariant pattern: create_product reuses
     ProductSubcategoryService.get_subcategory_by_id(subcategory_id,
     company_id=...), which already raises NotFound on cross-tenant access,
     rather than duplicating that check. No search param on list — not
-    documented; category/subcategory/status filters are BE-034's task
-    (mirrors the CRUD/Filters split BE-025/BE-028 established for Project).
+    documented; category/subcategory/status filters (BE-034) mirror the
+    CRUD/Filters split BE-025/BE-028 established for Project.
     """
 
     @classmethod
     def list_products(
         cls,
         company_id: Optional[str | uuid.UUID] = None,
+        category_id: Optional[str | uuid.UUID] = None,
+        subcategory_id: Optional[str | uuid.UUID] = None,
+        status: Optional[str] = None,
         ordering: str = "-created_at",
     ) -> QuerySet[Product]:
-        return selectors.list_products(company_id=company_id, ordering=ordering)
+        return selectors.list_products(
+            company_id=company_id,
+            category_id=category_id,
+            subcategory_id=subcategory_id,
+            status=status,
+            ordering=ordering,
+        )
 
     @classmethod
     def list_products_for_viewer(
@@ -420,10 +429,19 @@ class ProductService:
         is_platform_admin: bool,
         resolved_company_id: Optional[str | uuid.UUID],
         admin_company_id_param: Optional[str],
+        category_id: Optional[str | uuid.UUID] = None,
+        subcategory_id: Optional[str | uuid.UUID] = None,
+        status: Optional[str] = None,
         ordering: str = "-created_at",
     ) -> QuerySet[Product]:
         target_company_id = admin_company_id_param if is_platform_admin else resolved_company_id
-        return cls.list_products(company_id=target_company_id, ordering=ordering)
+        return cls.list_products(
+            company_id=target_company_id,
+            category_id=category_id,
+            subcategory_id=subcategory_id,
+            status=status,
+            ordering=ordering,
+        )
 
     @classmethod
     def resolve_create_target_company_id(

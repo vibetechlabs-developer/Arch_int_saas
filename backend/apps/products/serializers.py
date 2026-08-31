@@ -295,10 +295,20 @@ class ProductUpdateSerializer(serializers.Serializer):
 
 class ProductListQuerySerializer(serializers.Serializer):
     """
-    Validates ?ordering= query params for GET /products. Category/
-    subcategory/status filters are BE-034's task.
+    Validates GET /products query params (BE-034): category/subcategory/
+    status filters, matching BOQ_API.md's documented set exactly, plus
+    ordering.
     """
 
+    category = serializers.UUIDField(
+        source="category_id", required=False, default=None, allow_null=True
+    )
+    subcategory = serializers.UUIDField(
+        source="subcategory_id", required=False, default=None, allow_null=True
+    )
+    status = serializers.ChoiceField(
+        choices=ProductStatus.choices, required=False, default=None, allow_null=True
+    )
     ordering = serializers.ChoiceField(
         choices=sorted(VALID_PRODUCT_ORDER_FIELDS), required=False, default="-created_at"
     )

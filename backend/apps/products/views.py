@@ -341,8 +341,26 @@ class ProductSubcategoryViewSet(ObjectPermission404Mixin, viewsets.GenericViewSe
 @extend_schema_view(
     list=extend_schema(
         summary="List Products",
-        description="List tenant products with ordering. Category/subcategory/status filtering is BE-034's task.",
+        description="List tenant products. Filterable by category/subcategory/status, orderable via ?ordering=.",
         parameters=[
+            OpenApiParameter(
+                name="category",
+                description="Filter by ProductCategory UUID (matches via the product's subcategory).",
+                required=False,
+                type=str,
+            ),
+            OpenApiParameter(
+                name="subcategory",
+                description="Filter by ProductSubcategory UUID.",
+                required=False,
+                type=str,
+            ),
+            OpenApiParameter(
+                name="status",
+                description="Filter by status (active, inactive).",
+                required=False,
+                type=str,
+            ),
             OpenApiParameter(
                 name="ordering",
                 description="Ordering field (e.g. name, -name, created_at, -created_at).",
@@ -389,11 +407,11 @@ class ProductSubcategoryViewSet(ObjectPermission404Mixin, viewsets.GenericViewSe
 )
 class ProductViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     """
-    ViewSet for Product CRUD operations (BE-033). Mirrors
-    ProductCategoryViewSet/ProjectViewSet exactly — orchestration only,
-    all business logic lives in ProductService. No category/subcategory/
-    status filtering here (BE-034), no audit calls here (wired inline in
-    ProductService, not deferred — see class docstring there).
+    ViewSet for Product CRUD operations (BE-033) plus list filtering
+    (BE-034). Mirrors ProductCategoryViewSet/ProjectViewSet exactly —
+    orchestration only, all business logic lives in ProductService. No
+    audit calls here (wired inline in ProductService, not deferred — see
+    class docstring there).
     """
 
     permission_classes = [IsAuthenticated, ProductCategoryPermission]
@@ -410,6 +428,9 @@ class ProductViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
             is_platform_admin=is_platform_admin(request),
             resolved_company_id=request.company_id,
             admin_company_id_param=None,
+            category_id=validated["category_id"],
+            subcategory_id=validated["subcategory_id"],
+            status=validated["status"],
             ordering=validated["ordering"],
         )
 

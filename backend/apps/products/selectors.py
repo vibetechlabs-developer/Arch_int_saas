@@ -76,19 +76,33 @@ def has_active_subcategories_for_category(category_id: str | uuid.UUID) -> bool:
 
 def list_products(
     company_id: Optional[str | uuid.UUID] = None,
+    category_id: Optional[str | uuid.UUID] = None,
+    subcategory_id: Optional[str | uuid.UUID] = None,
+    status: Optional[str] = None,
     ordering: str = "-created_at",
 ) -> QuerySet[Product]:
     """
-    Read-only, tenant-scoped Product listing for ProductService.list_products
-    (BE-033). Deliberately bare — no category/subcategory/status filtering
-    here. BOQ_API.md documents those as list filters, but BE-034 ("Catalog
-    APIs") owns that logic explicitly as its own task, mirroring the exact
-    CRUD/Filters split BE-025/BE-028 established for Project.
+    Read-only, filtered/ordered Product listing for
+    ProductService.list_products (BE-034). Filters cover exactly
+    BOQ_API.md's documented set ("filter: category, subcategory, status")
+    — mirrors the CRUD/Filters split BE-025/BE-028 established for
+    Project. `category_id` filters via `subcategory__category_id` since
+    Product has no direct FK to ProductCategory (only to
+    ProductSubcategory, which itself FKs to ProductCategory).
     """
     queryset = ProductRepository.all()
 
     if company_id:
         queryset = queryset.filter(company_id=company_id)
+
+    if category_id:
+        queryset = queryset.filter(subcategory__category_id=category_id)
+
+    if subcategory_id:
+        queryset = queryset.filter(subcategory_id=subcategory_id)
+
+    if status:
+        queryset = queryset.filter(status=status)
 
     order_field = ordering if ordering in VALID_PRODUCT_ORDER_FIELDS else "-created_at"
     return queryset.order_by(order_field, "id")

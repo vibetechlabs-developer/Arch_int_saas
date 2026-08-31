@@ -809,7 +809,7 @@ _(Renumbered 2026-08-31, Sprint 3 planning: dropped the standalone "BE-034 – U
 - BE-033 – Products
 - BE-034 – Catalog APIs
 
-Status: In Progress (BE-031, BE-032, BE-033 Review; BE-034 Todo)
+Status: In Progress — all tasks implemented (BE-031–BE-034 Review, awaiting Backend Lead approval)
 
 ---
 
@@ -888,6 +888,28 @@ Depends On
 Depends On
 
 - BE-032 (Subcategories)
+
+---
+
+### BE-034 – Catalog APIs
+
+**Status:** Review
+
+**Priority:** Medium
+
+**Owner:** Backend Team
+
+**Scope:** the final Sprint 3 task, resolving BE-033's documented deferral — adds `BOQ_API.md`'s documented `GET /products` filter set (category, subcategory, status) exactly, mirroring the CRUD/Filters split BE-025/BE-028 established for Project. No new endpoints, no schema/migration change.
+
+**Implementation notes:** `apps/products/selectors.py::list_products()` extended with `category_id`/`subcategory_id`/`status` params — exact-match filters for `subcategory_id`/`status`; `category_id` filters via `subcategory__category_id` since Product has no direct FK to `ProductCategory` (only to `ProductSubcategory`, which itself FKs to Category). `ProductService.list_products`/`list_products_for_viewer` forward every param through unchanged (pure plumbing). `ProductListQuerySerializer` gained `category`/`subcategory` (`UUIDField`s) and `status` (`ChoiceField`, 400 on garbage input) alongside the existing `ordering` field. `ProductViewSet.list` validates and forwards them; the `@extend_schema` `parameters` list was extended to document all three for schema visibility.
+
+**Tests:** 10 new, `apps/products/tests/test_catalog_filters.py`. `ProductListFilterServiceTestCase` ×5: filter by category (via subcategory join)/subcategory/status individually, combined filters narrow results, no-filters-returns-all (regression guard that filtering is opt-in). `ProductListFilterEndpointTestCase` ×5: filter by status/category/subcategory query params, invalid status value 400, no-filters-returns-all via the HTTP endpoint. Full `apps/products` suite: **147 passed** (was 137 after BE-033). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected (query-time filtering only, no model changes). `spectacular --fail-on-warn`: clean.
+
+**Sprint 3 status:** every task BE-031–BE-034 is now implemented, tested, and documented at **Review** status, closing out Product Catalog. Per this file's standing rule, Sprint 3 itself is not marked closed here — that requires explicit Backend Lead review and approval of the four Review-status tasks above, the same as every prior sprint.
+
+Depends On
+
+- BE-033 (Products)
 
 ---
 
