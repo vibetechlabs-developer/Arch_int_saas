@@ -5,11 +5,54 @@ from django.db import IntegrityError, transaction
 from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
+from apps.audit.models import AuditAction
+from apps.audit.services import AuditLogService
 from apps.clients.services import ClientService
 from apps.common.exceptions import ConflictError
 from apps.projects import selectors, validators
 from apps.projects.models import Project, ProjectMember, ProjectStatus, get_allowed_next_statuses
 from apps.projects.repositories import ProjectMemberRepository, ProjectRepository
+
+PROJECT_AUDITED_FIELDS = (
+    "name",
+    "client_id",
+    "status",
+    "priority",
+    "assigned_to_id",
+    "start_date",
+    "deadline",
+    "follow_up_reminder_at",
+)
+
+PROJECT_MEMBER_AUDITED_FIELDS = ("project_id", "user_id", "assigned_by_id")
+
+
+def _serialize_audit_value(value: Any) -> Any:
+    """
+    apps.audit.models.AuditLog.before_state/after_state is a plain
+    JSONField with no custom encoder, so it can't serialize a raw
+    uuid.UUID/date/datetime the way Project's FK ids and date fields
+    naturally are — unlike ClientService's audited fields, which are all
+    already strings. Stringify anything json.JSONEncoder can't handle.
+    """
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.isoformat()
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    return value
+
+
+def _project_audit_state(project: Project) -> Dict[str, Any]:
+    return {
+        field: _serialize_audit_value(getattr(project, field)) for field in PROJECT_AUDITED_FIELDS
+    }
+
+
+def _project_member_audit_state(member: ProjectMember) -> Dict[str, Any]:
+    return {
+        field: _serialize_audit_value(getattr(member, field))
+        for field in PROJECT_MEMBER_AUDITED_FIELDS
+    }
 
 
 class ProjectService:
@@ -17,12 +60,10 @@ class ProjectService:
     Business logic and orchestration service for Project management
     (BE-025). Mirrors apps.clients.services.ClientService's structure
     (BACKEND_RULES.md: View -> Serializer -> Service -> Repository ->
-    Model). No audit calls here — Project's own audit integration is
-    BE-029's explicit scope, not built prematurely (mirrors how BE-024
-    left ENTITY_FIELD_ALLOWLISTS["project"] unbuilt). No status field is
-    writable through create/update — Project_API.md documents a separate
-    dedicated `PATCH .../status` endpoint for transitions, which is
-    BE-027's scope; general create/update never touch status.
+    Model). No status field is writable through create/update —
+    Project_API.md documents a separate dedicated `PATCH .../status`
+    endpoint for transitions (BE-027); general create/update never touch
+    status. Audit logging (BE-029) mirrors ClientService's pattern exactly.
     """
 
     @classmethod
@@ -141,6 +182,8 @@ class ProjectService:
         priority: str = "",
         assigned_to_id: Optional[str | uuid.UUID] = None,
         follow_up_reminder_at: Any = None,
+        actor_user: Any = None,
+        request: Any = None,
     ) -> Project:
         """
         Create a new Project within a Company tenant.
@@ -174,6 +217,16 @@ class ProjectService:
                 follow_up_reminder_at=follow_up_reminder_at,
             )
 
+            AuditLogService.record(
+                action=AuditAction.CREATE,
+                entity_type="project",
+                entity_id=project.id,
+                company_id=company.id,
+                actor_user=actor_user,
+                after_state=_project_audit_state(project),
+                request=request,
+            )
+
             return project
 
     @classmethod
@@ -182,6 +235,8 @@ class ProjectService:
         project_id: str | uuid.UUID,
         validated_data: Dict[str, Any],
         company_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
     ) -> Project:
         """
         Update an existing Project. Only name/dates/priority/assigned_to
@@ -190,6 +245,7 @@ class ProjectService:
         """
         with transaction.atomic():
             project = cls.get_project_by_id(project_id, company_id=company_id)
+            before_state = _project_audit_state(project)
 
             fields: Dict[str, Any] = {}
 
@@ -215,6 +271,17 @@ class ProjectService:
 
             project = ProjectRepository.save(project, fields)
 
+            AuditLogService.record(
+                action=AuditAction.UPDATE,
+                entity_type="project",
+                entity_id=project.id,
+                company_id=project.company_id,
+                actor_user=actor_user,
+                before_state=before_state,
+                after_state=_project_audit_state(project),
+                request=request,
+            )
+
             return project
 
     @classmethod
@@ -222,13 +289,29 @@ class ProjectService:
         cls,
         project_id: str | uuid.UUID,
         company_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
     ) -> None:
         """
         Soft-delete a Project by setting deleted_at timestamp.
         """
         with transaction.atomic():
             project = cls.get_project_by_id(project_id, company_id=company_id)
+            project_id_val = project.id
+            company_id_val = project.company_id
+            before_state = _project_audit_state(project)
+
             ProjectRepository.soft_delete(project)
+
+            AuditLogService.record(
+                action=AuditAction.DELETE,
+                entity_type="project",
+                entity_id=project_id_val,
+                company_id=company_id_val,
+                actor_user=actor_user,
+                before_state=before_state,
+                request=request,
+            )
 
     @classmethod
     def transition_status(
@@ -236,6 +319,8 @@ class ProjectService:
         project_id: str | uuid.UUID,
         target_status: str,
         company_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
     ) -> Project:
         """
         Transition a Project's status per the BE-027 transition graph
@@ -244,10 +329,17 @@ class ProjectService:
         -- this is a state-conflict, not a bad-input error (target_status
         itself is already validated as a real ProjectStatus value by
         ProjectStatusTransitionSerializer before this is called).
+
+        Audited as an UPDATE, not a separate action value — matches
+        apps.audit.models.AuditAction's own documented convention ("a
+        status change is recorded as an UPDATE with the status field
+        visible in before_state/after_state, not a separate action
+        value").
         """
         with transaction.atomic():
             project = cls.get_project_by_id(project_id, company_id=company_id)
             current_status = project.status
+            before_state = _project_audit_state(project)
 
             allowed = get_allowed_next_statuses(current_status, project.status_before_hold)
             if target_status not in allowed:
@@ -263,6 +355,17 @@ class ProjectService:
 
             project = ProjectRepository.save(project, fields)
 
+            AuditLogService.record(
+                action=AuditAction.UPDATE,
+                entity_type="project",
+                entity_id=project.id,
+                company_id=project.company_id,
+                actor_user=actor_user,
+                before_state=before_state,
+                after_state=_project_audit_state(project),
+                request=request,
+            )
+
             return project
 
 
@@ -273,9 +376,10 @@ class ProjectMemberService:
     (ProjectService.get_project_by_id + ObjectPermission404Mixin, the same
     pattern ProjectViewSet already uses) — every method here takes an
     already-authorized `project` instance, not a bare ID, so this service
-    never needs its own tenant-resolution logic. No AuditLogService calls
-    here — Project's audit integration (including membership changes) is
-    BE-029's explicit scope.
+    never needs its own tenant-resolution logic. Audit logging (BE-029)
+    records membership rows under entity_type="project_member" (their own
+    entity_id), not folded into the parent Project's "project" rows — see
+    apps.audit.validators.ENTITY_FIELD_ALLOWLISTS["project_member"].
     """
 
     @classmethod
@@ -288,6 +392,8 @@ class ProjectMemberService:
         project: Project,
         user_id: str | uuid.UUID,
         assigned_by_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
     ) -> ProjectMember:
         """
         Add a user to the project's team.
@@ -324,10 +430,26 @@ class ProjectMemberService:
                     "This user is already a member of this project's team."
                 ) from exc
 
+            AuditLogService.record(
+                action=AuditAction.CREATE,
+                entity_type="project_member",
+                entity_id=member.id,
+                company_id=project.company_id,
+                actor_user=actor_user,
+                after_state=_project_member_audit_state(member),
+                request=request,
+            )
+
             return member
 
     @classmethod
-    def remove_member(cls, project: Project, user_id: str | uuid.UUID) -> None:
+    def remove_member(
+        cls,
+        project: Project,
+        user_id: str | uuid.UUID,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> None:
         """
         Remove (soft-delete) a user from the project's team. Raises
         NotFound if no active membership exists for this user on this
@@ -336,4 +458,17 @@ class ProjectMemberService:
         """
         with transaction.atomic():
             member = ProjectMemberRepository.get_active_membership(project.id, user_id)
+            member_id = member.id
+            before_state = _project_member_audit_state(member)
+
             ProjectMemberRepository.soft_delete(member)
+
+            AuditLogService.record(
+                action=AuditAction.DELETE,
+                entity_type="project_member",
+                entity_id=member_id,
+                company_id=project.company_id,
+                actor_user=actor_user,
+                before_state=before_state,
+                request=request,
+            )

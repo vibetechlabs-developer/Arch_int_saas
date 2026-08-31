@@ -571,7 +571,7 @@ _(Renumbered 2026-08-27: originally BE-021–BE-044. BE-021 collided with the Sp
 
 _(Renumbered again 2026-08-27, BE-025 onward: inserted "BE-025 – Project CRUD" — Sprint 2 had given Client both a Module task (BE-022) and a separate CRUD task (BE-023), but Project only got Module (BE-024) with no CRUD task before jumping to Members. Project Members cannot be meaningfully built without Project creation/retrieval existing first. Every ID from the old BE-025 onward shifted forward by one to make room; Sprints 3–6 shifted by one accordingly (Sprint 3 now starts at BE-031, Sprint 6 now ends at BE-046). No code references any of the shifted IDs — confirmed by search before renumbering.)_
 
-Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025, BE-026, BE-027, BE-028 Review; BE-029–BE-030 Todo)
+Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025, BE-026, BE-027, BE-028, BE-029 Review; BE-030 Todo)
 
 ---
 
@@ -747,6 +747,30 @@ Depends On
 Depends On
 
 - BE-027 (Project Workflow)
+
+---
+
+### BE-029 – Project Audit Logs
+
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Implementation notes:** Wires `AuditLogService.record()` into every Project mutation deferred by BE-024 through BE-028: create/update/delete (`apps/projects/services.py::ProjectService`), status transitions, and team member add/remove (`ProjectMemberService`). Mirrors `apps.clients.services.ClientService`'s exact pattern — `actor_user`/`request` params threaded from `ProjectViewSet`/`ProjectTeamView`/`ProjectTeamMemberView` down to the service layer, a `_project_audit_state()`/`_project_member_audit_state()` helper snapshotting the allowlisted fields. `ENTITY_FIELD_ALLOWLISTS` (`apps/audit/validators.py`) gained two entries: `"project"` (`name`, `client_id`, `status`, `priority`, `assigned_to_id`, `start_date`, `deadline`, `follow_up_reminder_at` — full field coverage, since Project has no privacy-sensitive free-text field the way `client.addresses`/`notes` do) and `"project_member"` (`project_id`, `user_id`, `assigned_by_id` — membership changes get their **own** `entity_type`/`entity_id`, not folded into the parent Project's rows, so the state itself carries the project/user linkage for a self-describing row without a join). Status transitions are recorded as `AuditAction.UPDATE`, not a separate action value, per `AuditAction`'s own documented convention ("a status change is recorded as an UPDATE... not a separate action value") — already established for every other entity in this codebase, not a new decision.
+
+**Real bug found and fixed before any test ran:** `apps.audit.models.AuditLog.before_state`/`after_state` is a plain `JSONField` with **no custom encoder** — `ClientService`'s audited fields are all already strings, so this never surfaced before, but Project's audited fields include two FK ids (`client_id`, `assigned_to_id`, both `uuid.UUID` instances via Django's `_id` accessor) and three date/datetime fields. A raw `uuid.UUID`/`datetime.date`/`datetime.datetime` passed straight into `AuditLogService.record()` raises `TypeError` at save time under the default `json.JSONEncoder`. Fixed with a `_serialize_audit_value()` helper that `.isoformat()`s dates/datetimes and `str()`s UUIDs before the state dict is built — caught by a dedicated regression test (`test_create_project_with_dates_serializes_cleanly`) before it could reach a real audit-log write failure in any other task.
+
+**Verified negative case:** a status transition that raises `ConflictError` (invalid per the graph) writes **no** audit entry — the `AuditLogService.record()` call sits after the `ConflictError` raise inside the same `transaction.atomic()` block, so it never executes and nothing is persisted even transiently.
+
+**No changes to Client/Role audit behavior:** this task only touches Project's own services/views and the two new `ENTITY_FIELD_ALLOWLISTS` entries — `"client"`/`"role"`/`"company"`/`"user"` entries are untouched.
+
+**Tests:** 8 new, `apps/projects/tests/test_audit.py` (`ProjectAuditLogTestCase`): create writes a CREATE entry with correct `company_id`/`actor_user_id`/`after_state`, create-with-dates serializes cleanly (the regression guard for the bug above), update writes before/after, soft-delete writes a DELETE entry with `before_state` only, status transition writes an UPDATE entry (not a separate action), a failed/rejected status transition writes no UPDATE entry (only the earlier CREATE from setup), add-member writes a CREATE entry under `entity_type="project_member"`, remove-member writes a DELETE entry under the same. Full `apps/projects` suite: **142 passed** (was 134 after BE-028). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected (no model changes — `AuditLog`/`ENTITY_FIELD_ALLOWLISTS` needed no migration, matching how BE-023's own audit wiring needed none). `spectacular --fail-on-warn`: clean (no endpoint/schema changes in this task).
+
+Depends On
+
+- BE-028 (Project Filters)
 
 ---
 

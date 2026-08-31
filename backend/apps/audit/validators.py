@@ -18,6 +18,28 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
     # choice, since they're free-form/structured content rather than
     # simple identifiers — can be added later if audit review needs them.
     "client": {"name", "company_name", "email", "mobile", "gstin"},
+    # BE-029: full field coverage (no free-text/privacy-sensitive fields
+    # exist on Project the way client.addresses/notes do). FK ids
+    # (client_id/assigned_to_id) and date/datetime values are stringified
+    # by apps.projects.services._audit_state before reaching here — plain
+    # json.JSONEncoder (this JSONField has no custom encoder) can't
+    # serialize a raw uuid.UUID/date/datetime.
+    "project": {
+        "name",
+        "client_id",
+        "status",
+        "priority",
+        "assigned_to_id",
+        "start_date",
+        "deadline",
+        "follow_up_reminder_at",
+    },
+    # Team membership changes are their own entity (their own entity_id),
+    # not folded into "project" rows — project_id/user_id/assigned_by_id
+    # are carried in the state itself so a row is self-describing without
+    # a join, matching how every other audited entity's state is a
+    # snapshot of its own fields.
+    "project_member": {"project_id", "user_id", "assigned_by_id"},
 }
 
 

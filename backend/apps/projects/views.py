@@ -73,13 +73,14 @@ from apps.users.permissions import is_platform_admin
 class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     """
     ViewSet for Project CRUD operations (BE-025), plus the status
-    transition action (BE-027) and list filtering/ordering (BE-028).
-    Mirrors apps.clients.views.ClientViewSet — orchestration only, all
-    business logic lives in ProjectService. No audit calls here (BE-029).
-    Team/member endpoints (BE-026) live below in
-    ProjectTeamView/ProjectTeamMemberView — not on this ViewSet, since
-    their compound URL (`/projects/{projectId}/team/{userId}`) doesn't fit
-    a single-lookup-field @action.
+    transition action (BE-027), list filtering/ordering (BE-028), and
+    audit logging (BE-029, via ProjectService — this ViewSet only
+    forwards `actor_user`/`request`). Mirrors
+    apps.clients.views.ClientViewSet — orchestration only, all business
+    logic lives in ProjectService. Team/member endpoints (BE-026) live
+    below in ProjectTeamView/ProjectTeamMemberView — not on this ViewSet,
+    since their compound URL (`/projects/{projectId}/team/{userId}`)
+    doesn't fit a single-lookup-field @action.
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
@@ -137,6 +138,8 @@ class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
             priority=validated.get("priority", ""),
             assigned_to_id=validated.get("assigned_to_id"),
             follow_up_reminder_at=validated.get("follow_up_reminder_at"),
+            actor_user=request.user,
+            request=request,
         )
 
         response_data = ProjectSerializer(project).data
@@ -163,6 +166,8 @@ class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         updated_project = ProjectService.update_project(
             project_id=pk,
             validated_data=serializer.validated_data,
+            actor_user=request.user,
+            request=request,
         )
         response_data = ProjectSerializer(updated_project).data
         request_id = getattr(request, "request_id", None)
@@ -180,7 +185,7 @@ class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         project = ProjectService.get_project_by_id(pk)
         self.check_object_permissions(request, project)
 
-        ProjectService.soft_delete_project(pk)
+        ProjectService.soft_delete_project(pk, actor_user=request.user, request=request)
         request_id = getattr(request, "request_id", None)
 
         return ApiResponse.success(
@@ -211,6 +216,8 @@ class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         updated_project = ProjectService.transition_status(
             project_id=pk,
             target_status=serializer.validated_data["status"],
+            actor_user=request.user,
+            request=request,
         )
         response_data = ProjectSerializer(updated_project).data
         return ApiResponse.success(
@@ -266,6 +273,8 @@ class ProjectTeamView(ObjectPermission404Mixin, APIView):
             project=project,
             user_id=serializer.validated_data["user_id"],
             assigned_by_id=getattr(request.user, "id", None),
+            actor_user=request.user,
+            request=request,
         )
 
         response_data = ProjectMemberSerializer(member).data
@@ -292,7 +301,9 @@ class ProjectTeamMemberView(ObjectPermission404Mixin, APIView):
         project = ProjectService.get_project_by_id(project_id)
         self.check_object_permissions(request, project)
 
-        ProjectMemberService.remove_member(project=project, user_id=user_id)
+        ProjectMemberService.remove_member(
+            project=project, user_id=user_id, actor_user=request.user, request=request
+        )
 
         return ApiResponse.success(
             data={"message": "Team member removed successfully."},
