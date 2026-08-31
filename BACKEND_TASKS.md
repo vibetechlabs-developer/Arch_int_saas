@@ -571,7 +571,7 @@ _(Renumbered 2026-08-27: originally BE-021–BE-044. BE-021 collided with the Sp
 
 _(Renumbered again 2026-08-27, BE-025 onward: inserted "BE-025 – Project CRUD" — Sprint 2 had given Client both a Module task (BE-022) and a separate CRUD task (BE-023), but Project only got Module (BE-024) with no CRUD task before jumping to Members. Project Members cannot be meaningfully built without Project creation/retrieval existing first. Every ID from the old BE-025 onward shifted forward by one to make room; Sprints 3–6 shifted by one accordingly (Sprint 3 now starts at BE-031, Sprint 6 now ends at BE-046). No code references any of the shifted IDs — confirmed by search before renumbering.)_
 
-Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025, BE-026, BE-027 Review; BE-028–BE-030 Todo)
+Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025, BE-026, BE-027, BE-028 Review; BE-029–BE-030 Todo)
 
 ---
 
@@ -723,6 +723,30 @@ Depends On
 Depends On
 
 - BE-026 (Project Members)
+
+---
+
+### BE-028 – Project Filters
+
+**Status:** Review
+
+**Priority:** Medium
+
+**Owner:** Backend Team
+
+**Documentation gap flagged, resolved without blocking (low-risk plumbing, not a security/tenant/RBAC decision):** `Project_API.md` lists the list endpoint's filters as "status, client, assigned user, priority, date range" but never says which date field "date range" means — Project has two (`start_date`, `deadline`). Rather than guess one and silently drop the other, both are exposed as independent optional ranges: `startDateFrom`/`startDateTo` and `deadlineFrom`/`deadlineTo`. Flagged here explicitly rather than invented silently; can be narrowed later if the client confirms only one was meant.
+
+**Implementation notes:** `apps/projects/selectors.py::list_projects()` extended with `status`/`client_id`/`assigned_to_id`/`priority`/`start_date_from`/`start_date_to`/`deadline_from`/`deadline_to`/`ordering` params — exact-match filters for status/client/assignedTo/priority, inclusive range filters (`__gte`/`__lte`) for the two date pairs. `VALID_ORDER_FIELDS = {created_at, updated_at, name, start_date, deadline}` (both directions) — matches Client/Role's ordering convention, extended with the two Project-specific date fields since they're meaningful for schedule-oriented views; `status` was deliberately left out of the orderable set (arbitrary string sort on a lifecycle enum isn't a meaningful default and isn't documented). `ProjectService.list_projects`/`list_projects_for_viewer` forward every param through unchanged (pure plumbing, no new business logic). `ProjectListQuerySerializer` (new, mirrors `ClientListQuerySerializer`) validates `status`/`ordering` as `ChoiceField`s (400 on garbage input) and the four date params as `DateField`s; no free-text `search` param — `Project_API.md` doesn't document one for this endpoint, unlike Client's. `ProjectViewSet.list` now validates query params before calling the service, and declares `parameters=[ProjectListQuerySerializer]` in its `@extend_schema` for schema visibility, mirroring `ClientViewSet.list` exactly.
+
+**No new endpoints, no schema change:** this task is entirely query-param filtering on the existing `GET /projects` — no migration, no new URL.
+
+**Real bug found and fixed:** `list_projects`'s default ordering (`-created_at`) had no secondary tie-breaker. `apps/projects/tests/test_filters.py::test_invalid_ordering_falls_back_to_default` passed when run in isolation but failed when run as part of the full suite — two Projects created back-to-back in `setUp()` got byte-identical `created_at` timestamps (plausible under coarse OS clock resolution, particularly on Windows dev environments), so `ORDER BY created_at DESC` alone has no defined relative order between them and can return a different order across calls. Fixed by appending `"id"` as an unconditional secondary sort key (`queryset.order_by(order_field, "id")`) — UUIDs carry no ordering *meaning*, but guarantee a stable, repeatable order regardless of timestamp collisions. The affected test was corrected to assert membership (`assertCountEqual`) rather than a specific order for the tied case, since no specific order was ever a real guarantee. **Flagged, not fixed here:** `apps/clients/selectors.py::list_clients` and `apps/users/selectors.py::list_roles` share the exact same `order_by(order_field)`-with-no-tie-breaker pattern and are equally exposed to this — out of scope for BE-028 (a Project-only task), noted here for BE-030 ("CRM Tests", explicitly a final stabilization pass across Client+Project) to pick up.
+
+**Tests:** 15 new, `apps/projects/tests/test_filters.py`. `ProjectListFilterServiceTestCase` ×10: filter by status/client/assignedTo/priority individually, filter by start_date range, filter by deadline range, combined filters narrow results, ordering by name ascending, ordering by deadline descending, invalid ordering value falls back to the default (defense-in-depth at the selector layer, matching Client's own selector — even though the serializer already rejects invalid values with 400 before reaching it; asserts membership only, not order, per the tie-breaker finding above). `ProjectListFilterEndpointTestCase` ×5: filter by status query param, invalid status value 400, invalid ordering value 400, ordering by name query param, no-filters-returns-all (regression guard that filtering is opt-in). Full `apps/projects` suite: **134 passed** (was 119 after BE-027). Full backend suite: **500 passed, 0 failed** (was 485 after BE-027; caught the tie-breaker flake on this run, fixed, re-ran clean). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected (no model changes in this task). `spectacular --fail-on-warn`: clean.
+
+Depends On
+
+- BE-027 (Project Workflow)
 
 ---
 

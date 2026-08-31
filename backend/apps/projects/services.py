@@ -1,3 +1,4 @@
+import datetime
 import uuid
 from typing import Any, Dict, Optional
 from django.db import IntegrityError, transaction
@@ -25,8 +26,31 @@ class ProjectService:
     """
 
     @classmethod
-    def list_projects(cls, company_id: Optional[str | uuid.UUID] = None) -> QuerySet[Project]:
-        return selectors.list_projects(company_id=company_id)
+    def list_projects(
+        cls,
+        company_id: Optional[str | uuid.UUID] = None,
+        status: Optional[str] = None,
+        client_id: Optional[str | uuid.UUID] = None,
+        assigned_to_id: Optional[str | uuid.UUID] = None,
+        priority: Optional[str] = None,
+        start_date_from: Optional[datetime.date] = None,
+        start_date_to: Optional[datetime.date] = None,
+        deadline_from: Optional[datetime.date] = None,
+        deadline_to: Optional[datetime.date] = None,
+        ordering: str = "-created_at",
+    ) -> QuerySet[Project]:
+        return selectors.list_projects(
+            company_id=company_id,
+            status=status,
+            client_id=client_id,
+            assigned_to_id=assigned_to_id,
+            priority=priority,
+            start_date_from=start_date_from,
+            start_date_to=start_date_to,
+            deadline_from=deadline_from,
+            deadline_to=deadline_to,
+            ordering=ordering,
+        )
 
     @classmethod
     def list_projects_for_viewer(
@@ -34,14 +58,34 @@ class ProjectService:
         is_platform_admin: bool,
         resolved_company_id: Optional[str | uuid.UUID],
         admin_company_id_param: Optional[str],
+        status: Optional[str] = None,
+        client_id: Optional[str | uuid.UUID] = None,
+        assigned_to_id: Optional[str | uuid.UUID] = None,
+        priority: Optional[str] = None,
+        start_date_from: Optional[datetime.date] = None,
+        start_date_to: Optional[datetime.date] = None,
+        deadline_from: Optional[datetime.date] = None,
+        deadline_to: Optional[datetime.date] = None,
+        ordering: str = "-created_at",
     ) -> QuerySet[Project]:
         """
-        Mirrors ClientService.list_clients_for_viewer exactly.
+        Mirrors ClientService.list_clients_for_viewer exactly, extended
+        with BE-028's filter set.
         """
-        if is_platform_admin:
-            return cls.list_projects(company_id=admin_company_id_param)
+        target_company_id = admin_company_id_param if is_platform_admin else resolved_company_id
 
-        return cls.list_projects(company_id=resolved_company_id)
+        return cls.list_projects(
+            company_id=target_company_id,
+            status=status,
+            client_id=client_id,
+            assigned_to_id=assigned_to_id,
+            priority=priority,
+            start_date_from=start_date_from,
+            start_date_to=start_date_to,
+            deadline_from=deadline_from,
+            deadline_to=deadline_to,
+            ordering=ordering,
+        )
 
     @classmethod
     def resolve_create_target_company_id(

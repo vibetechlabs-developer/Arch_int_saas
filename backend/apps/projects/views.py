@@ -13,6 +13,7 @@ from apps.projects.models import Project
 from apps.projects.permissions import ProjectPermission
 from apps.projects.serializers import (
     ProjectCreateSerializer,
+    ProjectListQuerySerializer,
     ProjectMemberCreateSerializer,
     ProjectMemberSerializer,
     ProjectSerializer,
@@ -26,7 +27,12 @@ from apps.users.permissions import is_platform_admin
 @extend_schema_view(
     list=extend_schema(
         summary="List Projects",
-        description="List tenant projects. Search/filtering belongs to a later task (BE-028).",
+        description=(
+            "List tenant projects. Filterable by status/client/assignedTo/"
+            "priority/startDateFrom/startDateTo/deadlineFrom/deadlineTo, "
+            "orderable via ?ordering=."
+        ),
+        parameters=[ProjectListQuerySerializer],
         responses={status.HTTP_200_OK: ProjectSerializer(many=True)},
         tags=["Project"],
     ),
@@ -67,10 +73,10 @@ from apps.users.permissions import is_platform_admin
 class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     """
     ViewSet for Project CRUD operations (BE-025), plus the status
-    transition action (BE-027). Mirrors apps.clients.views.ClientViewSet —
-    orchestration only, all business logic lives in ProjectService. No
-    search/filter query params here (BE-028), no audit calls here
-    (BE-029). Team/member endpoints (BE-026) live below in
+    transition action (BE-027) and list filtering/ordering (BE-028).
+    Mirrors apps.clients.views.ClientViewSet — orchestration only, all
+    business logic lives in ProjectService. No audit calls here (BE-029).
+    Team/member endpoints (BE-026) live below in
     ProjectTeamView/ProjectTeamMemberView — not on this ViewSet, since
     their compound URL (`/projects/{projectId}/team/{userId}`) doesn't fit
     a single-lookup-field @action.
@@ -82,10 +88,23 @@ class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     queryset = Project.objects.none()
 
     def list(self, request: Request) -> Response:
+        query = ProjectListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        validated = query.validated_data
+
         queryset = ProjectService.list_projects_for_viewer(
             is_platform_admin=is_platform_admin(request),
             resolved_company_id=request.company_id,
             admin_company_id_param=None,
+            status=validated["status"],
+            client_id=validated["client_id"],
+            assigned_to_id=validated["assigned_to_id"],
+            priority=validated["priority"] or None,
+            start_date_from=validated["start_date_from"],
+            start_date_to=validated["start_date_to"],
+            deadline_from=validated["deadline_from"],
+            deadline_to=validated["deadline_to"],
+            ordering=validated["ordering"],
         )
 
         page = self.paginate_queryset(queryset)

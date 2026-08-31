@@ -1,6 +1,39 @@
 from rest_framework import serializers
 
 from apps.projects.models import Project, ProjectMember, ProjectStatus
+from apps.projects.selectors import VALID_ORDER_FIELDS
+
+
+class ProjectListQuerySerializer(serializers.Serializer):
+    """
+    Validates GET /projects query params (BE-028). Covers exactly
+    Project_API.md's documented filter set (status, client, assigned
+    user, priority, date range) plus ordering, matching the
+    ClientListQuerySerializer convention. No free-text `search` param —
+    Project_API.md doesn't document one for this endpoint, unlike Client.
+    """
+
+    status = serializers.ChoiceField(choices=ProjectStatus.choices, required=False, default=None, allow_null=True)
+    client = serializers.UUIDField(source="client_id", required=False, default=None, allow_null=True)
+    assignedTo = serializers.UUIDField(
+        source="assigned_to_id", required=False, default=None, allow_null=True
+    )
+    priority = serializers.CharField(required=False, allow_blank=True, default=None, allow_null=True)
+    startDateFrom = serializers.DateField(
+        source="start_date_from", required=False, default=None, allow_null=True
+    )
+    startDateTo = serializers.DateField(
+        source="start_date_to", required=False, default=None, allow_null=True
+    )
+    deadlineFrom = serializers.DateField(
+        source="deadline_from", required=False, default=None, allow_null=True
+    )
+    deadlineTo = serializers.DateField(
+        source="deadline_to", required=False, default=None, allow_null=True
+    )
+    ordering = serializers.ChoiceField(
+        choices=sorted(VALID_ORDER_FIELDS), required=False, default="-created_at"
+    )
 
 
 class ProjectSerializer(serializers.ModelSerializer):
