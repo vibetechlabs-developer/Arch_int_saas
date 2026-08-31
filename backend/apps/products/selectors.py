@@ -3,8 +3,12 @@ from typing import Optional
 
 from django.db.models import QuerySet
 
-from apps.products.models import ProductCategory, ProductSubcategory
-from apps.products.repositories import ProductCategoryRepository, ProductSubcategoryRepository
+from apps.products.models import Product, ProductCategory, ProductSubcategory
+from apps.products.repositories import (
+    ProductCategoryRepository,
+    ProductRepository,
+    ProductSubcategoryRepository,
+)
 
 VALID_CATEGORY_ORDER_FIELDS = {
     "created_at",
@@ -16,6 +20,8 @@ VALID_CATEGORY_ORDER_FIELDS = {
 }
 
 VALID_SUBCATEGORY_ORDER_FIELDS = VALID_CATEGORY_ORDER_FIELDS
+
+VALID_PRODUCT_ORDER_FIELDS = VALID_CATEGORY_ORDER_FIELDS
 
 
 def list_categories(
@@ -66,3 +72,34 @@ def has_active_subcategories_for_category(category_id: str | uuid.UUID) -> bool:
     (Client and Project are separate apps) doesn't apply here.
     """
     return ProductSubcategory.objects.filter(category_id=category_id).exists()
+
+
+def list_products(
+    company_id: Optional[str | uuid.UUID] = None,
+    ordering: str = "-created_at",
+) -> QuerySet[Product]:
+    """
+    Read-only, tenant-scoped Product listing for ProductService.list_products
+    (BE-033). Deliberately bare — no category/subcategory/status filtering
+    here. BOQ_API.md documents those as list filters, but BE-034 ("Catalog
+    APIs") owns that logic explicitly as its own task, mirroring the exact
+    CRUD/Filters split BE-025/BE-028 established for Project.
+    """
+    queryset = ProductRepository.all()
+
+    if company_id:
+        queryset = queryset.filter(company_id=company_id)
+
+    order_field = ordering if ordering in VALID_PRODUCT_ORDER_FIELDS else "-created_at"
+    return queryset.order_by(order_field, "id")
+
+
+def has_active_products_for_subcategory(subcategory_id: str | uuid.UUID) -> bool:
+    """
+    True if the given subcategory (by ID) has at least one non-deleted
+    Product. Backs ProductSubcategoryService.soft_delete_subcategory's
+    delete guard (resolves BE-032's documented deferral) — same direct-
+    query approach as has_active_subcategories_for_category, for the same
+    reasoning (Subcategory and Product share this one app).
+    """
+    return Product.objects.filter(subcategory_id=subcategory_id).exists()

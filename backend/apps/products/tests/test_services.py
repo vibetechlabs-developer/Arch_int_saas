@@ -1,12 +1,13 @@
 import uuid
+from decimal import Decimal
 from django.test import TestCase
 from rest_framework import exceptions as drf_exceptions
 
 from apps.audit.models import AuditLog
 from apps.common.exceptions import ConflictError
 from apps.company.models import Company, CompanyStatus
-from apps.products.models import ProductCategory, ProductSubcategory
-from apps.products.services import ProductCategoryService, ProductSubcategoryService
+from apps.products.models import Product, ProductCategory, ProductStatus, ProductSubcategory, ProductUnit
+from apps.products.services import ProductCategoryService, ProductService, ProductSubcategoryService
 
 
 class ProductCategoryServiceTestCase(TestCase):
@@ -263,6 +264,29 @@ class ProductSubcategoryServiceTestCase(TestCase):
 
         self.assertTrue(ProductSubcategory.all_objects.filter(id=subcategory_id).exists())
 
+    def test_soft_delete_subcategory_blocked_by_active_product(self):
+        """
+        Resolves BE-032's documented deferral.
+        """
+        ProductService.create_product(
+            company_id=self.subcategory1.company_id,
+            subcategory_id=self.subcategory1.id,
+            name="Ceramic Tile",
+        )
+
+        with self.assertRaises(ConflictError):
+            ProductSubcategoryService.soft_delete_subcategory(self.subcategory1.id)
+
+        self.assertFalse(
+            ProductSubcategory.objects.get(id=self.subcategory1.id).is_deleted
+        )
+
+    def test_soft_delete_subcategory_succeeds_with_zero_products(self):
+        ProductSubcategoryService.soft_delete_subcategory(self.subcategory1.id)
+        self.assertTrue(
+            ProductSubcategory.all_objects.get(id=self.subcategory1.id).is_deleted
+        )
+
     def test_create_subcategory_writes_audit_log_entry(self):
         subcategory = ProductSubcategoryService.create_subcategory(
             category=self.category1, name="Audited Subcategory"
@@ -292,4 +316,173 @@ class ProductSubcategoryServiceTestCase(TestCase):
             entity_type="product_subcategory", entity_id=subcategory_id, action="delete"
         )
         self.assertEqual(entry.before_state["name"], "Tiles")
+        self.assertIsNone(entry.after_state)
+
+
+class ProductServiceTestCase(TestCase):
+    """
+    Unit test suite for ProductService business logic (BE-033).
+    """
+
+    def setUp(self):
+        self.company1 = Company.objects.create(name="Alpha Corp", status=CompanyStatus.ACTIVE)
+        self.company2 = Company.objects.create(name="Beta Corp", status=CompanyStatus.ACTIVE)
+
+        self.category1 = ProductCategoryService.create_category(
+            company_id=self.company1.id, name="Flooring"
+        )
+        self.category2 = ProductCategoryService.create_category(
+            company_id=self.company2.id, name="Lighting"
+        )
+
+        self.subcategory1 = ProductSubcategoryService.create_subcategory(
+            category=self.category1, name="Tiles"
+        )
+        self.subcategory2 = ProductSubcategoryService.create_subcategory(
+            category=self.category2, name="Bulbs"
+        )
+
+        self.product1 = ProductService.create_product(
+            company_id=self.company1.id, subcategory_id=self.subcategory1.id, name="Ceramic Tile"
+        )
+
+    def test_create_product_success(self):
+        product = ProductService.create_product(
+            company_id=self.company1.id,
+            subcategory_id=self.subcategory1.id,
+            name="Marble Tile",
+            unit=ProductUnit.SQFT,
+            default_cost=Decimal("100.00"),
+            default_selling_rate=Decimal("150.00"),
+            tax_rate=Decimal("18.00"),
+        )
+        self.assertEqual(product.name, "Marble Tile")
+        self.assertEqual(product.company_id, self.company1.id)
+        self.assertEqual(product.unit, ProductUnit.SQFT)
+        self.assertEqual(product.status, ProductStatus.ACTIVE)
+
+    def test_create_product_with_explicit_status(self):
+        product = ProductService.create_product(
+            company_id=self.company1.id,
+            subcategory_id=self.subcategory1.id,
+            name="Discontinued Tile",
+            status=ProductStatus.INACTIVE,
+        )
+        self.assertEqual(product.status, ProductStatus.INACTIVE)
+
+    def test_create_product_nonexistent_company_raises_not_found(self):
+        with self.assertRaises(drf_exceptions.NotFound):
+            ProductService.create_product(
+                company_id=uuid.uuid4(), subcategory_id=self.subcategory1.id, name="Orphan"
+            )
+
+    def test_create_product_cross_tenant_subcategory_raises_not_found(self):
+        """
+        Resolves the Project.client/Project.company tenant-invariant
+        precedent: a subcategory belonging to another company must be
+        rejected exactly like a cross-tenant client is for Project.
+        """
+        with self.assertRaises(drf_exceptions.NotFound):
+            ProductService.create_product(
+                company_id=self.company1.id,
+                subcategory_id=self.subcategory2.id,
+                name="Cross Tenant Product",
+            )
+
+    def test_get_product_by_id_success(self):
+        product = ProductService.get_product_by_id(self.product1.id)
+        self.assertEqual(product.id, self.product1.id)
+
+    def test_get_product_by_id_cross_tenant_raises_not_found(self):
+        with self.assertRaises(drf_exceptions.NotFound):
+            ProductService.get_product_by_id(self.product1.id, company_id=self.company2.id)
+
+    def test_list_products_filtering_by_company(self):
+        products = ProductService.list_products(company_id=self.company1.id)
+        self.assertEqual(products.count(), 1)
+
+    def test_list_products_for_viewer_platform_admin_sees_all(self):
+        ProductService.create_product(
+            company_id=self.company2.id, subcategory_id=self.subcategory2.id, name="Bulb A"
+        )
+        queryset = ProductService.list_products_for_viewer(
+            is_platform_admin=True, resolved_company_id=None, admin_company_id_param=None
+        )
+        self.assertEqual(queryset.count(), 2)
+
+    def test_resolve_create_target_company_id_non_admin_mismatch_denied(self):
+        with self.assertRaises(drf_exceptions.PermissionDenied):
+            ProductService.resolve_create_target_company_id(
+                is_platform_admin=False,
+                resolved_company_id=self.company1.id,
+                supplied_company_id=self.company2.id,
+            )
+
+    def test_update_product_success(self):
+        updated = ProductService.update_product(
+            product_id=self.product1.id,
+            validated_data={"name": "Renamed Tile", "unit": ProductUnit.NOS},
+        )
+        self.assertEqual(updated.name, "Renamed Tile")
+        self.assertEqual(updated.unit, ProductUnit.NOS)
+
+    def test_update_product_status(self):
+        updated = ProductService.update_product(
+            product_id=self.product1.id, validated_data={"status": ProductStatus.INACTIVE}
+        )
+        self.assertEqual(updated.status, ProductStatus.INACTIVE)
+
+    def test_update_product_cross_tenant_raises_not_found(self):
+        with self.assertRaises(drf_exceptions.NotFound):
+            ProductService.update_product(
+                product_id=self.product1.id,
+                validated_data={"name": "Hacked"},
+                company_id=self.company2.id,
+            )
+
+    def test_update_product_does_not_expose_subcategory_changes(self):
+        updated = ProductService.update_product(
+            product_id=self.product1.id,
+            validated_data={"subcategory_id": str(self.subcategory2.id)},
+        )
+        self.assertEqual(updated.subcategory_id, self.subcategory1.id)
+
+    def test_soft_delete_product(self):
+        product_id = self.product1.id
+        ProductService.soft_delete_product(product_id)
+
+        with self.assertRaises(drf_exceptions.NotFound):
+            ProductService.get_product_by_id(product_id)
+
+        self.assertTrue(Product.all_objects.filter(id=product_id).exists())
+
+    def test_create_product_writes_audit_log_entry(self):
+        product = ProductService.create_product(
+            company_id=self.company1.id,
+            subcategory_id=self.subcategory1.id,
+            name="Audited Product",
+            default_cost=Decimal("50.00"),
+        )
+        entry = AuditLog.objects.get(entity_type="product", entity_id=product.id, action="create")
+        self.assertEqual(entry.company_id, self.company1.id)
+        self.assertEqual(entry.after_state["name"], "Audited Product")
+        self.assertEqual(entry.after_state["default_cost"], "50.00")
+        self.assertEqual(entry.after_state["subcategory_id"], str(self.subcategory1.id))
+
+    def test_update_product_writes_audit_log_entry(self):
+        ProductService.update_product(
+            product_id=self.product1.id, validated_data={"name": "Renamed"}
+        )
+        entry = AuditLog.objects.filter(
+            entity_type="product", entity_id=self.product1.id, action="update"
+        ).latest("created_at")
+        self.assertEqual(entry.before_state["name"], "Ceramic Tile")
+        self.assertEqual(entry.after_state["name"], "Renamed")
+
+    def test_soft_delete_product_writes_audit_log_entry(self):
+        product_id = self.product1.id
+        ProductService.soft_delete_product(product_id)
+
+        entry = AuditLog.objects.get(entity_type="product", entity_id=product_id, action="delete")
+        self.assertEqual(entry.before_state["name"], "Ceramic Tile")
         self.assertIsNone(entry.after_state)

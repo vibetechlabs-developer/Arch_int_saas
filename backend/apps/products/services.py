@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from typing import Any, Dict, Optional
 from django.db import transaction
 from django.db.models import QuerySet
@@ -8,11 +9,25 @@ from apps.audit.models import AuditAction
 from apps.audit.services import AuditLogService
 from apps.common.exceptions import ConflictError
 from apps.products import selectors, validators
-from apps.products.models import ProductCategory, ProductSubcategory
-from apps.products.repositories import ProductCategoryRepository, ProductSubcategoryRepository
+from apps.products.models import Product, ProductCategory, ProductStatus, ProductSubcategory
+from apps.products.repositories import (
+    ProductCategoryRepository,
+    ProductRepository,
+    ProductSubcategoryRepository,
+)
 
 CATEGORY_AUDITED_FIELDS = ("name",)
 SUBCATEGORY_AUDITED_FIELDS = ("name", "category_id")
+PRODUCT_AUDITED_FIELDS = (
+    "name",
+    "subcategory_id",
+    "image_url",
+    "unit",
+    "default_cost",
+    "default_selling_rate",
+    "tax_rate",
+    "status",
+)
 
 
 def _category_audit_state(category: ProductCategory) -> Dict[str, Any]:
@@ -23,6 +38,28 @@ def _subcategory_audit_state(subcategory: ProductSubcategory) -> Dict[str, Any]:
     return {
         field: str(getattr(subcategory, field)) if field.endswith("_id") else getattr(subcategory, field)
         for field in SUBCATEGORY_AUDITED_FIELDS
+    }
+
+
+def _serialize_product_audit_value(value: Any) -> Any:
+    """
+    apps.audit.models.AuditLog.before_state/after_state is a plain
+    JSONField with no custom encoder (the same gap BE-029 found for
+    Project) — Product's audited fields include a FK id (subcategory_id,
+    a uuid.UUID) and three Decimal money/percentage fields, none of which
+    json.JSONEncoder can serialize directly.
+    """
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
+
+
+def _product_audit_state(product: Product) -> Dict[str, Any]:
+    return {
+        field: _serialize_product_audit_value(getattr(product, field))
+        for field in PRODUCT_AUDITED_FIELDS
     }
 
 
@@ -328,13 +365,18 @@ class ProductSubcategoryService:
         """
         Soft-delete a ProductSubcategory by setting deleted_at timestamp.
 
-        Deferred (documented, not a gap, mirrors BE-031's identical
-        deferral for Category): the "block delete if active Products
-        exist" guard can't be built until BE-033 (Product) exists. BE-033
-        adds it, the same way BE-032 (this task) added Category's guard.
+        Resolves BE-032's documented deferral (mirrors BE-031's identical
+        resolution for Category): blocked with a 409 ConflictError if the
+        subcategory has any active (non-deleted) Product.
         """
         with transaction.atomic():
             subcategory = cls.get_subcategory_by_id(subcategory_id, company_id=company_id)
+
+            if selectors.has_active_products_for_subcategory(subcategory.id):
+                raise ConflictError(
+                    "This subcategory has one or more products and cannot be deleted."
+                )
+
             subcategory_id_val = subcategory.id
             company_id_val = subcategory.company_id
             before_state = _subcategory_audit_state(subcategory)
@@ -345,6 +387,221 @@ class ProductSubcategoryService:
                 action=AuditAction.DELETE,
                 entity_type="product_subcategory",
                 entity_id=subcategory_id_val,
+                company_id=company_id_val,
+                actor_user=actor_user,
+                before_state=before_state,
+                request=request,
+            )
+
+
+class ProductService:
+    """
+    Business logic and orchestration service for Product management
+    (BE-033). Mirrors ProjectService's structure (BE-025) for the
+    subcategory-tenant-invariant pattern: create_product reuses
+    ProductSubcategoryService.get_subcategory_by_id(subcategory_id,
+    company_id=...), which already raises NotFound on cross-tenant access,
+    rather than duplicating that check. No search param on list — not
+    documented; category/subcategory/status filters are BE-034's task
+    (mirrors the CRUD/Filters split BE-025/BE-028 established for Project).
+    """
+
+    @classmethod
+    def list_products(
+        cls,
+        company_id: Optional[str | uuid.UUID] = None,
+        ordering: str = "-created_at",
+    ) -> QuerySet[Product]:
+        return selectors.list_products(company_id=company_id, ordering=ordering)
+
+    @classmethod
+    def list_products_for_viewer(
+        cls,
+        is_platform_admin: bool,
+        resolved_company_id: Optional[str | uuid.UUID],
+        admin_company_id_param: Optional[str],
+        ordering: str = "-created_at",
+    ) -> QuerySet[Product]:
+        target_company_id = admin_company_id_param if is_platform_admin else resolved_company_id
+        return cls.list_products(company_id=target_company_id, ordering=ordering)
+
+    @classmethod
+    def resolve_create_target_company_id(
+        cls,
+        is_platform_admin: bool,
+        resolved_company_id: Optional[str | uuid.UUID],
+        supplied_company_id: Optional[str | uuid.UUID],
+    ) -> str | uuid.UUID:
+        """
+        Mirrors ClientService/ProjectService's identical method exactly.
+        """
+        if is_platform_admin:
+            if not supplied_company_id:
+                raise drf_exceptions.ValidationError(
+                    {"companyId": ["companyId is required for platform admin product creation."]}
+                )
+            return supplied_company_id
+
+        if supplied_company_id and str(supplied_company_id) != str(resolved_company_id):
+            raise drf_exceptions.PermissionDenied(
+                "You do not have permission to create products for this company."
+            )
+        return resolved_company_id
+
+    @classmethod
+    def get_product_by_id(
+        cls,
+        product_id: str | uuid.UUID,
+        company_id: Optional[str | uuid.UUID] = None,
+    ) -> Product:
+        """
+        Retrieve an active, non-deleted Product by primary key UUID.
+        Raises NotFound if it does not exist, is soft-deleted, or belongs
+        to another company.
+        """
+        product = ProductRepository.get_by_id(product_id)
+
+        if company_id is not None and str(product.company_id) != str(company_id):
+            raise drf_exceptions.NotFound("The requested product was not found.")
+
+        return product
+
+    @classmethod
+    def create_product(
+        cls,
+        company_id: str | uuid.UUID,
+        subcategory_id: str | uuid.UUID,
+        name: str,
+        image_url: str = "",
+        unit: str = "",
+        default_cost: Any = None,
+        default_selling_rate: Any = None,
+        tax_rate: Any = None,
+        status: Optional[str] = None,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> Product:
+        """
+        Create a new Product within a Company tenant.
+
+        Tenant invariant enforcement: the subcategory must belong to the
+        same company — enforced by reusing
+        ProductSubcategoryService.get_subcategory_by_id(subcategory_id,
+        company_id=...), the same pattern BE-025 established for
+        Project.client. `status` is settable at create -- unlike Project,
+        BOQ_API.md's own text explicitly lists "status" among Product's
+        create fields ("Create product/work item (unit, default cost,
+        default rate, tax, status)").
+        """
+        with transaction.atomic():
+            company = ProductRepository.get_company_by_id(company_id)
+            cleaned_name = validators.require_product_name(name)
+
+            # Raises NotFound if subcategory doesn't exist or belongs to another company.
+            subcategory = ProductSubcategoryService.get_subcategory_by_id(
+                subcategory_id, company_id=company_id
+            )
+
+            product = ProductRepository.create(
+                company=company,
+                subcategory=subcategory,
+                name=cleaned_name,
+                image_url=image_url or "",
+                unit=unit or "",
+                default_cost=default_cost,
+                default_selling_rate=default_selling_rate,
+                tax_rate=tax_rate,
+                status=status or ProductStatus.ACTIVE,
+            )
+
+            AuditLogService.record(
+                action=AuditAction.CREATE,
+                entity_type="product",
+                entity_id=product.id,
+                company_id=company.id,
+                actor_user=actor_user,
+                after_state=_product_audit_state(product),
+                request=request,
+            )
+
+            return product
+
+    @classmethod
+    def update_product(
+        cls,
+        product_id: str | uuid.UUID,
+        validated_data: Dict[str, Any],
+        company_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> Product:
+        """
+        Update an existing Product. `subcategory` is not editable here —
+        not documented as a supported reassignment anywhere (mirrors
+        ProjectService.update_project's exclusion of `client` for the same
+        reasoning: set at creation, not casually reassigned via edit).
+        """
+        with transaction.atomic():
+            product = cls.get_product_by_id(product_id, company_id=company_id)
+            before_state = _product_audit_state(product)
+
+            fields: Dict[str, Any] = {}
+
+            if "name" in validated_data:
+                fields["name"] = validators.require_product_name(validated_data["name"])
+
+            for field in ("image_url", "unit"):
+                if field in validated_data:
+                    fields[field] = validated_data[field] or ""
+
+            for field in ("default_cost", "default_selling_rate", "tax_rate"):
+                if field in validated_data:
+                    fields[field] = validated_data[field]
+
+            if "status" in validated_data:
+                fields["status"] = validated_data["status"]
+
+            product = ProductRepository.save(product, fields)
+
+            AuditLogService.record(
+                action=AuditAction.UPDATE,
+                entity_type="product",
+                entity_id=product.id,
+                company_id=product.company_id,
+                actor_user=actor_user,
+                before_state=before_state,
+                after_state=_product_audit_state(product),
+                request=request,
+            )
+
+            return product
+
+    @classmethod
+    def soft_delete_product(
+        cls,
+        product_id: str | uuid.UUID,
+        company_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> None:
+        """
+        Soft-delete a Product by setting deleted_at timestamp. No further
+        delete guard needed -- Product is the leaf of the catalog
+        hierarchy (nothing in this sprint's scope references it yet;
+        boq_item.product_id is a later sprint's concern).
+        """
+        with transaction.atomic():
+            product = cls.get_product_by_id(product_id, company_id=company_id)
+            product_id_val = product.id
+            company_id_val = product.company_id
+            before_state = _product_audit_state(product)
+
+            ProductRepository.soft_delete(product)
+
+            AuditLogService.record(
+                action=AuditAction.DELETE,
+                entity_type="product",
+                entity_id=product_id_val,
                 company_id=company_id_val,
                 actor_user=actor_user,
                 before_state=before_state,

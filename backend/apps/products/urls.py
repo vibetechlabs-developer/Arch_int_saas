@@ -4,6 +4,7 @@ from apps.products.views import (
     ProductCategoryViewSet,
     ProductSubcategoryListCreateView,
     ProductSubcategoryViewSet,
+    ProductViewSet,
 )
 
 category_list = ProductCategoryViewSet.as_view(
@@ -31,6 +32,22 @@ subcategory_detail = ProductSubcategoryViewSet.as_view(
     }
 )
 
+product_list = ProductViewSet.as_view(
+    {
+        "get": "list",
+        "post": "create",
+    }
+)
+
+product_detail = ProductViewSet.as_view(
+    {
+        "get": "retrieve",
+        "patch": "partial_update",
+        "put": "update",
+        "delete": "destroy",
+    }
+)
+
 urlpatterns = [
     re_path(r"^product-categories/?$", category_list, name="product-category-list"),
     re_path(
@@ -47,5 +64,11 @@ urlpatterns = [
         r"^product-subcategories/(?P<pk>[0-9a-fA-F-]{36})/?$",
         subcategory_detail,
         name="product-subcategory-detail",
+    ),
+    re_path(r"^products/?$", product_list, name="product-list"),
+    re_path(
+        r"^products/(?P<pk>[0-9a-fA-F-]{36})/?$",
+        product_detail,
+        name="product-detail",
     ),
 ]

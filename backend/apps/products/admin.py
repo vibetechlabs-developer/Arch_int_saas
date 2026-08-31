@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.products.models import ProductCategory, ProductSubcategory
+from apps.products.models import Product, ProductCategory, ProductSubcategory
 
 
 @admin.register(ProductCategory)
@@ -66,3 +66,39 @@ class ProductSubcategoryAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return ProductSubcategory.all_objects.all()
+
+
+@admin.register(Product)
+class ProductAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "subcategory",
+        "company",
+        "unit",
+        "status",
+        "created_at",
+        "is_deleted",
+    )
+    list_filter = (
+        "company",
+        "status",
+        "deleted_at",
+    )
+    search_fields = (
+        "name",
+    )
+    readonly_fields = (
+        "id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+    )
+
+    def is_deleted(self, obj: Product) -> bool:
+        return obj.is_deleted
+
+    is_deleted.boolean = True
+    is_deleted.short_description = "Deleted"
+
+    def get_queryset(self, request):
+        return Product.all_objects.all()

@@ -47,6 +47,20 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
     # here (same reasoning as Project's FK ids — this JSONField has no
     # custom encoder and can't serialize a raw uuid.UUID).
     "product_subcategory": {"name", "category_id"},
+    # BE-033: subcategory_id and the Decimal money/percentage fields are
+    # stringified by apps.products.services._product_audit_state before
+    # reaching here — same JSONField-has-no-custom-encoder reasoning as
+    # Project's FK ids (BE-029).
+    "product": {
+        "name",
+        "subcategory_id",
+        "image_url",
+        "unit",
+        "default_cost",
+        "default_selling_rate",
+        "tax_rate",
+        "status",
+    },
 }
 
 

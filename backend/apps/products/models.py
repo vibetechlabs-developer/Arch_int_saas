@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 from apps.common.models import BaseModel
 
@@ -97,3 +98,133 @@ class ProductSubcategory(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.category.name})"
+
+
+class ProductUnit(models.TextChoices):
+    """
+    01_Business/FRS.md §11's documented 8-value list — the one Product
+    field with an actual enumerated value domain (unlike `status`, which
+    has none documented anywhere; see ProductStatus below for that
+    Backend Lead decision).
+    """
+
+    NOS = "nos", _("Nos")
+    SQFT = "sqft", _("Sq.ft")
+    SQM = "sqm", _("Sq.m")
+    RUNNING_FT = "running_ft", _("Running ft")
+    KG = "kg", _("Kg")
+    LITRE = "litre", _("Litre")
+    SET = "set", _("Set")
+    JOB = "job", _("Job")
+
+
+class ProductStatus(models.TextChoices):
+    """
+    Database_Schema.md and FRS.md both list a `status` field on `product`
+    but never enumerate its values (unlike Company/Project, which have
+    documented enums). Backend Lead decision (AskUserQuestion, 2026-08-31):
+    a simple Active/Inactive enum — the standard catalog pattern where an
+    inactive product stays in the system for historical BOQ/Quotation
+    references but can't be selected for new items (that exclusion is
+    BE-034/BOQ's job to enforce, not this model).
+    """
+
+    ACTIVE = "active", _("Active")
+    INACTIVE = "inactive", _("Inactive")
+
+
+class Product(BaseModel):
+    """
+    Third level of the Product catalog hierarchy (BE-033) — the actual
+    catalog item/work item BOQ items can reference (Database_Schema.md's
+    `boq_item.product_id`, nullable, is built in a later sprint). Field
+    set matches `product(id, company_id, subcategory_id FK, name,
+    image_url, unit, default_cost, default_selling_rate, tax_rate,
+    status)` exactly. Only `company`/`subcategory`/`name` are required —
+    the remaining fields (image, unit, pricing, tax) are treated as detail
+    fields that may be filled in later, mirroring Project's own
+    only-the-identifying-fields-are-required approach (BE-024/025).
+
+    `subcategory` uses CASCADE, matching ProductSubcategory.category's own
+    reasoning (BE-032) — no doc names this relationship as needing
+    hard-delete protection.
+
+    Money fields use `NUMERIC(14,2)` (03_Database/Naming_Standards.md's
+    documented convention for money columns) via
+    `DecimalField(max_digits=14, decimal_places=2)`. `tax_rate` is a
+    percentage, not money — `max_digits=5, decimal_places=2` (up to
+    999.99%) is a plain numeric-precision choice, not a business rule.
+    """
+
+    company = models.ForeignKey(
+        "company.Company",
+        on_delete=models.CASCADE,
+        related_name="products",
+        db_index=True,
+        help_text="The tenant company this product belongs to.",
+    )
+    subcategory = models.ForeignKey(
+        ProductSubcategory,
+        on_delete=models.CASCADE,
+        related_name="products",
+        db_index=True,
+        help_text="The subcategory this product belongs to.",
+    )
+    name = models.CharField(
+        max_length=255,
+        help_text="Product/work item name.",
+    )
+    image_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="URL of the product's image, if any.",
+    )
+    unit = models.CharField(
+        max_length=20,
+        choices=ProductUnit.choices,
+        blank=True,
+        default="",
+        help_text="Unit of measure. One of the 8 documented values.",
+    )
+    default_cost = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Default cost price for this product.",
+    )
+    default_selling_rate = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Default selling rate for this product.",
+    )
+    tax_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Tax rate percentage applied to this product by default.",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=ProductStatus.choices,
+        default=ProductStatus.ACTIVE,
+        db_index=True,
+        help_text="Product catalog status.",
+    )
+
+    class Meta:
+        db_table = "product"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["company", "status"], name="product_company_status_idx"),
+            models.Index(fields=["subcategory"], name="product_subcategory_idx"),
+        ]
+        verbose_name = "product"
+        verbose_name_plural = "products"
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.company.name})"

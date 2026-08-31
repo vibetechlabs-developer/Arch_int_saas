@@ -6,7 +6,7 @@ from rest_framework.test import APIClient
 
 from apps.authentication.tokens import CompanyUserAccessToken, PlatformAdminAccessToken
 from apps.company.models import Company, CompanyStatus
-from apps.products.models import ProductCategory, ProductSubcategory
+from apps.products.models import Product, ProductCategory, ProductSubcategory
 from apps.users.models import CompanyMembership, CompanyMembershipStatus
 
 User = get_user_model()
@@ -421,3 +421,204 @@ class ProductSubcategoryViewTestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.subcategory_c2.refresh_from_db()
         self.assertFalse(self.subcategory_c2.is_deleted)
+
+    def test_delete_subcategory_blocked_by_active_product_returns_409(self):
+        Product.objects.create(
+            company=self.company1, subcategory=self.subcategory1, name="Ceramic Tile"
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.delete(self._detail_url(self.subcategory1.id))
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.subcategory1.refresh_from_db()
+        self.assertFalse(self.subcategory1.is_deleted)
+
+
+class ProductViewSetTestCase(TestCase):
+    """
+    Integration test suite for Product CRUD endpoints (BE-033).
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+        self.superadmin = User.objects.create_superuser(
+            email="superadmin3@example.com", name="Super Admin", password="StrongPassword123!"
+        )
+        self.superadmin_token = str(PlatformAdminAccessToken.for_user(self.superadmin))
+
+        self.member_user = User.objects.create_user(
+            email="alice3@company1.com", name="Alice Member", password="StrongPassword123!"
+        )
+        self.member_token = str(CompanyUserAccessToken.for_user(self.member_user))
+
+        self.non_member_user = User.objects.create_user(
+            email="bob3@outsider.com", name="Bob Outsider", password="StrongPassword123!"
+        )
+        self.non_member_token = str(CompanyUserAccessToken.for_user(self.non_member_user))
+
+        self.company1 = Company.objects.create(name="Studio One", status=CompanyStatus.ACTIVE)
+        self.company2 = Company.objects.create(name="Studio Two", status=CompanyStatus.ACTIVE)
+
+        CompanyMembership.objects.create(
+            company=self.company1, user=self.member_user, status=CompanyMembershipStatus.ACTIVE
+        )
+
+        self.category1 = ProductCategory.objects.create(company=self.company1, name="Flooring")
+        self.category_c2 = ProductCategory.objects.create(company=self.company2, name="Lighting")
+
+        self.subcategory1 = ProductSubcategory.objects.create(
+            company=self.company1, category=self.category1, name="Tiles"
+        )
+        self.subcategory_c2 = ProductSubcategory.objects.create(
+            company=self.company2, category=self.category_c2, name="Bulbs"
+        )
+
+        self.product1 = Product.objects.create(
+            company=self.company1, subcategory=self.subcategory1, name="Ceramic Tile"
+        )
+        self.product_c2 = Product.objects.create(
+            company=self.company2, subcategory=self.subcategory_c2, name="LED Bulb"
+        )
+
+    # --- Authentication / Authorization ---------------------------------
+
+    def test_unauthenticated_requests_fail_401(self):
+        resp_list = self.client.get("/products")
+        self.assertEqual(resp_list.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        resp_create = self.client.post("/products", {"name": "New Product"})
+        self.assertEqual(resp_create.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_user_without_active_membership_denied_access(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.non_member_token}")
+        response = self.client.get("/products")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    # --- List --------------------------------------------------------------
+
+    def test_list_products_as_company_member(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.get("/products")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()["data"]
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["name"], "Ceramic Tile")
+
+    def test_list_products_as_platform_admin_sees_all_companies(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        response = self.client.get("/products")
+        self.assertEqual(len(response.json()["data"]), 2)
+
+    # --- Create --------------------------------------------------------------
+
+    def test_create_product_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        payload = {
+            "name": "Marble Tile",
+            "subcategoryId": str(self.subcategory1.id),
+            "unit": "sqft",
+            "defaultCost": "100.00",
+            "defaultSellingRate": "150.00",
+            "taxRate": "18.00",
+        }
+        response = self.client.post("/products", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.json()["data"]
+        self.assertEqual(data["name"], "Marble Tile")
+        self.assertEqual(data["companyId"], str(self.company1.id))
+        self.assertEqual(data["subcategoryId"], str(self.subcategory1.id))
+        self.assertEqual(data["categoryId"], str(self.category1.id))
+        self.assertEqual(data["unit"], "sqft")
+        self.assertEqual(data["defaultCost"], "100.00")
+        self.assertEqual(data["status"], "active")
+
+    def test_create_product_missing_subcategory_id_400(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.post("/products", {"name": "No Subcategory"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_product_cross_tenant_subcategory_rejected(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        payload = {"name": "Cross Tenant", "subcategoryId": str(self.subcategory_c2.id)}
+        response = self.client.post("/products", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_create_product_invalid_unit_400(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        payload = {
+            "name": "Bad Unit",
+            "subcategoryId": str(self.subcategory1.id),
+            "unit": "not-a-real-unit",
+        }
+        response = self.client.post("/products", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_product_company_injection_by_member_denied(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        payload = {
+            "name": "Injected Product",
+            "subcategoryId": str(self.subcategory1.id),
+            "companyId": str(self.company2.id),
+        }
+        response = self.client.post("/products", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    # --- Retrieve --------------------------------------------------------------
+
+    def test_get_product_detail_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.get(f"/products/{self.product1.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["data"]["name"], "Ceramic Tile")
+
+    def test_cross_tenant_idor_get_product_fails(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.get(f"/products/{self.product_c2.id}")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    # --- Update --------------------------------------------------------------
+
+    def test_update_product_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.patch(
+            f"/products/{self.product1.id}", {"name": "Renamed Tile"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["data"]["name"], "Renamed Tile")
+
+    def test_update_product_status(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.patch(
+            f"/products/{self.product1.id}", {"status": "inactive"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["data"]["status"], "inactive")
+
+    def test_cross_tenant_idor_patch_product_fails(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.patch(
+            f"/products/{self.product_c2.id}", {"name": "Hacked"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.product_c2.refresh_from_db()
+        self.assertEqual(self.product_c2.name, "LED Bulb")
+
+    # --- Delete --------------------------------------------------------------
+
+    def test_delete_product_soft_deletes(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.delete(f"/products/{self.product1.id}")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.product1.refresh_from_db()
+        self.assertTrue(self.product1.is_deleted)
+
+    def test_cross_tenant_idor_delete_product_fails(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.delete(f"/products/{self.product_c2.id}")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.product_c2.refresh_from_db()
+        self.assertFalse(self.product_c2.is_deleted)

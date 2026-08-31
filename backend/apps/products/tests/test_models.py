@@ -1,8 +1,9 @@
 import uuid
+from decimal import Decimal
 from django.test import TestCase
 
 from apps.company.models import Company, CompanyStatus
-from apps.products.models import ProductCategory, ProductSubcategory
+from apps.products.models import Product, ProductCategory, ProductStatus, ProductSubcategory, ProductUnit
 
 
 class ProductCategoryModelTestCase(TestCase):
@@ -187,3 +188,122 @@ class ProductSubcategoryModelTestCase(TestCase):
         subcategory.refresh_from_db()
         self.assertEqual(subcategory.category_id, self.category.id)
         self.assertFalse(subcategory.is_deleted)
+
+
+class ProductModelTestCase(TestCase):
+    """
+    Unit test suite for Product domain model (BE-033).
+    """
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Test Company", status=CompanyStatus.ACTIVE)
+        self.other_company = Company.objects.create(name="Other Company", status=CompanyStatus.ACTIVE)
+        self.category = ProductCategory.objects.create(company=self.company, name="Flooring")
+        self.subcategory = ProductSubcategory.objects.create(
+            company=self.company, category=self.category, name="Tiles"
+        )
+
+    def test_product_creation_with_required_fields_only(self):
+        product = Product.objects.create(
+            company=self.company, subcategory=self.subcategory, name="Ceramic Tile"
+        )
+        self.assertIsInstance(product.id, uuid.UUID)
+        self.assertEqual(product.name, "Ceramic Tile")
+        self.assertEqual(product.image_url, "")
+        self.assertEqual(product.unit, "")
+        self.assertIsNone(product.default_cost)
+        self.assertIsNone(product.default_selling_rate)
+        self.assertIsNone(product.tax_rate)
+        self.assertEqual(product.status, ProductStatus.ACTIVE)
+
+    def test_product_creation_with_all_fields(self):
+        product = Product.objects.create(
+            company=self.company,
+            subcategory=self.subcategory,
+            name="Ceramic Tile",
+            image_url="https://example.com/tile.png",
+            unit=ProductUnit.SQFT,
+            default_cost=Decimal("120.50"),
+            default_selling_rate=Decimal("180.00"),
+            tax_rate=Decimal("18.00"),
+            status=ProductStatus.INACTIVE,
+        )
+        product.refresh_from_db()
+        self.assertEqual(product.image_url, "https://example.com/tile.png")
+        self.assertEqual(product.unit, ProductUnit.SQFT)
+        self.assertEqual(product.default_cost, Decimal("120.50"))
+        self.assertEqual(product.default_selling_rate, Decimal("180.00"))
+        self.assertEqual(product.tax_rate, Decimal("18.00"))
+        self.assertEqual(product.status, ProductStatus.INACTIVE)
+
+    def test_product_all_unit_values_accepted(self):
+        for unit_value in ProductUnit.values:
+            product = Product.objects.create(
+                company=self.company,
+                subcategory=self.subcategory,
+                name=f"Item {unit_value}",
+                unit=unit_value,
+            )
+            self.assertEqual(product.unit, unit_value)
+
+    def test_product_str_representation(self):
+        product = Product.objects.create(
+            company=self.company, subcategory=self.subcategory, name="Ceramic Tile"
+        )
+        self.assertEqual(str(product), f"Ceramic Tile ({self.company.name})")
+
+    def test_product_tenant_isolation_via_company_fk(self):
+        other_category = ProductCategory.objects.create(company=self.other_company, name="Lighting")
+        other_subcategory = ProductSubcategory.objects.create(
+            company=self.other_company, category=other_category, name="Bulbs"
+        )
+        Product.objects.create(company=self.company, subcategory=self.subcategory, name="Company A Product")
+        Product.objects.create(
+            company=self.other_company, subcategory=other_subcategory, name="Company B Product"
+        )
+
+        company_products = Product.objects.filter(company=self.company)
+        self.assertEqual(company_products.count(), 1)
+        self.assertEqual(company_products.first().name, "Company A Product")
+
+    def test_product_soft_delete_lifecycle(self):
+        product = Product.objects.create(
+            company=self.company, subcategory=self.subcategory, name="Ceramic Tile"
+        )
+        product_id = product.id
+
+        product.delete()
+        self.assertTrue(product.is_deleted)
+
+        self.assertFalse(Product.objects.filter(id=product_id).exists())
+        self.assertTrue(Product.all_objects.filter(id=product_id).exists())
+
+        product.restore()
+        self.assertTrue(Product.objects.filter(id=product_id).exists())
+
+    def test_product_subcategory_cascade_delete(self):
+        product = Product.objects.create(
+            company=self.company, subcategory=self.subcategory, name="Ceramic Tile"
+        )
+        product_id = product.id
+        self.subcategory.delete(hard=True)
+        self.assertFalse(Product.all_objects.filter(id=product_id).exists())
+
+    def test_product_requires_subcategory(self):
+        with self.assertRaises(Exception):
+            Product.objects.create(company=self.company, name="Orphan Product")
+
+    def test_subcategory_soft_delete_leaves_product_fk_untouched(self):
+        product = Product.objects.create(
+            company=self.company, subcategory=self.subcategory, name="Ceramic Tile"
+        )
+        self.subcategory.delete()
+
+        product.refresh_from_db()
+        self.assertEqual(product.subcategory_id, self.subcategory.id)
+        self.assertFalse(product.is_deleted)
+
+    def test_product_company_status_composite_index_exists(self):
+        index_names = {index.name for index in Product._meta.indexes}
+        self.assertIn("product_company_status_idx", index_names)
+        self.assertIn("product_subcategory_idx", index_names)

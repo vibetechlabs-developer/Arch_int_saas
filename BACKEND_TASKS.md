@@ -809,7 +809,7 @@ _(Renumbered 2026-08-31, Sprint 3 planning: dropped the standalone "BE-034 – U
 - BE-033 – Products
 - BE-034 – Catalog APIs
 
-Status: In Progress (BE-031, BE-032 Review; BE-033–BE-034 Todo)
+Status: In Progress (BE-031, BE-032, BE-033 Review; BE-034 Todo)
 
 ---
 
@@ -858,6 +858,36 @@ Depends On
 Depends On
 
 - BE-031 (Categories)
+
+---
+
+### BE-033 – Products
+
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Implementation notes:** New `Product(BaseModel)` — the leaf of the catalog hierarchy — plus two `TextChoices` enums: `ProductUnit` (the 8 documented values from `01_Business/FRS.md` §11: Nos, Sq.ft, Sq.m, Running ft, Kg, Litre, Set, Job — the one Product field with an actual enumerated domain) and `ProductStatus` (Active/Inactive, the Backend Lead decision recorded in BE-031's entry, since `status` has zero documented values anywhere). Field set matches `Database_Schema.md`'s `product(id, company_id, subcategory_id FK, name, image_url, unit, default_cost, default_selling_rate, tax_rate, status)` exactly. Only `company`/`subcategory`/`name` are required — `image_url`/`unit`/pricing/`tax_rate` are optional detail fields, mirroring Project's own only-the-identifying-fields-are-required philosophy (BE-024/025). Money fields (`default_cost`, `default_selling_rate`) use `DecimalField(max_digits=14, decimal_places=2)` — `03_Database/Naming_Standards.md`'s documented `NUMERIC(14,2)` convention for money columns, the first field in this codebase to need it. `tax_rate` uses `max_digits=5, decimal_places=2` (a plain numeric-precision choice for a percentage, not a business rule). `subcategory` uses CASCADE, matching `ProductSubcategory.category`'s own BE-032 reasoning. Two indexes: `(company, status)` (mirrors Project's own composite index exactly) and a bare `subcategory` index for the list-by-subcategory query BE-034 will need.
+
+**Endpoints are flat, not nested** (unlike Subcategory) — `GET/POST /products`, `GET/PATCH/PUT/DELETE /products/{id}`, matching `BOQ_API.md`'s own literal paths (`/companies/{companyId}/products`, minus the established `/companies/{companyId}` deviation). `status` **is** settable at create, unlike Project — `BOQ_API.md`'s own text explicitly lists "status" among Product's create fields ("Create product/work item (unit, default cost, default rate, tax, status)"), a genuine documented difference from Project_API.md's separate-status-endpoint design, not an inconsistency. `subcategory` is not editable via the general update endpoint, mirroring `ProjectUpdateSerializer`'s exclusion of `client` for the identical reasoning (set at creation, not casually reassigned).
+
+**Tenant invariant enforcement:** `ProductService.create_product()` reuses `ProductSubcategoryService.get_subcategory_by_id(subcategory_id, company_id=...)`, which already raises `NotFound` on cross-tenant access — the same reuse-don't-duplicate pattern BE-025 established for `Project.client`.
+
+**Real bug found and fixed before any test ran:** `spectacular --fail-on-warn` hit the same enum-naming collision BE-025 found (`Company.status`/`Project.status`) — now a three-way collision with `Product.status`. Fixed by adding `"ProductStatusEnum": "apps.products.models.ProductStatus"` to `SPECTACULAR_SETTINGS["ENUM_NAME_OVERRIDES"]` in `config/settings.py`.
+
+**Audit logging wired inline** (mirrors BE-031/032, not deferred): `_product_audit_state()` stringifies `subcategory_id` (a `uuid.UUID`) and the three `Decimal` fields before they reach `AuditLogService.record()` — the same `JSONField`-has-no-custom-encoder gap BE-029 found for Project's FK ids/dates, now hit again for Product's FK id and money fields. `ENTITY_FIELD_ALLOWLISTS["product"]` added with full field coverage.
+
+**Resolves BE-032's deferred guard:** `ProductSubcategoryService.soft_delete_subcategory()` now checks `selectors.has_active_products_for_subcategory()` and raises `ConflictError` (409) if the subcategory has any non-deleted Product — closing the deferral chain BE-031 started (Category→Subcategory→Product, each guard added by the task that introduces the next level down). Product itself needs no delete guard of its own — nothing in this sprint's scope references it yet (`boq_item.product_id` is a later sprint's concern).
+
+**Deferred to BE-034 (documented, not a gap, mirrors the BE-025/BE-028 CRUD/Filters split for Project):** `list_products()` is deliberately bare — no category/subcategory/status filtering, which `BOQ_API.md` documents as this endpoint's filter set but which BE-034 ("Catalog APIs") owns as its own task.
+
+**Tests:** 46 new. `apps/products/tests/test_models.py` +11: required-fields-only creation with correct defaults, full-field creation, all 8 `ProductUnit` values accepted, str repr, tenant isolation via FK, soft-delete lifecycle + restore, Subcategory `CASCADE` hard-delete removes Product, required-subcategory enforcement, Subcategory **soft**-delete leaves Product's FK untouched, composite indexes exist. `apps/products/tests/test_services.py` +23: `ProductSubcategoryService` guard tests (blocked-by-active-product, succeeds-with-zero-products) plus full `ProductService` coverage (create success/with-explicit-status/nonexistent-company/cross-tenant-subcategory-rejected, get/list/cross-tenant scoping, `list_products_for_viewer` platform-admin-sees-all, `resolve_create_target_company_id` mismatch-denied, update success/status-update/cross-tenant-404/subcategory-changes-ignored, soft-delete, audit row creation on create/update/delete including `Decimal`/`uuid.UUID` stringification). `apps/products/tests/test_views.py` +12 (`ProductViewSetTestCase`) plus 1 added to the Subcategory test case (`test_delete_subcategory_blocked_by_active_product_returns_409`): 401/403, list scoping (member vs. platform-admin-sees-all), create (success/missing-subcategoryId-400/cross-tenant-subcategory-404/invalid-unit-400/company-injection-403), retrieve (success/cross-tenant-404), update (success/status-update/cross-tenant-404), delete (soft-deletes/cross-tenant-404). Full `apps/products` suite: **137 passed** (was 91 after BE-032). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected after generating `0003_product.py`. `spectacular --fail-on-warn`: clean after the `ENUM_NAME_OVERRIDES` fix; confirmed `/products/` and `/products/{id}/` present in the generated schema.
+
+Depends On
+
+- BE-032 (Subcategories)
 
 ---
 

@@ -16,3 +16,13 @@ def require_subcategory_name(name: str) -> str:
     if not name or not name.strip():
         raise ValueError("Subcategory name cannot be blank or empty.")
     return name.strip()
+
+
+def require_product_name(name: str) -> str:
+    """
+    Enforce Product.name is present and non-blank. Mirrors
+    require_category_name/require_subcategory_name.
+    """
+    if not name or not name.strip():
+        raise ValueError("Product name cannot be blank or empty.")
+    return name.strip()

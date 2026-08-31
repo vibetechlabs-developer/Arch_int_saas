@@ -272,6 +272,7 @@ SPECTACULAR_SETTINGS = {
     "ENUM_NAME_OVERRIDES": {
         "CompanyStatusEnum": "apps.company.models.CompanyStatus",
         "ProjectStatusEnum": "apps.projects.models.ProjectStatus",
+        "ProductStatusEnum": "apps.products.models.ProductStatus",
     },
 }
 
