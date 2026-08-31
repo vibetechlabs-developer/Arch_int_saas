@@ -1,12 +1,15 @@
 import uuid
+from decimal import Decimal
 from django.test import TestCase
 from rest_framework import exceptions as drf_exceptions
 
 from apps.audit.models import AuditLog
-from apps.boq.models import BOQ, BOQSection
-from apps.boq.services import BOQSectionService, BOQService
+from apps.boq.models import BOQ, BOQItem, BOQSection
+from apps.boq.services import BOQItemService, BOQSectionService, BOQService
 from apps.clients.models import Client
+from apps.common.exceptions import ConflictError
 from apps.company.models import Company, CompanyStatus
+from apps.products.models import Product, ProductCategory, ProductSubcategory, ProductUnit
 from apps.projects.models import Project
 
 
@@ -123,6 +126,26 @@ class BOQSectionServiceTestCase(TestCase):
 
         self.assertTrue(BOQSection.all_objects.filter(id=section_id).exists())
 
+    def test_soft_delete_section_blocked_by_active_item(self):
+        """
+        Resolves BE-035's documented deferral.
+        """
+        section = BOQSectionService.create_section(boq=self.boq1, name="Flooring")
+        BOQItemService.create_item(
+            section=section, description="Custom work", quantity=Decimal("1.00"),
+            unit=ProductUnit.JOB, rate=Decimal("100.00"),
+        )
+
+        with self.assertRaises(ConflictError):
+            BOQSectionService.soft_delete_section(section.id)
+
+        self.assertFalse(BOQSection.objects.get(id=section.id).is_deleted)
+
+    def test_soft_delete_section_succeeds_with_zero_items(self):
+        section = BOQSectionService.create_section(boq=self.boq1, name="Flooring")
+        BOQSectionService.soft_delete_section(section.id)
+        self.assertTrue(BOQSection.all_objects.get(id=section.id).is_deleted)
+
     def test_create_section_writes_audit_log_entry(self):
         section = BOQSectionService.create_section(boq=self.boq1, name="Audited Section")
         entry = AuditLog.objects.get(
@@ -150,4 +173,218 @@ class BOQSectionServiceTestCase(TestCase):
             entity_type="boq_section", entity_id=section_id, action="delete"
         )
         self.assertEqual(entry.before_state["name"], "Flooring")
+        self.assertIsNone(entry.after_state)
+
+
+class BOQItemServiceTestCase(TestCase):
+    """
+    Unit test suite for BOQItemService business logic (BE-036).
+    """
+
+    def setUp(self):
+        self.company1 = Company.objects.create(name="Alpha Corp", status=CompanyStatus.ACTIVE)
+        self.company2 = Company.objects.create(name="Beta Corp", status=CompanyStatus.ACTIVE)
+
+        self.client1 = Client.objects.create(company=self.company1, name="Client One")
+        self.project1 = Project.objects.create(
+            company=self.company1, client=self.client1, name="Kitchen Remodel"
+        )
+        self.boq1 = BOQService.get_or_create_boq_for_project(self.project1)
+        self.section1 = BOQSectionService.create_section(boq=self.boq1, name="Flooring")
+
+        self.client2 = Client.objects.create(company=self.company2, name="Client Two")
+        self.project2 = Project.objects.create(
+            company=self.company2, client=self.client2, name="Office Fitout"
+        )
+        self.boq2 = BOQService.get_or_create_boq_for_project(self.project2)
+        self.section2 = BOQSectionService.create_section(boq=self.boq2, name="Other")
+
+        self.category1 = ProductCategory.objects.create(company=self.company1, name="Flooring")
+        self.subcategory1 = ProductSubcategory.objects.create(
+            company=self.company1, category=self.category1, name="Tiles"
+        )
+        self.product1 = Product.objects.create(
+            company=self.company1,
+            subcategory=self.subcategory1,
+            name="Ceramic Tile",
+            unit=ProductUnit.SQFT,
+            default_selling_rate=Decimal("120.00"),
+            tax_rate=Decimal("18.00"),
+        )
+
+        self.category2 = ProductCategory.objects.create(company=self.company2, name="Lighting")
+        self.subcategory2 = ProductSubcategory.objects.create(
+            company=self.company2, category=self.category2, name="Bulbs"
+        )
+        self.product2 = Product.objects.create(
+            company=self.company2, subcategory=self.subcategory2, name="LED Bulb"
+        )
+
+    def test_create_free_text_item_success(self):
+        item = BOQItemService.create_item(
+            section=self.section1,
+            description="Custom flooring work",
+            quantity=Decimal("10.00"),
+            unit=ProductUnit.SQFT,
+            rate=Decimal("50.00"),
+        )
+        self.assertEqual(item.description, "Custom flooring work")
+        self.assertEqual(item.amount, Decimal("500.00"))
+        self.assertIsNone(item.product)
+
+    def test_create_free_text_item_missing_description_rejected(self):
+        with self.assertRaises(drf_exceptions.ValidationError):
+            BOQItemService.create_item(
+                section=self.section1, quantity=Decimal("1.00"), unit=ProductUnit.JOB,
+                rate=Decimal("10.00"),
+            )
+
+    def test_create_free_text_item_missing_rate_rejected(self):
+        with self.assertRaises(drf_exceptions.ValidationError):
+            BOQItemService.create_item(
+                section=self.section1, description="Custom", quantity=Decimal("1.00"),
+                unit=ProductUnit.JOB,
+            )
+
+    def test_create_item_missing_quantity_rejected(self):
+        with self.assertRaises(drf_exceptions.ValidationError):
+            BOQItemService.create_item(
+                section=self.section1, description="Custom", rate=Decimal("1.00"),
+                unit=ProductUnit.JOB,
+            )
+
+    def test_create_item_with_product_inherits_defaults(self):
+        item = BOQItemService.create_item(
+            section=self.section1, product_id=self.product1.id, quantity=Decimal("5.00"),
+        )
+        self.assertEqual(item.description, "Ceramic Tile")
+        self.assertEqual(item.unit, ProductUnit.SQFT)
+        self.assertEqual(item.rate, Decimal("120.00"))
+        self.assertEqual(item.tax, Decimal("18.00"))
+        self.assertEqual(item.amount, Decimal("600.00"))
+
+    def test_create_item_with_product_explicit_overrides_win(self):
+        item = BOQItemService.create_item(
+            section=self.section1,
+            product_id=self.product1.id,
+            description="Custom Description",
+            quantity=Decimal("5.00"),
+            unit=ProductUnit.NOS,
+            rate=Decimal("200.00"),
+            tax=Decimal("5.00"),
+        )
+        self.assertEqual(item.description, "Custom Description")
+        self.assertEqual(item.unit, ProductUnit.NOS)
+        self.assertEqual(item.rate, Decimal("200.00"))
+        self.assertEqual(item.tax, Decimal("5.00"))
+
+    def test_create_item_explicit_zero_tax_not_overridden_by_product(self):
+        """
+        Regression guard: tax=0 is a legitimate explicit value (Decimal(0)
+        is falsy) and must not be silently replaced by the product's own
+        tax_rate.
+        """
+        item = BOQItemService.create_item(
+            section=self.section1,
+            product_id=self.product1.id,
+            quantity=Decimal("1.00"),
+            tax=Decimal("0.00"),
+        )
+        self.assertEqual(item.tax, Decimal("0.00"))
+
+    def test_create_item_cross_tenant_product_raises_not_found(self):
+        with self.assertRaises(drf_exceptions.NotFound):
+            BOQItemService.create_item(
+                section=self.section1, product_id=self.product2.id, quantity=Decimal("1.00"),
+            )
+
+    def test_list_items(self):
+        BOQItemService.create_item(
+            section=self.section1, description="A", quantity=Decimal("1.00"),
+            unit=ProductUnit.JOB, rate=Decimal("1.00"),
+        )
+        BOQItemService.create_item(
+            section=self.section1, description="B", quantity=Decimal("1.00"),
+            unit=ProductUnit.JOB, rate=Decimal("1.00"),
+        )
+        items = BOQItemService.list_items(self.section1)
+        self.assertEqual(items.count(), 2)
+
+    def test_get_item_by_id_cross_tenant_raises_not_found(self):
+        item = BOQItemService.create_item(
+            section=self.section1, description="A", quantity=Decimal("1.00"),
+            unit=ProductUnit.JOB, rate=Decimal("1.00"),
+        )
+        with self.assertRaises(drf_exceptions.NotFound):
+            BOQItemService.get_item_by_id(item.id, company_id=self.company2.id)
+
+    def test_update_item_recomputes_amount(self):
+        item = BOQItemService.create_item(
+            section=self.section1, description="A", quantity=Decimal("1.00"),
+            unit=ProductUnit.JOB, rate=Decimal("10.00"),
+        )
+        updated = BOQItemService.update_item(
+            item_id=item.id, validated_data={"quantity": Decimal("3.00")}
+        )
+        self.assertEqual(updated.amount, Decimal("30.00"))
+
+    def test_update_item_cross_tenant_raises_not_found(self):
+        item = BOQItemService.create_item(
+            section=self.section1, description="A", quantity=Decimal("1.00"),
+            unit=ProductUnit.JOB, rate=Decimal("1.00"),
+        )
+        with self.assertRaises(drf_exceptions.NotFound):
+            BOQItemService.update_item(
+                item_id=item.id,
+                validated_data={"description": "Hacked"},
+                company_id=self.company2.id,
+            )
+
+    def test_soft_delete_item(self):
+        item = BOQItemService.create_item(
+            section=self.section1, description="A", quantity=Decimal("1.00"),
+            unit=ProductUnit.JOB, rate=Decimal("1.00"),
+        )
+        item_id = item.id
+        BOQItemService.soft_delete_item(item_id)
+
+        with self.assertRaises(drf_exceptions.NotFound):
+            BOQItemService.get_item_by_id(item_id)
+
+        self.assertTrue(BOQItem.all_objects.filter(id=item_id).exists())
+
+    def test_create_item_writes_audit_log_entry(self):
+        item = BOQItemService.create_item(
+            section=self.section1, description="Audited Item", quantity=Decimal("2.00"),
+            unit=ProductUnit.JOB, rate=Decimal("10.00"),
+        )
+        entry = AuditLog.objects.get(entity_type="boq_item", entity_id=item.id, action="create")
+        self.assertEqual(entry.company_id, self.company1.id)
+        self.assertEqual(entry.after_state["description"], "Audited Item")
+        self.assertEqual(entry.after_state["amount"], "20.00")
+
+    def test_update_item_writes_audit_log_entry(self):
+        item = BOQItemService.create_item(
+            section=self.section1, description="Original", quantity=Decimal("1.00"),
+            unit=ProductUnit.JOB, rate=Decimal("10.00"),
+        )
+        BOQItemService.update_item(
+            item_id=item.id, validated_data={"description": "Renamed"}
+        )
+        entry = AuditLog.objects.filter(
+            entity_type="boq_item", entity_id=item.id, action="update"
+        ).latest("created_at")
+        self.assertEqual(entry.before_state["description"], "Original")
+        self.assertEqual(entry.after_state["description"], "Renamed")
+
+    def test_soft_delete_item_writes_audit_log_entry(self):
+        item = BOQItemService.create_item(
+            section=self.section1, description="A", quantity=Decimal("1.00"),
+            unit=ProductUnit.JOB, rate=Decimal("1.00"),
+        )
+        item_id = item.id
+        BOQItemService.soft_delete_item(item_id)
+
+        entry = AuditLog.objects.get(entity_type="boq_item", entity_id=item_id, action="delete")
+        self.assertEqual(entry.before_state["description"], "A")
         self.assertIsNone(entry.after_state)

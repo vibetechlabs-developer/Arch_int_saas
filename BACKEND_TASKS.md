@@ -915,7 +915,7 @@ Depends On
 
 # Sprint 4 – BOQ
 
-Status: In Progress (BE-035 Review; BE-036–BE-038 Todo)
+Status: In Progress (BE-035, BE-036 Review; BE-037–BE-038 Todo)
 
 ---
 
@@ -943,6 +943,38 @@ Depends On
 
 - BE-025 (Project CRUD — BOQ is nested under Project)
 - BE-033 (Products — `boq_item.product_id` will reference it in BE-036)
+
+---
+
+### BE-036 – BOQ Items
+
+**Status:** Review
+
+**Priority:** Critical
+
+**Owner:** Backend Team
+
+**Implementation notes:** New `BOQItem(BaseModel)` — field set matches `Database_Schema.md`'s `boq_item(id, boq_section_id FK, product_id FK nullable, description, quantity, unit, rate, discount, tax, amount, is_optional, is_alternative, notes)` exactly, same no-`company`-column schema literalism as `BOQSection` (BE-035). `product` is nullable `SET_NULL` (an item may optionally reference a catalog Product or be pure free-text, per `BOQ_API.md`), preserving a historical item's frozen description/rate if the referenced Product is later hard-deleted — mirrors `Project.assigned_to`'s `SET_NULL` reasoning. `unit` reuses `apps.products.models.ProductUnit`'s 8 documented values directly (FRS.md §11/§12 name the same unit list for both Product and BOQ items — one enum, not a duplicate). `discount`/`tax` are percentages (`max_digits=5, decimal_places=2`), the Backend Lead decision from BE-035 planning. `amount` is always server-computed (`quantity * rate`, `BOQ_API.md`'s own documented formula, explicitly "never trusted from client") — no caller can set it directly.
+
+**Product-reference defaulting, resolved without asking (a direct reading of `BOQ_API.md`'s own Notes, not an invention):** when `productId` is supplied and `description`/`unit`/`rate`/`tax` are omitted, they default from the product's `name`/`unit`/`default_selling_rate`/`tax_rate` ("inherit default cost/rate/unit/tax"). Without a product, `description`/`unit`/`rate` have no sensible default and are required — `ValidationError` (400) if missing. Explicit values always win over product defaults, including an explicit `tax: 0` (verified by a dedicated regression test — `Decimal(0)` is falsy in Python, so a naive `tax or product.tax_rate` would have silently discarded a legitimate "no tax" override).
+
+**Tenant invariant enforcement:** `BOQItemService.create_item()` reuses `ProductService.get_product_by_id(product_id, company_id=...)`, which already raises `NotFound` on cross-tenant access — the same reuse-don't-duplicate pattern `BE-025`/`BE-033` established for `Project.client`/`Product.subcategory`.
+
+**A second tenant-safety check beyond the usual pattern:** the item-create endpoint's URL carries both `projectId` and `sectionId` (`BOQ_API.md`'s literal nested path). Unlike every prior nested-create endpoint in this codebase, a `company_id` match alone isn't sufficient here — a company can have multiple Projects, each with its own BOQ, so a `sectionId` belonging to a *sibling* project under the *same* company would pass a company-only check. `BOQItemListCreateView` explicitly verifies `section.boq.project_id == project.id` (404 if not), covered by a dedicated test (`test_section_from_sibling_project_returns_404`).
+
+**Real bug found and fixed before any other test ran:** `Decimal("2.00") * Decimal("10.00")` produces `Decimal("20.0000")` — 4 decimal places, not the 2 `amount`'s `decimal_places=2` implies. Postgres' `NUMERIC(14,2)` column silently rounds it on the *next* fetch, but the in-memory value used for the immediate API response and audit log entry stayed unrounded until then (caught by `test_create_item_writes_audit_log_entry` failing with `'20.0000' != '20.00'`, not assumed). Fixed with a shared `_compute_amount()` helper that explicitly `.quantize()`s to 2 decimal places (`ROUND_HALF_UP`), used by both `create_item` and `update_item`.
+
+**Endpoints:** `POST /projects/{projectId}/boq/sections/{sectionId}/items` (`BOQItemListCreateView`, no GET — items are retrieved via `BOQDetailView`'s tree, which now nests `items` inside each section). `PATCH/PUT/DELETE /boq-items/{id}` (`BOQItemViewSet`, flat), matching `BOQ_API.md`'s documented paths exactly. `update_item` also accepts `description`/`unit` (not in `BOQ_API.md`'s literal PATCH field list — "quantity/rate/discount/tax/notes/optional/alternative flags" — but excluding them would make a free-text item's own identifying content unfixable after a typo; `product`/`section` reassignment remains excluded, matching every prior module's exclusion of its own parent reference from PATCH).
+
+**Resolves BE-035's deferred guard:** `BOQSectionService.soft_delete_section()` now checks `selectors.has_active_items_for_section()` and raises `ConflictError` (409) if the section has any non-deleted Item — closing the deferral chain BE-031 started, now spanning Category→Subcategory→Product *and* BOQ→Section→Item.
+
+**Audit logging wired inline** (mirrors BE-035, not deferred): `_item_audit_state()` stringifies `product_id` (`uuid.UUID`) and four `Decimal` fields before reaching `AuditLogService.record()` — the same `JSONField`-has-no-custom-encoder gap BE-029/BE-033 found, hit again here. `ENTITY_FIELD_ALLOWLISTS["boq_item"]` added with full field coverage.
+
+**Tests:** 39 new. `apps/boq/tests/test_models.py` +9: free-text/with-product creation, str repr, required-section, Section `CASCADE` hard-delete removes Item, Product `SET_NULL` on hard-delete (description/rate stay frozen), soft-delete lifecycle, Section **soft**-delete leaves Item's FK untouched, reverse accessor. `apps/boq/tests/test_services.py` +23 (`BOQItemServiceTestCase`, plus 2 added to `BOQSectionServiceTestCase` for the resolved guard): create free-text success, missing-description/missing-rate/missing-quantity rejected (400), create-with-product inherits defaults, explicit values override product defaults, explicit `tax=0` not silently overridden (the regression guard for the bug above), cross-tenant product `NotFound`, list/get/cross-tenant scoping, update recomputes `amount`, cross-tenant update `NotFound`, soft-delete, audit row creation on create/update/delete. `apps/boq/tests/test_views.py` +14 (`BOQItemViewTestCase`, plus 1 added to the Section test case): 401, cross-tenant project 404, sibling-project-section 404 (the second tenant-safety check above), create free-text/with-product-inherits-defaults/missing-fields-400, item-appears-in-boq-tree, update recomputes amount, cross-tenant update/delete 404, delete soft-deletes. Full `apps/boq` suite: **82 passed** (was 43 after BE-035). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected after generating `0002_boqitem.py`. `spectacular --fail-on-warn`: clean; confirmed `/projects/{project_id}/boq/sections/{section_id}/items/` and `/boq-items/{id}/` present in the generated schema.
+
+Depends On
+
+- BE-035 (BOQ Module)
 
 ---
 

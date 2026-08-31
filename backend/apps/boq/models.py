@@ -1,6 +1,7 @@
 from django.db import models
 
 from apps.common.models import BaseModel
+from apps.products.models import ProductUnit
 
 
 class BOQ(BaseModel):
@@ -97,3 +98,108 @@ class BOQSection(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.name} (BOQ {self.boq_id})"
+
+
+class BOQItem(BaseModel):
+    """
+    A single line item within a BOQSection (BE-036). Field set matches
+    Database_Schema.md's `boq_item(id, boq_section_id FK, product_id FK
+    nullable, description, quantity, unit, rate, discount, tax, amount,
+    is_optional, is_alternative, notes)` exactly — like BOQSection, no
+    `company` column (tenant scoping resolves through
+    `boq_section.boq.company_id`).
+
+    `product` is nullable (`SET_NULL`) — an item may optionally reference
+    a catalog Product (to inherit default cost/rate/unit/tax, per
+    BOQ_API.md's own Notes) or be pure free-text; SET_NULL preserves a
+    historical item's own frozen description/rate if the referenced
+    Product is later hard-deleted, mirroring Project.assigned_to's
+    SET_NULL reasoning.
+
+    `amount` is server-computed (`quantity * rate`, BOQ_API.md's own
+    documented formula and its explicit "never trusted from client" rule)
+    by BOQItemService — never client-writable. `discount`/`tax` are
+    percentages (Backend Lead decision, 2026-08-31, made during BE-035
+    planning), `max_digits=5, decimal_places=2` matching Product.tax_rate.
+    """
+
+    boq_section = models.ForeignKey(
+        BOQSection,
+        on_delete=models.CASCADE,
+        related_name="items",
+        db_index=True,
+        help_text="The section this item belongs to.",
+    )
+    product = models.ForeignKey(
+        "products.Product",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="boq_items",
+        help_text="Optional catalog product reference. Null for a free-text item.",
+    )
+    description = models.CharField(
+        max_length=500,
+        help_text="Item description. Defaults from the product's name if a product is referenced.",
+    )
+    quantity = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="Quantity of this item.",
+    )
+    unit = models.CharField(
+        max_length=20,
+        choices=ProductUnit.choices,
+        blank=True,
+        default="",
+        help_text=(
+            "Unit of measure — reuses apps.products.models.ProductUnit's "
+            "8 documented values (FRS.md §11/§12 name the same unit list "
+            "for both Product and BOQ items). Defaults from the "
+            "referenced product's unit if not supplied."
+        ),
+    )
+    rate = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        help_text="Rate per unit. Defaults from the product's default selling rate if a product is referenced.",
+    )
+    discount = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text="Discount percentage applied to this item.",
+    )
+    tax = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text="Tax percentage applied to this item. Defaults from the product's tax rate if referenced.",
+    )
+    amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        help_text="Server-computed: quantity * rate. Never client-writable.",
+    )
+    is_optional = models.BooleanField(
+        default=False,
+        help_text="Excluded from the BOQ's default summary total when true.",
+    )
+    is_alternative = models.BooleanField(
+        default=False,
+        help_text="Excluded from the BOQ's default summary total when true.",
+    )
+    notes = models.TextField(
+        blank=True,
+        default="",
+        help_text="Free-form notes about this item.",
+    )
+
+    class Meta:
+        db_table = "boq_item"
+        ordering = ["created_at"]
+        verbose_name = "BOQ item"
+        verbose_name_plural = "BOQ items"
+
+    def __str__(self) -> str:
+        return f"{self.description} ({self.boq_section_id})"

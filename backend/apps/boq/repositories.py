@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
-from apps.boq.models import BOQ, BOQSection
+from apps.boq.models import BOQ, BOQItem, BOQSection
 from apps.projects.models import Project
 
 
@@ -75,3 +75,39 @@ class BOQSectionRepository:
     @staticmethod
     def soft_delete(section: BOQSection) -> None:
         section.delete()
+
+
+class BOQItemRepository:
+    """
+    Data-access layer for BOQItem (BE-036).
+    """
+
+    @staticmethod
+    def all_for_section(section_id: str | uuid.UUID) -> QuerySet[BOQItem]:
+        return BOQItem.objects.select_related(
+            "boq_section", "boq_section__boq", "boq_section__boq__company", "product"
+        ).filter(boq_section_id=section_id)
+
+    @staticmethod
+    def get_by_id(item_id: str | uuid.UUID) -> BOQItem:
+        try:
+            return BOQItem.objects.select_related(
+                "boq_section", "boq_section__boq", "boq_section__boq__company", "product"
+            ).get(id=item_id)
+        except (BOQItem.DoesNotExist, ValueError):
+            raise drf_exceptions.NotFound("The requested BOQ item was not found.")
+
+    @staticmethod
+    def create(**fields: Any) -> BOQItem:
+        return BOQItem.objects.create(**fields)
+
+    @staticmethod
+    def save(item: BOQItem, fields: Optional[Dict[str, Any]] = None) -> BOQItem:
+        for field, value in (fields or {}).items():
+            setattr(item, field, value)
+        item.save()
+        return item
+
+    @staticmethod
+    def soft_delete(item: BOQItem) -> None:
+        item.delete()

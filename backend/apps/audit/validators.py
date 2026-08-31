@@ -66,6 +66,23 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
     # recording.
     "boq": {"project_id"},
     "boq_section": {"name", "sort_order"},
+    # BE-036: product_id and the Decimal fields are stringified by
+    # apps.boq.services._item_audit_state before reaching here -- same
+    # JSONField-has-no-custom-encoder reasoning as Project (BE-029) and
+    # Product (BE-033).
+    "boq_item": {
+        "product_id",
+        "description",
+        "quantity",
+        "unit",
+        "rate",
+        "discount",
+        "tax",
+        "amount",
+        "is_optional",
+        "is_alternative",
+        "notes",
+    },
 }
 
 

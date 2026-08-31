@@ -1,3 +1,4 @@
+from django.http import Http404
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated
@@ -5,14 +6,17 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.boq.models import BOQSection
+from apps.boq.models import BOQItem, BOQSection
 from apps.boq.serializers import (
+    BOQItemCreateSerializer,
+    BOQItemSerializer,
+    BOQItemUpdateSerializer,
     BOQSectionCreateSerializer,
     BOQSectionSerializer,
     BOQSectionUpdateSerializer,
     BOQSerializer,
 )
-from apps.boq.services import BOQSectionService, BOQService
+from apps.boq.services import BOQItemService, BOQSectionService, BOQService
 from apps.common.responses import ApiResponse
 from apps.common.views import ObjectPermission404Mixin
 from apps.projects.permissions import ProjectPermission
@@ -162,5 +166,131 @@ class BOQSectionViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         BOQSectionService.soft_delete_section(pk, actor_user=request.user, request=request)
         return ApiResponse.success(
             data={"message": "BOQ section deleted successfully."},
+            request_id=getattr(request, "request_id", None),
+        )
+
+
+class BOQItemListCreateView(ObjectPermission404Mixin, APIView):
+    """
+    `POST /projects/{projectId}/boq/sections/{sectionId}/items` (BE-036).
+    No GET here — items are retrieved via BOQDetailView's tree. Resolves
+    `project_id` from the URL for the permission check, then verifies
+    `section_id` actually belongs to that project's BOQ (not just the
+    same company) — a company can have many projects, each with its own
+    BOQ, so a company-level check alone wouldn't catch a section_id from
+    a sibling project under the same tenant.
+    """
+
+    permission_classes = [IsAuthenticated, ProjectPermission]
+
+    @extend_schema(
+        summary="Add BOQ Item",
+        description="Add an item to a BOQ section (product reference or free-text).",
+        request=BOQItemCreateSerializer,
+        responses={status.HTTP_201_CREATED: BOQItemSerializer},
+        tags=["BOQ"],
+    )
+    def post(self, request: Request, project_id: str = None, section_id: str = None) -> Response:
+        project = ProjectService.get_project_by_id(project_id)
+        self.check_object_permissions(request, project)
+
+        section = BOQSectionService.get_section_by_id(section_id, company_id=project.company_id)
+        if str(section.boq.project_id) != str(project.id):
+            raise Http404
+
+        serializer = BOQItemCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+
+        item = BOQItemService.create_item(
+            section=section,
+            product_id=validated.get("product_id"),
+            description=validated.get("description", ""),
+            quantity=validated["quantity"],
+            unit=validated.get("unit", ""),
+            rate=validated.get("rate"),
+            discount=validated.get("discount"),
+            tax=validated.get("tax"),
+            is_optional=validated.get("is_optional", False),
+            is_alternative=validated.get("is_alternative", False),
+            notes=validated.get("notes", ""),
+            actor_user=request.user,
+            request=request,
+        )
+
+        response_data = BOQItemSerializer(item).data
+        return ApiResponse.created(
+            data=response_data, request_id=getattr(request, "request_id", None)
+        )
+
+
+@extend_schema_view(
+    partial_update=extend_schema(
+        summary="Update BOQ Item",
+        description="Edit item (quantity/rate/discount/tax/notes/optional/alternative flags), plus description/unit.",
+        request=BOQItemUpdateSerializer,
+        responses={status.HTTP_200_OK: BOQItemSerializer},
+        tags=["BOQ"],
+    ),
+    update=extend_schema(
+        summary="Full Update BOQ Item",
+        description="Update forwards to partial_update logic.",
+        request=BOQItemUpdateSerializer,
+        responses={status.HTTP_200_OK: BOQItemSerializer},
+        tags=["BOQ"],
+    ),
+    destroy=extend_schema(
+        summary="Remove BOQ Item",
+        description="Soft-delete a BOQ item by UUID.",
+        responses={status.HTTP_200_OK: BOQItemSerializer},
+        tags=["BOQ"],
+    ),
+)
+class BOQItemViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
+    """
+    Flat detail-only actions for BOQItem (`/boq-items/{id}`, BE-036),
+    matching BOQ_API.md's documented `PATCH`/`DELETE .../boq/items/{itemId}`
+    paths exactly (minus the `/projects/{projectId}/boq` prefix — an
+    item's own id is already globally unique and sufficient to resolve
+    it, the same flat-detail convention every other nested list/create
+    endpoint in this codebase uses).
+    """
+
+    permission_classes = [IsAuthenticated, ProjectPermission]
+    serializer_class = BOQItemSerializer
+    queryset = BOQItem.objects.none()
+
+    def partial_update(self, request: Request, pk: str = None) -> Response:
+        item = BOQItemService.get_item_by_id(pk)
+        self.check_object_permissions(request, item.boq_section.boq)
+
+        serializer = BOQItemUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        updated_item = BOQItemService.update_item(
+            item_id=pk,
+            validated_data=serializer.validated_data,
+            actor_user=request.user,
+            request=request,
+        )
+        response_data = BOQItemSerializer(updated_item).data
+        return ApiResponse.success(
+            data=response_data, request_id=getattr(request, "request_id", None)
+        )
+
+    def update(self, request: Request, pk: str = None) -> Response:
+        """
+        Full update forwards to partial_update logic — matching the
+        existing convention.
+        """
+        return self.partial_update(request, pk=pk)
+
+    def destroy(self, request: Request, pk: str = None) -> Response:
+        item = BOQItemService.get_item_by_id(pk)
+        self.check_object_permissions(request, item.boq_section.boq)
+
+        BOQItemService.soft_delete_item(pk, actor_user=request.user, request=request)
+        return ApiResponse.success(
+            data={"message": "BOQ item deleted successfully."},
             request_id=getattr(request, "request_id", None),
         )

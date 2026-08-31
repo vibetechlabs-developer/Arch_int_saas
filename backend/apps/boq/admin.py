@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.boq.models import BOQ, BOQSection
+from apps.boq.models import BOQ, BOQItem, BOQSection
 
 
 @admin.register(BOQ)
@@ -63,3 +63,43 @@ class BOQSectionAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return BOQSection.all_objects.all()
+
+
+@admin.register(BOQItem)
+class BOQItemAdmin(admin.ModelAdmin):
+    list_display = (
+        "description",
+        "boq_section",
+        "product",
+        "quantity",
+        "rate",
+        "amount",
+        "is_optional",
+        "is_alternative",
+        "created_at",
+        "is_deleted",
+    )
+    list_filter = (
+        "is_optional",
+        "is_alternative",
+        "deleted_at",
+    )
+    search_fields = (
+        "description",
+    )
+    readonly_fields = (
+        "id",
+        "amount",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+    )
+
+    def is_deleted(self, obj: BOQItem) -> bool:
+        return obj.is_deleted
+
+    is_deleted.boolean = True
+    is_deleted.short_description = "Deleted"
+
+    def get_queryset(self, request):
+        return BOQItem.all_objects.all()
