@@ -4,7 +4,9 @@ from typing import Any, Dict, Optional
 from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
+from apps.company.models import Company
 from apps.projects.models import Project
+from apps.users.models import User
 
 
 class ProjectRepository:
@@ -45,3 +47,17 @@ class ProjectRepository:
     @staticmethod
     def soft_delete(project: Project) -> None:
         project.delete()
+
+    @staticmethod
+    def get_company_by_id(company_id: str | uuid.UUID) -> Company:
+        try:
+            return Company.objects.get(id=company_id)
+        except (Company.DoesNotExist, ValueError):
+            raise drf_exceptions.NotFound("The specified company was not found.")
+
+    @staticmethod
+    def get_user_by_id(user_id: str | uuid.UUID) -> User:
+        try:
+            return User.objects.get(id=user_id)
+        except (User.DoesNotExist, ValueError):
+            raise drf_exceptions.ValidationError({"assignedTo": ["assignedTo user was not found."]})

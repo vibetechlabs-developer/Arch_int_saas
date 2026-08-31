@@ -28,6 +28,7 @@
 | 010 | `create_audit_log` | `audit_log` | `company` (nullable), `user` | Must exist before any module that writes audit entries goes live |
 | 011 | `create_clients` | `client` | `company` | First tenant-owned business entity |
 | 012 | `create_projects` | `project` | `company`, `client`, `user` (assigned_to) | `project.client_id → client.id` |
+| 012a | `create_project_members` | `project_member` | `company`, `project`, `user` (member, assigned_by) | **Added 2026-08-27, not in the original 001–027 sequence** — approved deviation, see note below |
 | 013 | `create_product_categories` | `product_category` | `company` | |
 | 014 | `create_product_subcategories` | `product_subcategory` | `product_category` | |
 | 015 | `create_products` | `product` | `product_subcategory` | |
@@ -43,6 +44,12 @@
 | 025 | `create_expenses` | `expense` | `company`, `project`, `user` (added_by, employee) | |
 | 026 | `create_tasks` | `task` | `project`, `user` (assigned_to) | |
 | 027 | `create_documents` | `document` | `project`, `user` (uploaded_by) | Generic `entity_type`/`entity_id` pattern also allows attaching to other entities later |
+
+---
+
+## Deviations From This Plan
+
+- **`project_member` (012a), added 2026-08-27, BE-026 planning.** The original 001–027 sequence gave Project only a single `assigned_to` FK — no multi-user "Team" table. `01_Business/FRS.md` §10 and `02_Architecture/Solution_Architecture.md` §3 both name Team as a distinct aggregated concept, and `04_API/Project_API.md` documents `/team` add/remove-by-user endpoints that a single FK cannot represent. Backend Lead approved adding `project_member` (fields: `company`, `project`, `user` nullable, `assigned_by` nullable — see `BACKEND_TASKS.md` BE-026) as a documented exception to this plan rather than silently building it unrecorded. `assigned_to` is unaffected and remains the primary/point-of-contact field.
 
 ---
 

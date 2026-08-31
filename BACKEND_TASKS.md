@@ -562,13 +562,16 @@ _(Renumbered 2026-08-27: originally BE-021–BE-044. BE-021 collided with the Sp
 - BE-022 – Client Module
 - BE-023 – Client CRUD
 - BE-024 – Project Module
-- BE-025 – Project Members
-- BE-026 – Project Workflow
-- BE-027 – Project Filters
-- BE-028 – Project Audit Logs
-- BE-029 – CRM Tests
+- BE-025 – Project CRUD
+- BE-026 – Project Members
+- BE-027 – Project Workflow
+- BE-028 – Project Filters
+- BE-029 – Project Audit Logs
+- BE-030 – CRM Tests
 
-Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025–BE-029 Todo)
+_(Renumbered again 2026-08-27, BE-025 onward: inserted "BE-025 – Project CRUD" — Sprint 2 had given Client both a Module task (BE-022) and a separate CRUD task (BE-023), but Project only got Module (BE-024) with no CRUD task before jumping to Members. Project Members cannot be meaningfully built without Project creation/retrieval existing first. Every ID from the old BE-025 onward shifted forward by one to make room; Sprints 3–6 shifted by one accordingly (Sprint 3 now starts at BE-031, Sprint 6 now ends at BE-046). No code references any of the shifted IDs — confirmed by search before renumbering.)_
+
+Status: In Progress (BE-022, BE-023, BE-024 Done; BE-025 Review; BE-026–BE-030 Todo)
 
 ---
 
@@ -631,7 +634,7 @@ Depends On
 
 **Assigned_to invariant documented, not enforced yet:** future requirement — `assigned_to` must belong to the same Company as the Project. No assignment service exists yet to enforce this (BE-024 has no service layer); flagged for whichever task first builds assignment behavior.
 
-**Deferred to later tasks (explicit boundaries, not gaps):** Project Members/team beyond `assigned_to` — BE-025 (including whether a new `project_member` table is needed, since none exists in `Migration_Plan.md`). Status transition rules/authorization — BE-026. Filters/search — BE-027. Audit log integration for Project's own mutations — BE-028 (no `ENTITY_FIELD_ALLOWLISTS["project"]` entry added yet — nothing writes Project audit rows in BE-024).
+**Deferred to later tasks (explicit boundaries, not gaps):** Project CRUD (create/retrieve/update/delete endpoints) — BE-025, inserted after this task closed (see the Sprint 2 renumbering note above; BE-024 built the model only, no service/view layer). Project Members/team beyond `assigned_to` — BE-026 (a new `project_member` table, approved by Backend Lead as a documented deviation from `Migration_Plan.md` — see that task's entry). Status transition rules/authorization — BE-027. Filters/search — BE-028. Audit log integration for Project's own mutations — BE-029 (no `ENTITY_FIELD_ALLOWLISTS["project"]` entry added yet — nothing writes Project audit rows in BE-024).
 
 **Tests:** 33 new. `apps/projects/tests/test_models.py` ×18: required-field enforcement (company/client/name), optional-field defaults, `status` defaults to `draft`, all 11 `ProjectStatus` values accepted, `priority` accepts arbitrary text, str repr, soft-delete lifecycle + restore, `Project.company` field configured as CASCADE (structural check — see the ProtectedError finding above for why this can't be exercised end-to-end in isolation), Company hard-delete blocked by PROTECT via Client when a Project exists (the finding above, verified not assumed), Client soft-delete leaves Project's FK untouched, Client hard-delete blocked by PROTECT when a Project references it, Client hard-delete succeeds when no Project references it, `assigned_to` SET_NULL on User hard-delete, `(company, status)` composite index exists. `apps/clients/tests/test_services.py` +15 (`ClientDeleteGuardTestCase`): delete succeeds with zero/completed-only/cancelled-only/completed+cancelled projects; delete blocked by each of the other 9 statuses individually (draft, planning, design, quotation, approved, execution, quality_check, handover, on_hold); blocked delete leaves the client undeleted; blocked delete writes no DELETE audit entry; successful delete still writes its existing audit entry. Full backend suite: **383 passed, 0 failed** (was 350 after BE-023). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected.
 
@@ -641,13 +644,41 @@ Depends On
 
 ---
 
+### BE-025 – Project CRUD
+
+**Status:** Review
+
+**Priority:** Critical
+
+**Owner:** Backend Team
+
+**Implementation notes:** Full Project CRUD, mirroring `ClientViewSet`/`ClientService`/`ClientSerializer` architecture exactly (which itself mirrors `RoleViewSet`). Flat endpoints `GET/POST /projects`, `GET/PATCH/PUT/DELETE /projects/{id}`. `ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet)` — pure orchestration, all logic in `ProjectService`. `ProjectService.resolve_create_target_company_id()`/`list_projects_for_viewer()` mirror `ClientService`'s exactly: non-admin's `request.company_id` is the only tenant source; a mismatched client-supplied `companyId` is rejected (403); platform admin requires an explicit `companyId` on create and sees all companies' projects on list. `ProjectPermission` is a byte-for-byte mirror of `ClientPermission` — the same coarse tenant-membership gate, no fine-grained `project.*` codes (consistent with the standing BE-022 decision). `list_projects()` in `selectors.py` is deliberately bare (company filter + `-created_at` ordering only) — no search/status/priority/date filtering, which is BE-028's job.
+
+**Resolves BE-024's deferred tenant invariant:** `ProjectService.create_project()` calls `ClientService.get_client_by_id(client_id, company_id=target_company_id)` to load the client, reusing its existing cross-tenant `NotFound` check rather than duplicating logic — this enforces `Project.company_id == Project.client.company_id` exactly as BE-024 flagged it should, with no new code in the Client domain.
+
+**Resolves BE-024's deferred assignee invariant:** a new `apps/projects/validators.py::validate_assignee_company_membership(user_id, company_id)` checks for an **active** `CompanyMembership` row for the given user in the given company and raises `ValidationError({"assignedTo": [...]})` (400) if none exists — covers both "wrong company" and "revoked membership" cases with one check. Called from both `create_project` (when `assigned_to_id` is supplied) and `update_project` (when `assigned_to_id` is present in `validated_data`, including explicit clearing to `None`, which is allowed unconditionally).
+
+**Status and Client are deliberately excluded from the edit surface:** `ProjectUpdateSerializer` has no `status` or `client`/`clientId` field, and `ProjectService.update_project()` ignores those keys even if present in `validated_data` (defense in depth, verified by a dedicated test) — `Project_API.md` documents status changes going through a separate `/status` sub-endpoint (BE-027's scope, the status transition graph) and does not document client reassignment via the general edit endpoint at all. `ProjectCreateSerializer` likewise has no `status` field — every new Project starts at the model default (`draft`).
+
+**No audit logging in this task:** `ProjectService` makes no `AuditLogService.record()` calls and `ENTITY_FIELD_ALLOWLISTS["project"]` was not added — wiring Project's own mutations into the audit trail is BE-029's explicit scope, matching how BE-024 (Project Module) also deferred it.
+
+**Schema fix (unrelated bug, fixed in passing):** `spectacular --fail-on-warn` failed with a non-optimally-resolvable enum naming collision — both `Company.status` (`CompanyStatus`) and `Project.status` (`ProjectStatus`) are `TextChoices` fields named `status` on different models, which drf-spectacular can't disambiguate by name alone. Fixed with an explicit `ENUM_NAME_OVERRIDES` entry in `SPECTACULAR_SETTINGS` (`config/settings.py`) mapping each to its import path. No behavior change; schema now generates cleanly.
+
+**Tests:** 92 new. `apps/projects/tests/test_services.py` ×23: create success, nonexistent-company `NotFound`, cross-tenant-client `NotFound`, valid-assignee accepted, wrong-company-assignee rejected, revoked-membership-assignee rejected, get/list/cross-tenant scoping, `list_projects_for_viewer` platform-admin-sees-all, `resolve_create_target_company_id` non-admin-mismatch-denied, update success, cross-tenant update `NotFound`, assignee-wrong-company rejected on update, assignee-can-be-cleared, status/client keys ignored by update even when present, soft-delete plus post-delete `NotFound` plus row still present via `all_objects`. `apps/projects/tests/test_views.py` ×~33 (endpoint-level, mirroring `apps/clients/tests/test_views.py`'s structure): 401/403, list scoping (member vs. admin-sees-all), empty-list shape, soft-deleted excluded from list, create (member and admin-with-companyId, cross-tenant-client rejected, company-injection-by-member denied, validation 400, missing-`clientId` 400, supplied `status` silently ignored), retrieve (success, cross-tenant 404 indistinguishable from nonexistent, admin cross-tenant allowed), update (success, PUT-behaves-like-PATCH, `status`/`client` changes ignored, cross-tenant 404), delete (soft-deletes, cross-tenant 404, admin allowed). Full backend suite: **425 passed, 0 failed** (was 383 after BE-024). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected (no schema change — `repositories.py`/`selectors.py` additions are pure lookups, no new fields). `spectacular --fail-on-warn`: clean after the `ENUM_NAME_OVERRIDES` fix; confirmed `/projects/` and `/projects/{id}/` present in the generated schema.
+
+Depends On
+
+- BE-024 (Project Module)
+
+---
+
 # Sprint 3 – Product Catalog
 
-- BE-030 – Categories
-- BE-031 – Subcategories
-- BE-032 – Products
-- BE-033 – Units
-- BE-034 – Catalog APIs
+- BE-031 – Categories
+- BE-032 – Subcategories
+- BE-033 – Products
+- BE-034 – Units
+- BE-035 – Catalog APIs
 
 Status: Todo
 
@@ -655,10 +686,10 @@ Status: Todo
 
 # Sprint 4 – BOQ
 
-- BE-035 – BOQ Module
-- BE-036 – BOQ Items
-- BE-037 – BOQ Calculations
-- BE-038 – BOQ APIs
+- BE-036 – BOQ Module
+- BE-037 – BOQ Items
+- BE-038 – BOQ Calculations
+- BE-039 – BOQ APIs
 
 Status: Todo
 
@@ -666,9 +697,9 @@ Status: Todo
 
 # Sprint 5 – Quotation
 
-- BE-039 – Quotation
-- BE-040 – Versioning
-- BE-041 – Approval Workflow
+- BE-040 – Quotation
+- BE-041 – Versioning
+- BE-042 – Approval Workflow
 
 Status: Todo
 
@@ -676,10 +707,10 @@ Status: Todo
 
 # Sprint 6 – Finance
 
-- BE-042 – Invoice
-- BE-043 – Payment
-- BE-044 – Expense
-- BE-045 – Financial Reports
+- BE-043 – Invoice
+- BE-044 – Payment
+- BE-045 – Expense
+- BE-046 – Financial Reports
 
 Status: Todo
 

@@ -264,6 +264,14 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Multi-Tenant Architecture & Interior Management SaaS API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    # BE-025: Company.status and Project.status are both TextChoices named
+    # "status" — drf-spectacular can't tell them apart by field name alone
+    # and falls back to an unstable hash-suffixed component name
+    # ("Status4e9Enum"). Naming them explicitly keeps the schema stable.
+    "ENUM_NAME_OVERRIDES": {
+        "CompanyStatusEnum": "apps.company.models.CompanyStatus",
+        "ProjectStatusEnum": "apps.projects.models.ProjectStatus",
+    },
 }
 
 
