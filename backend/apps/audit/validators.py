@@ -61,6 +61,11 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
         "tax_rate",
         "status",
     },
+    # BE-035: BOQ is only ever audited at creation (auto-created on first
+    # access, not user-editable) -- project_id is the one field worth
+    # recording.
+    "boq": {"project_id"},
+    "boq_section": {"name", "sort_order"},
 }
 
 

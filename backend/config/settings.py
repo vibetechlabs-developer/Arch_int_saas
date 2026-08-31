@@ -102,6 +102,7 @@ INSTALLED_APPS = [
     "apps.clients",
     "apps.projects",
     "apps.products",
+    "apps.boq",
 ]
 
 AUTH_USER_MODEL = "users.User"

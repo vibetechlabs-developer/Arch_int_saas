@@ -915,12 +915,34 @@ Depends On
 
 # Sprint 4 – BOQ
 
-- BE-035 – BOQ Module
-- BE-036 – BOQ Items
-- BE-037 – BOQ Calculations
-- BE-038 – BOQ APIs
+Status: In Progress (BE-035 Review; BE-036–BE-038 Todo)
 
-Status: Todo
+---
+
+### BE-035 – BOQ Module
+
+**Status:** Review
+
+**Priority:** Critical
+
+**Owner:** Backend Team
+
+**Pre-implementation documentation audit (AskUserQuestion, 2026-08-31) found two genuine business-rule/architecture gaps, resolved by Backend Lead decision before any code was written:** (1) `boq_item.discount`/`tax` (Database_Schema.md) and the summary endpoint's "computed subtotal/discount/tax/total" have no documented representation — decided **percentages** (matching `Product.tax_rate`'s already-established convention), not flat currency amounts; this determines BE-037's summary formula. (2) `BOQ_API.md` documents no `POST .../boq` endpoint at all, only `GET .../boq` and `POST .../boq/sections` — decided BOQ is **auto-created on first access** (a `get_or_create` per project), matching `Migration_Plan.md`'s own stated rationale for the table's position ("One BOQ per project") and the absence of any documented create step.
+
+**Two inferred decisions, not asked (documented here instead):** (a) `boq_section`/`boq_item` have **no `company_id` column** in `Database_Schema.md` — unlike every tenant table built so far in this codebase (Client, Project, ProjectMember, ProductCategory/Subcategory/Product all denormalize `company`). Followed the schema literally rather than adding an undocumented column — tenant scoping for a Section resolves through `section.boq.company_id`, not a column on the table itself. (b) Sprint 4's task list (BOQ Module / Items / Calculations / APIs) has no separate "Audit Logs" task, so audit logging is wired **inline** in each task as its mutations are built — the same precedent Sprint 3's Product Catalog established (BE-031), not Project's separate BE-024-029 split.
+
+**Implementation notes:** New `apps.boq` app (per `00_Development_Standards/Folder_Structure.md` §2a). `BOQ(BaseModel)`: `company` FK (CASCADE), `project` — a **`OneToOneField`** (the first in this codebase), enforcing "one BOQ per project" at the database level, not just by convention. `status` is a plain unconstrained `CharField` — no documented value domain anywhere (unlike Project/Company's documented enums), and no endpoint in `BOQ_API.md` ever reads or writes it; treated like `Project.priority` was when undocumented, not like `Product.status` (which had an obvious binary real-world meaning this field doesn't). `BOQSection(BaseModel)`: `boq` FK (CASCADE — no doc names this relationship as needing hard-delete protection, same reasoning as Category→Subcategory), `name` (required), `sort_order` (`PositiveIntegerField`, auto-assigned as `max existing + 1` — `BOQ_API.md`'s "Add a section" row lists no input fields at all, so no manual override is exposed).
+
+**Endpoints:** `GET /projects/{projectId}/boq` (`BOQDetailView`) returns the full tree (BOQ + nested sections; items join the response shape in BE-036) and auto-creates the BOQ if it doesn't exist yet. `POST /projects/{projectId}/boq/sections` (`BOQSectionListCreateView`) adds a section, auto-creating the BOQ too if needed. Both reuse `ProjectPermission` directly (object-level check is "does the caller belong to this Project's company", identical whether checked against the Project or the BOQ) — no new permission class, mirroring `ProjectTeamView`'s established reasoning. **Section PATCH/DELETE added for CRUD consistency** (`/boq-sections/{id}`, flat) even though `BOQ_API.md` documents neither — the same "add missing CRUD" Backend Lead decision BE-031 established for Category/Subcategory/Product's DELETE endpoints, applied here to Section's full edit surface.
+
+**Deferred (documented, not a gap, continues the exact BE-031→032→033 deferral chain):** `soft_delete_section()` is unconditional in this task — the "block delete if active Items exist" guard can't be built until BE-036 (`BOQItem`) exists. BE-036 adds it.
+
+**Tests:** 43 new. `apps/boq/tests/test_models.py` ×16: BOQ creation/str-repr/one-per-project-enforced (`OneToOneField` uniqueness)/required-project/cascade-delete-with-project/soft-delete-lifecycle; Section creation/str-repr/default-ordering-by-sort_order/required-boq/cascade-delete-with-boq/soft-delete-lifecycle/BOQ-soft-delete-leaves-Section-FK-untouched/reverse-accessor. `apps/boq/tests/test_services.py` ×15: `BOQService` get-or-create-creates-on-first-call/is-idempotent/writes-audit-only-on-creation; `BOQSectionService` create/list/get/update/soft-delete success and cross-tenant-scoping paths, auto-increment-sort-order, blank-name-rejected, audit row creation on create/update/delete. `apps/boq/tests/test_views.py` ×12: 401/403, cross-tenant project 404, BOQ auto-creates-on-first-access and is-idempotent, platform-admin-cross-tenant-access-allowed, create-section success/appears-in-tree/validation-400/cross-tenant-404, flat update/delete success and cross-tenant-404. Full `apps/boq` suite: **43 passed, 0 failed**. `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected after generating `0001_initial.py`. `spectacular --fail-on-warn`: clean; confirmed `/projects/{project_id}/boq/`, `/projects/{project_id}/boq/sections/`, and `/boq-sections/{id}/` present in the generated schema, tagged "BOQ".
+
+Depends On
+
+- BE-025 (Project CRUD — BOQ is nested under Project)
+- BE-033 (Products — `boq_item.product_id` will reference it in BE-036)
 
 ---
 
