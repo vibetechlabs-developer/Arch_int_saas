@@ -915,7 +915,7 @@ Depends On
 
 # Sprint 4 – BOQ
 
-Status: In Progress (BE-035, BE-036, BE-037 Review; BE-038 Todo)
+Status: In Progress — all tasks implemented (BE-035–BE-038 Review, awaiting Backend Lead approval)
 
 ---
 
@@ -999,6 +999,26 @@ Depends On
 Depends On
 
 - BE-036 (BOQ Items)
+
+---
+
+### BE-038 – BOQ APIs
+
+**Status:** Review
+
+**Priority:** Medium
+
+**Owner:** Backend Team
+
+**Scope:** the final Sprint 4 stabilization pass — every endpoint `BOQ_API.md` documents (`GET .../boq`, `POST .../boq/sections`, `POST .../boq/sections/{sectionId}/items`, `PATCH`/`DELETE .../boq/items/{itemId}`, `GET .../boq/summary`) was already fully built across BE-035/036/037, the same situation BE-034 ("Catalog APIs") found after BE-031–033 had already covered every documented Product Catalog endpoint. No new endpoint, no schema/migration change — this task adds full end-to-end integration coverage exercising the documented flow in one place over real HTTP calls, plus a final sign-off run of the whole backend suite as the sprint-closing gate, mirroring BE-030's role for Sprint 2.
+
+**Tests:** 2 new, `apps/boq/tests/test_integration.py` (`BOQEndToEndIntegrationTestCase`): a full flow — BOQ auto-creates → add section → add a free-text item and a product-referenced item (verifying product-defaulting) → add an optional item → confirm all three appear in the BOQ tree nested under their section → edit an item and confirm `amount` recomputes → confirm the summary excludes the optional item and matches a hand-computed discount/tax result → delete the product item and confirm the summary updates — and a second test confirming a Section delete is blocked (409) while it has an active Item, then succeeds once the item is removed (the full BE-035→036 guard-chain exercised end to end via HTTP, not just at the service layer). Full `apps/boq` suite: **95 passed** (was 93 after BE-037). Full backend suite re-verified green as the sprint-closing gate: **754 passed, 0 failed** (was 752 after BE-037). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected. `spectacular --fail-on-warn`: clean.
+
+**Sprint 4 status:** every task BE-035–BE-038 is now implemented, tested, and documented at **Review** status, closing out BOQ. Per this file's standing rule, Sprint 4 itself is not marked closed here — that requires explicit Backend Lead review and approval of the four Review-status tasks above, the same as every prior sprint.
+
+Depends On
+
+- BE-037 (BOQ Calculations)
 
 ---
 
