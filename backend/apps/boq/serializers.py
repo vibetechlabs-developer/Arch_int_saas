@@ -177,3 +177,17 @@ class BOQSerializer(serializers.ModelSerializer):
         model = BOQ
         fields = ["id", "projectId", "status", "sections", "createdAt", "updatedAt"]
         read_only_fields = fields
+
+
+class BOQSummarySerializer(serializers.Serializer):
+    """
+    Serializer for `GET .../boq/summary`'s computed dict (BE-037) — not a
+    ModelSerializer, since BOQSummaryService.compute_summary returns a
+    plain dict, not a model instance. Matches BOQ_API.md's literal
+    description: "Computed subtotal/discount/tax/total".
+    """
+
+    subtotal = serializers.DecimalField(max_digits=14, decimal_places=2)
+    discount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    tax = serializers.DecimalField(max_digits=14, decimal_places=2)
+    total = serializers.DecimalField(max_digits=14, decimal_places=2)

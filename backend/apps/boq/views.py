@@ -15,8 +15,9 @@ from apps.boq.serializers import (
     BOQSectionSerializer,
     BOQSectionUpdateSerializer,
     BOQSerializer,
+    BOQSummarySerializer,
 )
-from apps.boq.services import BOQItemService, BOQSectionService, BOQService
+from apps.boq.services import BOQItemService, BOQSectionService, BOQService, BOQSummaryService
 from apps.common.responses import ApiResponse
 from apps.common.views import ObjectPermission404Mixin
 from apps.projects.permissions import ProjectPermission
@@ -37,7 +38,7 @@ class BOQDetailView(ObjectPermission404Mixin, APIView):
 
     @extend_schema(
         summary="Get Project BOQ",
-        description="Get a project's BOQ (sections, and from BE-036 on, items). Auto-created on first access.",
+        description="Get a project's BOQ (sections and each section's items). Auto-created on first access.",
         responses={status.HTTP_200_OK: BOQSerializer},
         tags=["BOQ"],
     )
@@ -50,6 +51,37 @@ class BOQDetailView(ObjectPermission404Mixin, APIView):
         )
 
         response_data = BOQSerializer(boq).data
+        return ApiResponse.success(
+            data=response_data, request_id=getattr(request, "request_id", None)
+        )
+
+
+class BOQSummaryView(ObjectPermission404Mixin, APIView):
+    """
+    `GET /projects/{projectId}/boq/summary` (BE-037). Same permission
+    reuse and auto-create-on-access pattern as BOQDetailView — an empty,
+    freshly-created BOQ simply summarizes to all-zeros rather than
+    erroring.
+    """
+
+    permission_classes = [IsAuthenticated, ProjectPermission]
+
+    @extend_schema(
+        summary="Get BOQ Summary",
+        description="Computed subtotal/discount/tax/total, excluding optional and alternative items.",
+        responses={status.HTTP_200_OK: BOQSummarySerializer},
+        tags=["BOQ"],
+    )
+    def get(self, request: Request, project_id: str = None) -> Response:
+        project = ProjectService.get_project_by_id(project_id)
+        self.check_object_permissions(request, project)
+
+        boq = BOQService.get_or_create_boq_for_project(
+            project, actor_user=request.user, request=request
+        )
+        summary = BOQSummaryService.compute_summary(boq)
+
+        response_data = BOQSummarySerializer(summary).data
         return ApiResponse.success(
             data=response_data, request_id=getattr(request, "request_id", None)
         )

@@ -1,5 +1,7 @@
 import uuid
 
+from django.db.models import QuerySet
+
 from apps.boq.models import BOQItem
 
 
@@ -13,3 +15,16 @@ def has_active_items_for_section(section_id: str | uuid.UUID) -> bool:
     domain-ownership indirection is needed.
     """
     return BOQItem.objects.filter(boq_section_id=section_id).exists()
+
+
+def list_includible_items_for_boq(boq_id: str | uuid.UUID) -> QuerySet[BOQItem]:
+    """
+    All non-deleted BOQItems across every Section of the given BOQ,
+    excluding items flagged `is_optional`/`is_alternative` — per
+    BOQ_API.md's Notes: "Optional and alternative items must be excluded
+    from the default total". Backs BOQSummaryService.compute_summary
+    (BE-037).
+    """
+    return BOQItem.objects.filter(
+        boq_section__boq_id=boq_id, is_optional=False, is_alternative=False
+    )

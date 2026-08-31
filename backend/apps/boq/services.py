@@ -491,3 +491,63 @@ class BOQItemService:
                 before_state=before_state,
                 request=request,
             )
+
+
+class BOQSummaryService:
+    """
+    Computes a BOQ's subtotal/discount/tax/total (BE-037), matching
+    BOQ_API.md's `GET .../boq/summary` description exactly. Read-only —
+    no persistence, no audit entry (nothing is mutated).
+
+    Formula, per item (discount/tax are percentages, Backend Lead
+    decision from BE-035 planning): `base = amount` (already
+    `quantity * rate`, BE-036); `item_discount = base * discount / 100`;
+    `after_discount = base - item_discount`; `item_tax = after_discount *
+    tax / 100`; `item_total = after_discount + item_tax`. Aggregated
+    across every includible item: `subtotal = sum(base)`,
+    `discount = sum(item_discount)`, `tax = sum(item_tax)`,
+    `total = subtotal - discount + tax`.
+
+    Items flagged `is_optional`/`is_alternative` are excluded entirely
+    from every one of these sums — BOQ_API.md's Notes: "Optional and
+    alternative items must be excluded from the default total but
+    retrievable for quotation variants". Whether alternates are a
+    BOQ-level or Quotation-level concept is explicitly flagged in
+    BOQ_API.md's own Notes as needing client confirmation
+    (Database_Schema.md's Open Items) — that question is about a later
+    module's design (how Quotation copies/varies alternates), not
+    something this summary computation needs to resolve; the
+    exclusion-from-default-total behavior itself is unambiguous and
+    implemented as documented.
+    """
+
+    @classmethod
+    def compute_summary(cls, boq: BOQ) -> Dict[str, Decimal]:
+        items = selectors.list_includible_items_for_boq(boq.id)
+
+        subtotal = Decimal("0.00")
+        discount_total = Decimal("0.00")
+        tax_total = Decimal("0.00")
+
+        for item in items:
+            base = item.amount
+            item_discount = (base * item.discount / Decimal("100")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            after_discount = base - item_discount
+            item_tax = (after_discount * item.tax / Decimal("100")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+
+            subtotal += base
+            discount_total += item_discount
+            tax_total += item_tax
+
+        total = subtotal - discount_total + tax_total
+
+        return {
+            "subtotal": subtotal,
+            "discount": discount_total,
+            "tax": tax_total,
+            "total": total,
+        }

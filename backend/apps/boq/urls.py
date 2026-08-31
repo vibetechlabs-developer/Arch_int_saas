@@ -6,6 +6,7 @@ from apps.boq.views import (
     BOQItemViewSet,
     BOQSectionListCreateView,
     BOQSectionViewSet,
+    BOQSummaryView,
 )
 
 section_detail = BOQSectionViewSet.as_view(
@@ -29,6 +30,11 @@ urlpatterns = [
         r"^projects/(?P<project_id>[0-9a-fA-F-]{36})/boq/?$",
         BOQDetailView.as_view(),
         name="boq-detail",
+    ),
+    re_path(
+        r"^projects/(?P<project_id>[0-9a-fA-F-]{36})/boq/summary/?$",
+        BOQSummaryView.as_view(),
+        name="boq-summary",
     ),
     re_path(
         r"^projects/(?P<project_id>[0-9a-fA-F-]{36})/boq/sections/?$",

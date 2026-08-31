@@ -915,7 +915,7 @@ Depends On
 
 # Sprint 4 – BOQ
 
-Status: In Progress (BE-035, BE-036 Review; BE-037–BE-038 Todo)
+Status: In Progress (BE-035, BE-036, BE-037 Review; BE-038 Todo)
 
 ---
 
@@ -975,6 +975,30 @@ Depends On
 Depends On
 
 - BE-035 (BOQ Module)
+
+---
+
+### BE-037 – BOQ Calculations
+
+**Status:** Review
+
+**Priority:** Critical
+
+**Owner:** Backend Team
+
+**Scope:** `GET /projects/{projectId}/boq/summary`, matching `BOQ_API.md`'s documented "Computed subtotal/discount/tax/total". Read-only — no persistence, no audit entry (nothing is mutated). Per-item `amount` computation (`quantity * rate`) already landed in BE-036 since it's intrinsic to a single item's own CRUD; this task owns the cross-item aggregation, mirroring how record-intrinsic computation stayed with CRUD while cross-record math got its own task (the same split Project's Filters (BE-028) took from its CRUD (BE-025)).
+
+**Formula (percentages, the Backend Lead decision from BE-035 planning):** per includible item — `item_discount = base * discount / 100`; `after_discount = base - item_discount`; `item_tax = after_discount * tax / 100`; `item_total = after_discount + item_tax` (tax applied after discount, the standard invoicing order). Aggregated: `subtotal = sum(base)`, `discount = sum(item_discount)`, `tax = sum(item_tax)`, `total = subtotal - discount + tax`. Every intermediate percentage computation is `.quantize()`d to 2 decimal places (`ROUND_HALF_UP`) before summing, using the same pattern BE-036's `_compute_amount()` fix established — not summing raw unrounded Decimals and rounding only the final total, which would produce a different (and arguably less correct) number for the same inputs.
+
+**Optional/alternative exclusion — implemented as documented, the ambiguous part deliberately left alone:** `selectors.list_includible_items_for_boq()` excludes `is_optional`/`is_alternative` items entirely from every sum, per `BOQ_API.md`'s own Notes ("Optional and alternative items must be excluded from the default total"). That same Notes section flags a related but distinct open question — whether alternates are a BOQ-level or Quotation-level concept — as needing client confirmation (`Database_Schema.md`'s Open Items). That question is about how a *later* module (Quotation) copies or varies alternates; it doesn't block or ambiguity this summary computation, which only needs to know whether to exclude them here (unambiguous), so it wasn't re-raised as a blocking question for this task.
+
+**No new endpoint beyond summary; no schema/migration change** — this task is pure computation plus one read-only endpoint.
+
+**Tests:** 11 new, `apps/boq/tests/test_summary.py`. `BOQSummaryServiceTestCase` ×7: empty-BOQ summarizes to all-zeros (not an error), single item with no discount/tax, discount-then-tax formula verified against a hand-computed example (500.00 base, 10% discount, 18% tax → 531.00 total), optional items excluded, alternative items excluded, soft-deleted items excluded, aggregation across multiple sections. `BOQSummaryEndpointTestCase` ×4: 401 unauthenticated, cross-tenant project 404, no-BOQ-yet returns zeros (auto-creates, matching `BOQDetailView`'s own behavior), summary reflects created items via the full HTTP endpoint. Full `apps/boq` suite: **93 passed** (was 82 after BE-036). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected. `spectacular --fail-on-warn`: clean; confirmed `/projects/{project_id}/boq/summary/` present in the generated schema.
+
+Depends On
+
+- BE-036 (BOQ Items)
 
 ---
 
