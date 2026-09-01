@@ -83,6 +83,29 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
         "is_alternative",
         "notes",
     },
+    # BE-039: full field coverage. project_id/boq_id/client_id (UUIDs),
+    # subtotal/discount/tax/total (Decimal), and valid_until (a plain
+    # datetime.date -- a new type prior audit helpers didn't need to
+    # handle) are all stringified by
+    # apps.quotations.services._serialize_quotation_audit_value before
+    # reaching here -- same JSONField-has-no-custom-encoder reasoning as
+    # Project (BE-029), Product (BE-033), and BOQItem (BE-036).
+    "quotation": {
+        "project_id",
+        "boq_id",
+        "client_id",
+        "quote_number",
+        "version",
+        "subtotal",
+        "discount",
+        "tax",
+        "total",
+        "terms",
+        "payment_schedule",
+        "valid_until",
+        "status",
+        "notes",
+    },
 }
 
 

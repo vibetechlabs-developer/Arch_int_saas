@@ -103,6 +103,7 @@ INSTALLED_APPS = [
     "apps.projects",
     "apps.products",
     "apps.boq",
+    "apps.quotations",
 ]
 
 AUTH_USER_MODEL = "users.User"
@@ -274,6 +275,7 @@ SPECTACULAR_SETTINGS = {
         "CompanyStatusEnum": "apps.company.models.CompanyStatus",
         "ProjectStatusEnum": "apps.projects.models.ProjectStatus",
         "ProductStatusEnum": "apps.products.models.ProductStatus",
+        "QuotationStatusEnum": "apps.quotations.models.QuotationStatus",
     },
 }
 

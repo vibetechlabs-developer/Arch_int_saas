@@ -1024,11 +1024,63 @@ Depends On
 
 # Sprint 5 – Quotation
 
-- BE-039 – Quotation
-- BE-040 – Versioning
-- BE-041 – Approval Workflow
+## BE-039 – Quotation
 
-Status: Todo
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Pre-implementation documentation audit (AskUserQuestion):** Database_Schema.md's own "Open Items" §2 flags `quote_number` generation as unresolved (per-company vs. global sequence); the versioning approach (`quote_number` + `version` columns, no documented parent FK) needed a Backend Lead call; the status enum's `internal_review` value has no corresponding action in Finance_API.md's endpoint table; and `POST .../reject`'s one-line description ("rejection/revision request") is ambiguous against the enum's two distinct values (`rejected` vs `revision_requested`). Four questions asked, all resolved with the recommended option: (1) `quote_number` is per-company sequential (`QT-000001`), generated the same non-atomic `max()`/`count()+1` way `BOQSectionRepository.max_sort_order_for_boq` already does — an accepted precedent in this codebase, not a new risk; (2) a revision reuses the same `quote_number` and increments `version` (matches Database_Schema.md's literal two columns, no undocumented parent FK), backed by a DB-level `UniqueConstraint(company, quote_number, version)`; (3) `internal_review` has no dedicated transition endpoint — it stays in the enum, unused by the API, matching Finance_API.md's endpoint table exactly; (4) `/reject` always sets the terminal `rejected` — a client wanting changes instead is handled by staff calling `/revise` directly.
+
+**Implementation notes:** New `apps.quotations` app. `Quotation` (company/project/boq[nullable, SET_NULL]/client FKs, `quote_number`+`version`, `subtotal`/`discount`/`tax`/`total` as `NUMERIC(14,2)` currency amounts — not percentages, unlike `BOQItem`'s per-item fields) + `QuotationItem` (mirrors `BOQItem` minus its own discount/tax column, matching `Database_Schema.md`'s literal `quotation_item` column list). `client` is always derived from `project.client_id`, never caller-supplied — the same server-derived-relationship pattern `BOQ.company` established. `QuotationService.create_quotation`: `items=None` (omitted from the request entirely) pulls the project's own BOQ (auto-created via the existing `BOQService.get_or_create_boq_for_project`), copies its current includible items (`apps.boq.selectors.list_includible_items_for_boq`, reused directly — excludes optional/alternative items) as a frozen snapshot, and copies `BOQSummaryService.compute_summary`'s `{subtotal, discount, tax, total}` dict verbatim; raises a 400 `ValidationError` if the BOQ has no items to copy. An explicit `items` list instead builds items manually (product-reference defaulting mirrors `BOQItemService.create_item`'s reuse-don't-duplicate pattern via `ProductService.get_product_by_id`), with `discount`/`tax` supplied directly as flat currency amounts (default 0) rather than derived. No generic `PATCH`/`DELETE` on Quotation — a deliberate exception to the "add CRUD for consistency" precedent (BE-031/BE-035): a versioned commercial document's content should only change through `/revise` (BE-040), never a silent in-place edit.
+
+**Tests:** `apps/quotations/tests/test_models.py` (15), `test_services.py` (13), `test_views.py` (10) — cross-tenant 404s on every entry point, from-BOQ vs. manual creation, empty-BOQ rejection, product-defaulting, per-company `quote_number` sequencing (including independence across companies), and the DB-level `(company, quote_number, version)` uniqueness constraint.
+
+Depends On
+
+- BE-035 (BOQ Module), BE-037 (BOQ Calculations), BE-033 (Products)
+
+---
+
+## BE-040 – Versioning
+
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Implementation notes:** `POST /quotations/{quotationId}/revise` (`QuotationService.revise_quotation`). Clone-then-partial-override semantics, matching `ProjectService.update_project`'s own partial-field-override style but applied to a **new row** instead of an in-place update, per CLAUDE.md's "Revision → new version" rule — the source row is never mutated, only ever read from. Any field omitted from the request carries over unchanged from the source version; `items=None` clones the source version's items (and its `boq`/`subtotal`) verbatim, an explicit `items` list replaces them and recomputes `subtotal` (clearing `boq`, since the new items are no longer necessarily a BOQ snapshot); `discount`/`tax` carry over unless explicitly given either way; `total` is always recomputed. New version starts at `status=draft`. Guard (Backend Lead decision, Sprint 5 planning): only the **latest** version of a `quote_number` may be revised — raises a 409 `ConflictError` otherwise, keeping the version chain linear rather than letting it fork. This same `_ensure_latest_version` guard is shared with BE-041's three action endpoints below.
+
+**Tests:** 5 new in `test_services.py`, 3 new in `test_views.py` — no-override clone, partial override, item replacement clearing `boq`, the stale-version 409, and a 3-version revision chain confirmed end to end over HTTP.
+
+Depends On
+
+- BE-039 (Quotation)
+
+---
+
+## BE-041 – Approval Workflow
+
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Implementation notes:** Three fixed single-transition action endpoints, all reusing the shared `_ensure_latest_version` guard from BE-040 plus a `from_status` precondition (409 `ConflictError` if violated) via a common `QuotationService._transition_status` helper — mirrors `ProjectService.transition_status`'s "a status change is recorded as an UPDATE, not a separate action value" audit convention, except `/approve` uses `AuditAction.APPROVE`, the enum value `Database_Schema.md`'s own `audit_log.action` set reserves for exactly this. `POST .../send`: `draft → sent` (no `internal_review` transition exists — see BE-039's planning decision). `POST .../approve`: `sent → approved`. `POST .../reject`: `sent → rejected`, always terminal (see BE-039's planning decision) — a client wanting changes instead is handled by staff calling `/revise` directly on the rejected quotation, which has no status precondition of its own.
+
+**Tests:** 8 new in `test_services.py`, 6 new in `test_views.py` — each transition's success path, each one's wrong-source-status 409, the stale-version guard applying to `/send` too, and confirming a rejected quotation can still be revised. Full `apps/quotations` suite (BE-039–BE-041 combined): **60 passed**.
+
+**Sprint 5 status:** every task BE-039–BE-041 is now implemented, tested, and documented at **Review** status, closing out Quotation. Per this file's standing rule, Sprint 5 itself is not marked closed here — that requires explicit Backend Lead review and approval of the three Review-status tasks above, the same as every prior sprint.
+
+**Full-suite verification note (important for future sessions):** this sprint's own `apps.quotations` suite is clean either way, but the full-suite sign-off gate briefly showed 16 spurious failures/errors, all confined to `apps.authentication.tests` (`test_login.py`, `test_forgot_password.py`, `test_reset_password.py`, `test_throttling.py`) — every one traced to running the suite via `python manage.py test` instead of `pytest`. `conftest.py` has an autouse `_clear_throttle_cache` fixture (clears DRF's `ScopedRateThrottle` cache before/after every test) that only fires under `pytest` — `manage.py test` silently skips it, so real HTTP calls to the throttled auth endpoints across different test files leak rate-limit state into each other. Reproduced and confirmed in isolation (the same 4 files alone: 12 failures/3 errors under `manage.py test`, 41/41 clean under `pytest`), then the full suite re-verified via `pytest`: **814 passed, 0 failed**. No production or test code needed to change — `pytest` (per this repo's own `pytest.ini` + `conftest.py`) is the correct full-suite command; `manage.py test` is safe for scoped/per-app runs but must not be used as the sprint-closing gate.
+
+Depends On
+
+- BE-040 (Versioning)
 
 ---
 
