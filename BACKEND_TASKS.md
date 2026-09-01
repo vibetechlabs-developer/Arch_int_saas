@@ -1086,12 +1086,87 @@ Depends On
 
 # Sprint 6 – Finance
 
-- BE-042 – Invoice
-- BE-043 – Payment
-- BE-044 – Expense
-- BE-045 – Financial Reports
+## BE-042 – Invoice
 
-Status: Todo
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Pre-implementation documentation audit (AskUserQuestion):** Finance_API.md says invoice status (`draft, sent, partially_paid, paid, overdue, cancelled`) is "derived server-side from paid-vs-total amount and due date" — but only `draft`/`sent`/`cancelled` have dedicated action endpoints, and this sprint has no scheduled/cron job. Two questions asked, both resolved with the recommended option: (1) `overdue` is never persisted — the stored `status` column only ever holds `draft/sent/partially_paid/paid/cancelled`; `InvoiceService.compute_effective_status` derives `overdue` at read time (sent/partially_paid + a past `due_date`), so `GET` responses are always accurate with no background sweep needed; (2) BE-045 ("Financial Reports") scopes to `GET /reports/finance` + `GET /reports/expenses` only — `/reports/dashboard`, `/reports/sales`, `/reports/projects` are deferred (Leads don't exist yet for sales conversion; dashboard/project reports span modules outside this sprint).
+
+**Backend Lead decision (not asked — a direct consequence of already-binding docs, not a new ambiguity):** `Invoice` has **no `contract_id` column**, despite Database_Schema.md listing one. `Contract` is not part of this build's scope — CLAUDE.md's Module Dependency Map goes straight from Quotation to Invoice with no Contract step, and the Engineering Execution Rules' "Never implement future modules unless instructed" forbids adding a table this build order doesn't call for just to satisfy a permanently-null FK. Finance_API.md's "from contract/approved quotation, or ad hoc" becomes "from an approved quotation, or ad hoc" here.
+
+**Implementation notes:** New `apps.invoices` app. `Invoice` (company/project/quotation[nullable, SET_NULL]/client FKs, `invoice_number` per-company sequential "INV-000001" — the exact `QuotationRepository.next_quote_number` scheme from BE-039, reused without re-litigating) + `InvoiceItem` (matches Database_Schema.md's `invoice_item` columns exactly — **no `product_id` FK**, unlike QuotationItem/BOQItem). `InvoiceService.create_invoice`: `quotationId` supplied reuses `QuotationService.get_quotation_by_id` (cross-tenant 404) and requires `quotation.status == approved` (400 otherwise), copying its items/subtotal/discount/tax/total verbatim — the same BOQ-summary-copy pattern BE-039 established, one level up the chain; `items` supplied instead builds an ad hoc invoice manually; exactly one of the two must be given. `PATCH /invoices/{id}` ("Edit (draft only)") and `/send`/`/cancel` mirror Quotation's guard style (409 on the wrong source status) — `/cancel` blocked once `paid` or already `cancelled` (Backend Lead decision, Finance_API.md doesn't spell out cancel's preconditions).
+
+**Tests:** `apps/invoices/tests/test_models.py` (13), `test_services.py` (21), `test_views.py` (11) — from-quotation vs. ad hoc creation, the approved-quotation precondition, draft-only edit/PATCH guard, cancel's terminal-status guard, and `compute_effective_status`'s overdue derivation (confirming the persisted column itself never changes).
+
+Depends On
+
+- BE-039 (Quotation)
+
+---
+
+## BE-043 – Payment
+
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Implementation notes:** New `apps.payments` app. `Payment` (company/invoice/client/project FKs — `client`/`project` denormalized off `invoice`, matching every prior "every tenant table gets its own direct FK" precedent; `method` an unconstrained CharField, no documented value domain, the same treatment `BOQ.status` got). `PaymentService.create_payment` is blocked (409) against a `draft` or `cancelled` invoice — recording money against either has no real-world meaning (Backend Lead decision, Finance_API.md doesn't spell out a precondition). Every create/void call ends by invoking `InvoiceService.recompute_status_from_payments` (new BE-042 method, added here since payments are what actually drive it): fully covered -> `paid`; partially covered -> `partially_paid`; nothing covered (e.g. a voided payment) -> `sent` (the only state a payable invoice can revert to, given the create-time guard above) -- a cancelled invoice's status is never resurrected by this recompute. "Void a payment (audit-logged, not hard-deleted)" is just `SoftDeleteModel.delete()` -- no separate status field needed.
+
+**Tests:** `apps/payments/tests/test_models.py` (6), `test_services.py` (11), `test_views.py` (7) -- draft/cancelled-invoice payment rejection, partial/full payment status transitions, multi-payment accumulation to `paid`, void reverting `paid` -> `sent`/`partially_paid` correctly, and the cancelled-invoice-not-resurrected guard.
+
+Depends On
+
+- BE-042 (Invoice)
+
+---
+
+## BE-044 – Expense
+
+**Status:** Review
+
+**Priority:** High
+
+**Owner:** Backend Team
+
+**Implementation notes:** New `apps.expenses` app. `Expense` (company/project FKs, `category`/`vendor` unconstrained text -- no Vendor model exists yet, Procurement is a future-phase module per CLAUDE.md's MVP Phasing; `employee`/`added_by` both `SET_NULL` FKs to `users.User`). `employee`, when supplied, reuses `apps.projects.validators.validate_assignee_company_membership` -- the exact same active-CompanyMembership invariant `Project.assigned_to`/`ProjectMember` already enforce, not a new check. `added_by` is always the acting user at creation. Workflow `draft -> submitted -> approved -> paid` (`ExpenseApprovalStatus`) matches Finance_API.md's `/submit`/`/approve`/`/mark-paid` actions exactly, mirroring Quotation's `_transition_status` guard style. `PATCH`/`DELETE /expenses/{id}` were added for CRUD consistency (draft only) -- not themselves documented in Finance_API.md, the same precedent BE-031/BE-035/BE-042 established repeatedly this build. List filters (`category`, `vendor`, `employee`, `date`, plus `approvalStatus`) match Finance_API.md's documented set, folded into this single task since Sprint 6 has no separate "Filters" task the way Project/Product did.
+
+**Tests:** `apps/expenses/tests/test_models.py` (8), `test_services.py` (22), `test_views.py` (11) -- cross-company employee assignment rejected, the `employeeId` "omitted vs. explicit null" three-way sentinel on PATCH, draft-only edit/delete guards, the full submit/approve/mark-paid chain plus each transition's wrong-source-status 409, and every documented list filter.
+
+Depends On
+
+- BE-025 (Project)
+
+---
+
+## BE-045 – Financial Reports
+
+**Status:** Review
+
+**Priority:** Medium
+
+**Owner:** Backend Team
+
+**Scope (per BE-042's planning decision):** `GET /reports/finance` and `GET /reports/expenses` only -- see BE-042's AskUserQuestion note above.
+
+**Implementation notes:** New `apps.reports` app -- pure read-only aggregation, no model of its own. `FinanceReportService.compute`: `revenue` sums `total` across every billed (`sent`/`partially_paid`/`paid`) invoice in scope (accrual, excludes `draft`/`cancelled`); `received` sums every active payment's amount regardless of its invoice's current status (money already collected stays collected even if the invoice is later cancelled); `receivables = revenue - received`; `outstanding` narrows `receivables` to the subset that's also currently overdue (reuses `InvoiceService.compute_effective_status`, BE-042's read-time derivation); `expenses` sums `amount + tax` across `approved`/`paid` expenses only (a draft/submitted expense isn't a confirmed cost yet); `profitLoss = revenue - expenses`. `ExpenseReportService.compute` returns category/project/vendor/employee/date breakdowns, including every expense regardless of `approvalStatus` (a broader visibility report, deliberately distinct from the P&L figure's approved-only scope). Each figure/breakdown is scoped independently by its own entity's most natural date field (Invoice by `created_at`, Payment by `payment_date`, Expense by `date`) -- Finance_API.md's `?dateFrom=&dateTo=` note doesn't name one unified date column across three different tables. `?projectId=` scopes both reports to one project; a platform admin must supply `?companyId=` explicitly (no single resolved tenant), mirroring every list endpoint's `admin_company_id_param` pattern.
+
+**Tests:** `apps/reports/tests/test_services.py` (15), `test_views.py` (5) -- revenue/receivables/outstanding/expenses/P&L arithmetic across draft/sent/cancelled invoices and draft/approved expenses, project and company-tenant isolation, and every expense breakdown grouping.
+
+**Sprint 6 status:** every task BE-042–BE-045 is now implemented, tested, and documented at **Review** status, closing out Finance -- the last MVP-scope sprint in CLAUDE.md's Module Dependency Map (`Auth->Company->User->Role->Client->Project->Product->BOQ->Quotation->Invoice->Payment->Expense->Reports`). Per this file's standing rule, Sprint 6 itself is not marked closed here -- that requires explicit Backend Lead review and approval of the four Review-status tasks above, the same as every prior sprint. Full `apps/invoices` + `apps/payments` + `apps/expenses` + `apps/reports` suite: **130 passed** (45 + 24 + 41 + 20). Full backend suite re-verified green via `pytest` (per BE-041's documented lesson on the correct runner) as the sprint-closing gate: **944 passed, 0 failed** (was 814 after Sprint 5). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected. `spectacular --fail-on-warn`: clean.
+
+Depends On
+
+- BE-044 (Expense)
+
+---
+
+# Sprint 7 – Platform
 
 ---
 

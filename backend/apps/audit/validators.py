@@ -106,6 +106,63 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
         "status",
         "notes",
     },
+    # BE-042: project_id/quotation_id/client_id (UUIDs), the Decimal money
+    # fields, and due_date (a plain datetime.date) are all stringified by
+    # apps.invoices.services._serialize_invoice_audit_value before
+    # reaching here -- same JSONField-has-no-custom-encoder reasoning as
+    # Quotation (BE-039). Note `status` here is always the persisted base
+    # value (draft/sent/partially_paid/paid/cancelled) -- "overdue" is a
+    # read-time-only derivation (InvoiceService.compute_effective_status)
+    # that never reaches the audit log.
+    "invoice": {
+        "project_id",
+        "quotation_id",
+        "client_id",
+        "invoice_number",
+        "subtotal",
+        "discount",
+        "tax",
+        "total",
+        "due_date",
+        "payment_terms",
+        "status",
+        "notes",
+    },
+    # BE-043: invoice_id/client_id/project_id (UUIDs), amount (Decimal),
+    # and payment_date (a plain datetime.date) are all stringified by
+    # apps.payments.services._serialize_payment_audit_value before
+    # reaching here -- same JSONField-has-no-custom-encoder reasoning as
+    # Invoice (BE-042).
+    "payment": {
+        "invoice_id",
+        "client_id",
+        "project_id",
+        "payment_date",
+        "amount",
+        "method",
+        "reference_number",
+        "receipt_url",
+        "notes",
+    },
+    # BE-044: project_id/employee_id/added_by_id (UUIDs), amount/tax
+    # (Decimal), and date (a plain datetime.date) are all stringified by
+    # apps.expenses.services._serialize_expense_audit_value before
+    # reaching here -- same JSONField-has-no-custom-encoder reasoning as
+    # Payment (BE-043).
+    "expense": {
+        "project_id",
+        "category",
+        "vendor",
+        "employee_id",
+        "amount",
+        "tax",
+        "date",
+        "payment_method",
+        "receipt_url",
+        "notes",
+        "added_by_id",
+        "approval_status",
+    },
 }
 
 
