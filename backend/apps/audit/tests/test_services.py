@@ -2,7 +2,7 @@ import uuid
 from django.test import TestCase
 
 from apps.audit.models import AuditAction, AuditLog
-from apps.audit.services import AuditLogService
+from apps.audit.services import ActivityLogService, AuditLogService
 from apps.company.models import Company
 from apps.users.models import User
 
@@ -157,3 +157,67 @@ class AuditLogServiceTestCase(TestCase):
 
         self.assertFalse(hasattr(AuditLogRepository, "update"))
         self.assertFalse(hasattr(AuditLogRepository, "delete"))
+
+
+class ActivityLogServiceTestCase(TestCase):
+    """
+    Unit tests for ActivityLogService (BE-047).
+    """
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Studio One")
+        self.other_company = Company.objects.create(name="Studio Two")
+        self.user = User.objects.create_user(
+            email="actor@example.com", name="Actor", password="StrongPassword123!"
+        )
+
+    def test_scoped_to_company(self):
+        AuditLogService.record(
+            action=AuditAction.CREATE, entity_type="role", entity_id=uuid.uuid4(), company_id=self.company.id,
+        )
+        AuditLogService.record(
+            action=AuditAction.CREATE, entity_type="role", entity_id=uuid.uuid4(), company_id=self.other_company.id,
+        )
+
+        results = ActivityLogService.list_activity_for_company(self.company.id)
+        self.assertEqual(results.count(), 1)
+
+    def test_filter_by_entity_type(self):
+        AuditLogService.record(
+            action=AuditAction.CREATE, entity_type="role", entity_id=uuid.uuid4(), company_id=self.company.id,
+        )
+        AuditLogService.record(
+            action=AuditAction.CREATE, entity_type="client", entity_id=uuid.uuid4(), company_id=self.company.id,
+        )
+
+        results = ActivityLogService.list_activity_for_company(self.company.id, entity_type="client")
+        self.assertEqual(results.count(), 1)
+        self.assertEqual(results.first().entity_type, "client")
+
+    def test_filter_by_action(self):
+        AuditLogService.record(
+            action=AuditAction.CREATE, entity_type="role", entity_id=uuid.uuid4(), company_id=self.company.id,
+        )
+        AuditLogService.record(
+            action=AuditAction.DELETE, entity_type="role", entity_id=uuid.uuid4(), company_id=self.company.id,
+        )
+
+        results = ActivityLogService.list_activity_for_company(self.company.id, action=AuditAction.DELETE)
+        self.assertEqual(results.count(), 1)
+
+    def test_filter_by_actor_user_id(self):
+        other_user = User.objects.create_user(
+            email="other@example.com", name="Other", password="StrongPassword123!"
+        )
+        AuditLogService.record(
+            action=AuditAction.CREATE, entity_type="role", entity_id=uuid.uuid4(),
+            company_id=self.company.id, actor_user=self.user,
+        )
+        AuditLogService.record(
+            action=AuditAction.CREATE, entity_type="role", entity_id=uuid.uuid4(),
+            company_id=self.company.id, actor_user=other_user,
+        )
+
+        results = ActivityLogService.list_activity_for_company(self.company.id, actor_user_id=self.user.id)
+        self.assertEqual(results.count(), 1)
+        self.assertEqual(results.first().actor_user_id, self.user.id)

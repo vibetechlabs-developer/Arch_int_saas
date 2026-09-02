@@ -163,6 +163,18 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
         "added_by_id",
         "approval_status",
     },
+    # BE-046: project_id/entity_id/uploaded_by_id (UUIDs) are stringified
+    # by apps.documents.services._serialize_document_audit_value before
+    # reaching here -- same JSONField-has-no-custom-encoder reasoning as
+    # every prior sprint's audit helper.
+    "document": {
+        "project_id",
+        "entity_type",
+        "entity_id",
+        "file_url",
+        "version",
+        "uploaded_by_id",
+    },
 }
 
 

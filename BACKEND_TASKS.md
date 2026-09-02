@@ -1168,17 +1168,69 @@ Depends On
 
 # Sprint 7 – Platform
 
+- BE-046 – Documents
+- BE-047 – Activity Logs
+- BE-048 – Dashboard
+
+**Scope note (AskUserQuestion, 2026-09-01):** the original stub bundled 5 items (Notifications, Documents, Activity Logs, Dashboard, Analytics), but unlike every prior sprint, none of them have a documented API sketch anywhere in `04_API/`. Documents (table already in `Database_Schema.md`), Activity Logs (a read-only feed derivable from the existing `audit_log` table, BE-019), and Dashboard (KPIs fully enumerated in CLAUDE.md, reusing existing Project/Quotation/Invoice/Expense data) are buildable now. **Notifications** and **"Advanced Analytics"** are explicitly labeled Phase 5 in FRS.md §26 and CLAUDE.md's own MVP Phasing — building them now would mean inventing a data model, event/channel design, and business rules with zero source-document backing, contradicting CLAUDE.md's "don't build Phase 3-5 features unless explicitly instructed" rule and this file's "Never implement future modules unless instructed." Renumbered/reordered to BE-046-048, sequenced so Dashboard (which reuses both) is built last; deferred to Phase 5. Notifications/Analytics remain unassigned task numbers for when that phase is reached.
+
+Status: Done
+
 ---
 
-# Sprint 7 – Platform
+## BE-046 – Documents
 
-- Notifications
-- Documents
-- Activity Logs
-- Dashboard
-- Analytics
+**Status:** Done
 
-Status: Todo
+**Priority:** Medium
+
+**Owner:** Backend Team
+
+**Implementation notes:** New `apps.documents` app. `Document` matches Database_Schema.md's `document(id, company_id, project_id FK, entity_type, entity_id, file_url, version, uploaded_by FK, uploaded_at)` with one deliberate simplification: no separate `uploaded_at` column -- a document's upload moment and its row-creation moment are always the same instant (unlike Payment.payment_date/Expense.date, which a user can genuinely backdate), so `BaseModel.created_at` already carries that exact meaning and is exposed as `uploadedAt` in the API rather than physically duplicated. `entity_type`/`entity_id` is the same generic polymorphic-attachment pattern `AuditLog` already uses -- not a real FK, since it spans many entity tables (Migration_Plan.md's own note: "allows attaching to other entities later"); defaults to `("project", project.id)` when omitted. No file-upload endpoint exists anywhere in this codebase -- `fileUrl` is caller-supplied (the same out-of-band-object-storage pattern already established for `Payment.receipt_url`/`Expense.receipt_url`/`Product.image_url`). `version` is auto-assigned (next version among every Document sharing the same `(entity_type, entity_id)` pair, the same `max()+1` pattern `BOQSectionRepository`/`QuotationRepository` established) -- re-uploading against the same target is how a document gets "re-versioned," with no separate endpoint needed.
+
+**Tests:** `apps/documents/tests/test_models.py` (7), `test_services.py` (8), `test_views.py` (9) -- default-to-project-entity, explicit entity targeting, version auto-increment (including independence across different entities), cross-tenant 404s, and the blank-`fileUrl` guard.
+
+Depends On
+
+- BE-025 (Project)
+
+---
+
+## BE-047 – Activity Logs
+
+**Status:** Done
+
+**Priority:** Medium
+
+**Owner:** Backend Team
+
+**Implementation notes:** No new app or model -- extends `apps.audit` (BE-019) with its first read surface (`selectors.py`, `serializers.py`, `views.py`, `urls.py` -- audit logging had been write-only internal infrastructure until now). New `ActivityLogService` (deliberately separate from the write-only `AuditLogService`, mirroring `apps.boq`'s own `BOQService`/`BOQSummaryService` write/read split) backs `GET /activity-logs`: tenant-scoped, filterable by `entityType`/`entityId`/`action`/`actorUserId`/date range, **paginated** (`StandardPagination`) -- unlike Quotation/Invoice/Expense's nested-under-Project lists, a tenant-wide audit feed is exactly the "unbounded collection" `CompanyViewSet`/`ProductViewSet`'s pagination precedent covers, not the small nested-list precedent. A platform admin must supply `?companyId=` explicitly (no single resolved tenant), mirroring `apps.reports`' identical pattern.
+
+**Tests:** `apps/audit/tests/test_services.py` (13 total, including 4 `ActivityLogServiceTestCase`), `apps/audit/tests/test_models.py` (5), `apps/audit/tests/test_activity_log_views.py` (3) -- company isolation, and filters by entity type/action/actor.
+
+Depends On
+
+- BE-019 (Audit Log)
+
+---
+
+## BE-048 – Dashboard
+
+**Status:** Done
+
+**Priority:** Medium
+
+**Owner:** Backend Team
+
+**Implementation notes:** New `apps.dashboard` app -- pure read-only aggregation, no model of its own, matching CLAUDE.md's Dashboard / Reports section exactly: 8 KPI cards (Total/Active Projects, Total Quotations, Total Billed Revenue, Total Received, Pending Amount, Total Expenses, Net Profit/Loss) plus 8 "recent" sections (Recent Projects/Quotations/Expenses, Pending Payments, Overdue Invoices, Upcoming Deadlines, Recent Activities, Project Profitability). Every money KPI reuses `FinanceReportService.compute` (BE-045) directly rather than recomputing the same revenue/received/expenses/profit-loss formulas a second time; `recentActivities` reuses `ActivityLogService` (BE-047) and `AuditLogSerializer` directly. "Total Quotations" counts distinct `quote_number`s, not every revision row. "Overdue Invoices" reuses `InvoiceService.compute_effective_status` (BE-042) the same way `FinanceReportService._compute_outstanding` does. "Project Profitability" calls `FinanceReportService.compute` once per active project (a per-project loop, not optimized further -- a dashboard read, not a hot path) and returns the top 5 by profit. Every "recent" list is capped at 5 (10 for activities) -- CLAUDE.md names each section but not a page size; no doc gap worth an AskUserQuestion over.
+
+**Tests:** `apps/dashboard/tests/test_services.py` (9), `test_views.py` (2) -- KPI arithmetic reuse, active-project exclusion of terminal statuses, distinct-quote-number counting, pending/overdue invoice listing, the 30-day upcoming-deadline window, per-project profitability, and company-tenant isolation.
+
+**Sprint 7 status:** every task BE-046–BE-048 is implemented, verified, tested, and marked **Done**, completing Sprint 7 (Platform). Full `apps/documents` + `apps/audit` + `apps/dashboard` suite: **56 passed** (24 + 21 + 11). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected. `spectacular --fail-on-warn`: clean.
+
+Depends On
+
+- BE-047 (Activity Logs)
 
 ---
 

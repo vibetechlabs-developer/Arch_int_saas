@@ -1,8 +1,11 @@
+import datetime
 import logging
 import uuid
 from typing import Any, Dict, Optional
 
-from apps.audit import validators
+from django.db.models import QuerySet
+
+from apps.audit import selectors, validators
 from apps.audit.models import AuditAction, AuditLog
 from apps.audit.repositories import AuditLogRepository
 
@@ -90,3 +93,38 @@ class AuditLogService:
         )
 
         return entry
+
+
+class ActivityLogService:
+    """
+    Read-only "Activity Feed"/"Activity Logs" surface (BE-047), built
+    directly on the existing audit_log table (BE-019) -- no new model.
+    Deliberately separate from AuditLogService: that class is a write-
+    only concern (every prior sprint's services call `.record()` and
+    never read this table back), this one is the read/query concern,
+    mirroring how apps.boq split BOQService (write orchestration) from
+    BOQSummaryService (read computation).
+    """
+
+    @classmethod
+    def list_activity_for_company(
+        cls,
+        company_id: str | uuid.UUID,
+        entity_type: Optional[str] = None,
+        entity_id: Optional[str | uuid.UUID] = None,
+        action: Optional[str] = None,
+        actor_user_id: Optional[str | uuid.UUID] = None,
+        date_from: Optional[datetime.date] = None,
+        date_to: Optional[datetime.date] = None,
+        ordering: str = "-created_at",
+    ) -> QuerySet[AuditLog]:
+        return selectors.list_activity_for_company(
+            company_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action=action,
+            actor_user_id=actor_user_id,
+            date_from=date_from,
+            date_to=date_to,
+            ordering=ordering,
+        )

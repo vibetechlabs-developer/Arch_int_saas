@@ -108,6 +108,8 @@ INSTALLED_APPS = [
     "apps.payments",
     "apps.expenses",
     "apps.reports",
+    "apps.documents",
+    "apps.dashboard",
 ]
 
 AUTH_USER_MODEL = "users.User"
