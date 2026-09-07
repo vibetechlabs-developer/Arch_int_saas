@@ -5,6 +5,7 @@ from apps.authentication.views import (
     LoginView,
     LogoutView,
     MeView,
+    MyMembershipsView,
     PlatformLoginView,
     ResetPasswordView,
     TokenRefreshView,
@@ -16,6 +17,7 @@ urlpatterns = [
     re_path(r"^auth/refresh/?$", TokenRefreshView.as_view(), name="auth-refresh"),
     re_path(r"^auth/logout/?$", LogoutView.as_view(), name="auth-logout"),
     re_path(r"^auth/me/?$", MeView.as_view(), name="auth-me"),
+    re_path(r"^auth/memberships/?$", MyMembershipsView.as_view(), name="auth-memberships"),
     re_path(
         r"^auth/forgot-password/?$",
         ForgotPasswordView.as_view(),

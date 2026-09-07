@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from apps.users.models import CompanyMembership, Role, User
+from apps.users.models import CompanyMembership, Permission, Role, RolePermission, User
 
 
 @admin.register(User)
@@ -64,6 +64,7 @@ class CompanyMembershipAdmin(admin.ModelAdmin):
     list_display = (
         "user",
         "company",
+        "role",
         "status",
         "created_at",
         "is_deleted",
@@ -75,7 +76,7 @@ class CompanyMembershipAdmin(admin.ModelAdmin):
         "company__name",
     )
     readonly_fields = ("id", "created_at", "updated_at", "deleted_at")
-    raw_id_fields = ("user", "company")
+    raw_id_fields = ("user", "company", "role")
 
     def is_deleted(self, obj: CompanyMembership) -> bool:
         return obj.is_deleted
@@ -117,4 +118,38 @@ class RoleAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return Role.all_objects.all()
+
+
+@admin.register(Permission)
+class PermissionAdmin(admin.ModelAdmin):
+    """
+    Admin configuration for the global Permission catalog.
+    """
+
+    list_display = ("code", "module", "action", "created_at")
+    list_filter = ("module", "action")
+    search_fields = ("code", "module", "description")
+    readonly_fields = ("id", "created_at", "updated_at", "deleted_at")
+
+
+@admin.register(RolePermission)
+class RolePermissionAdmin(admin.ModelAdmin):
+    """
+    Admin configuration for Role <-> Permission grants.
+    """
+
+    list_display = ("role", "permission", "created_at", "is_deleted")
+    list_filter = ("deleted_at",)
+    search_fields = ("role__name", "permission__code")
+    readonly_fields = ("id", "created_at", "updated_at", "deleted_at")
+    raw_id_fields = ("role", "permission")
+
+    def is_deleted(self, obj: RolePermission) -> bool:
+        return obj.is_deleted
+
+    is_deleted.boolean = True
+    is_deleted.short_description = "Deleted"
+
+    def get_queryset(self, request):
+        return RolePermission.all_objects.all()
 

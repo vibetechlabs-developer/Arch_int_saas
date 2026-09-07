@@ -175,6 +175,16 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
         "version",
         "uploaded_by_id",
     },
+    # BE-052: user_id/role_id are stringified by
+    # apps.users.services.CompanyMembershipService._membership_snapshot
+    # before reaching here -- same JSONField-has-no-custom-encoder
+    # reasoning as every prior sprint's audit helper. Never includes the
+    # invited email as free text beyond what's already resolvable via
+    # user_id, keeping this row self-describing without duplicating PII.
+    "company_membership": {"user_id", "role_id", "status"},
+    # BE-049/BE-051: only the resulting permission-code set is recorded,
+    # never full Permission objects (a code is not sensitive).
+    "role_permission": {"permission_codes"},
 }
 
 

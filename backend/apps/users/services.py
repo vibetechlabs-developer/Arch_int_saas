@@ -9,8 +9,14 @@ from apps.audit.models import AuditAction
 from apps.audit.services import AuditLogService
 from apps.common.exceptions import ConflictError
 from apps.users import selectors, validators
-from apps.users.models import Role
-from apps.users.repositories import RoleRepository
+from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role
+from apps.users.permission_catalog import ALL_PERMISSION_CODES, DEFAULT_ROLE_PERMISSIONS
+from apps.users.repositories import (
+    CompanyMembershipRepository,
+    PermissionRepository,
+    RolePermissionRepository,
+    RoleRepository,
+)
 
 logger = logging.getLogger("apps.users.services")
 
@@ -298,6 +304,339 @@ class RoleService:
                 action=AuditAction.DELETE,
                 entity_type="role",
                 entity_id=role_id_val,
+                company_id=company_id_val,
+                actor_user=actor_user,
+                before_state=before_state,
+                request=request,
+            )
+
+    @classmethod
+    def assign_permissions(
+        cls,
+        role_id: str | uuid.UUID,
+        codes: list[str],
+        company_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> Role:
+        """
+        Replace a role's permission grants with exactly the given set of
+        permission codes (BE-049/BE-051). Unknown codes are rejected rather
+        than silently ignored, since a typo'd code would otherwise grant
+        nothing while looking like it succeeded.
+        """
+        with transaction.atomic():
+            role = cls.get_role_by_id(role_id, company_id=company_id)
+
+            before_codes = sorted(PermissionRepository.codes_for_role(role.id))
+
+            permissions = list(PermissionRepository.filter_by_codes(codes))
+            found_codes = {p.code for p in permissions}
+            unknown_codes = sorted(set(codes) - found_codes)
+            if unknown_codes:
+                raise drf_exceptions.ValidationError(
+                    {"permissionCodes": [f"Unknown permission code(s): {', '.join(unknown_codes)}"]}
+                )
+
+            RolePermissionRepository.replace_role_permissions(role, permissions)
+            after_codes = sorted(found_codes)
+
+            AuditLogService.record(
+                action=AuditAction.UPDATE,
+                entity_type="role_permission",
+                entity_id=role.id,
+                company_id=role.company_id,
+                actor_user=actor_user,
+                before_state={"permission_codes": before_codes},
+                after_state={"permission_codes": after_codes},
+                request=request,
+            )
+
+            return role
+
+    @classmethod
+    def seed_default_roles_for_company(cls, company: Any) -> list[Role]:
+        """
+        Auto-create the documented default roles (05_Security/Permissions.md
+        §3) for a newly created company, each with its representative
+        permission set from apps.users.permission_catalog. Called from
+        apps.company.services.CompanyService.create_company() so a new
+        tenant isn't empty-handed. Company Admins can still edit, rename, or
+        add roles afterward via the existing /roles API — this is a
+        starting point, not a locked-in set.
+
+        Not backfilled onto companies that existed before this feature
+        shipped; only new companies get auto-seeded roles.
+        """
+        all_permissions_by_code = {p.code: p for p in PermissionRepository.all()}
+        created_roles: list[Role] = []
+
+        for role_name, codes in DEFAULT_ROLE_PERMISSIONS.items():
+            role = RoleRepository.create(
+                company=company,
+                name=role_name,
+                description=f"Default '{role_name}' role, auto-created for this company.",
+                is_active=True,
+            )
+
+            resolved_codes = ALL_PERMISSION_CODES if codes == "__all__" else codes
+            permissions = [
+                all_permissions_by_code[code]
+                for code in resolved_codes
+                if code in all_permissions_by_code
+            ]
+            RolePermissionRepository.replace_role_permissions(role, permissions)
+            created_roles.append(role)
+
+        return created_roles
+
+
+class PermissionService:
+    """
+    Read-only RBAC resolution. Not yet wired into any view's
+    permission_classes (BE-054 is the deliberately separate enforcement
+    cutover) — exists so the architecture and its tests exist ahead of that
+    cutover, per the Backend Lead decision to build the smallest complete
+    architecture now and flag enforcement as a follow-up.
+    """
+
+    @staticmethod
+    def list_all_permissions():
+        return PermissionRepository.all()
+
+    @staticmethod
+    def get_permission_codes_for_membership(membership: Optional[CompanyMembership]) -> set[str]:
+        """
+        A membership with no role, no active status, or that is None has no
+        permission codes — fails closed rather than defaulting to "every
+        code" or "every code the company has ever granted".
+        """
+        if membership is None:
+            return set()
+        if membership.status != CompanyMembershipStatus.ACTIVE:
+            return set()
+        if membership.role_id is None:
+            return set()
+        return PermissionRepository.codes_for_role(membership.role_id)
+
+    @staticmethod
+    def has_permission(membership: Optional[CompanyMembership], code: str) -> bool:
+        return code in PermissionService.get_permission_codes_for_membership(membership)
+
+
+class CompanyMembershipService:
+    """
+    Business logic and orchestration service for CompanyMembership
+    management (BE-052): invite, list, remove, suspend, reactivate, and
+    assign/change role. Every mutation is audited (BE-055).
+    """
+
+    @classmethod
+    def list_memberships(
+        cls,
+        company_id: str | uuid.UUID,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+        ordering: str = "-created_at",
+    ):
+        return selectors.list_memberships_for_company(
+            company_id=company_id, status=status, search=search, ordering=ordering
+        )
+
+    @classmethod
+    def list_my_memberships(cls, user_id: str | uuid.UUID):
+        """
+        BE-053: the current user's own active memberships across every
+        company they belong to, for workspace switching.
+        """
+        return selectors.list_memberships_for_user(user_id)
+
+    @classmethod
+    def get_membership_by_id(
+        cls,
+        membership_id: str | uuid.UUID,
+        company_id: Optional[str | uuid.UUID] = None,
+    ) -> CompanyMembership:
+        membership = CompanyMembershipRepository.get_by_id(membership_id)
+        if company_id is not None and str(membership.company_id) != str(company_id):
+            raise drf_exceptions.NotFound("The requested membership was not found.")
+        return membership
+
+    @classmethod
+    def invite_member(
+        cls,
+        company_id: str | uuid.UUID,
+        email: str,
+        role_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> CompanyMembership:
+        """
+        Invite an existing user (by email) into a company. This does not
+        create a new User account — matches CLAUDE.md's `User -> Company
+        Membership` model, where a user is a global identity that can be
+        invited into a company it doesn't yet belong to. Creating a brand
+        new user record for an email with no existing account is a
+        registration/onboarding flow, out of this task's scope.
+        """
+        with transaction.atomic():
+            company = RoleRepository.get_company_by_id(company_id)
+            cleaned_email = validators.clean_email(email)
+            user = CompanyMembershipRepository.get_user_by_email(cleaned_email)
+
+            if CompanyMembershipRepository.active_membership_exists(company.id, user.id):
+                raise ConflictError("This user already has a membership in this company.")
+
+            role = None
+            if role_id is not None:
+                role = CompanyMembershipRepository.get_role_by_id(role_id)
+                validators.validate_role_belongs_to_company(role, company.id)
+
+            try:
+                with transaction.atomic():
+                    membership = CompanyMembershipRepository.create(
+                        company=company,
+                        user=user,
+                        role=role,
+                        status=CompanyMembershipStatus.INVITED,
+                    )
+            except IntegrityError as exc:
+                raise ConflictError(
+                    "This user already has a membership in this company."
+                ) from exc
+
+            AuditLogService.record(
+                action=AuditAction.CREATE,
+                entity_type="company_membership",
+                entity_id=membership.id,
+                company_id=company.id,
+                actor_user=actor_user,
+                after_state={
+                    "user_id": str(user.id),
+                    "role_id": str(role.id) if role else None,
+                    "status": membership.status,
+                },
+                request=request,
+            )
+
+            return membership
+
+    @classmethod
+    def _membership_snapshot(cls, membership: CompanyMembership) -> Dict[str, Any]:
+        return {
+            "user_id": str(membership.user_id),
+            "role_id": str(membership.role_id) if membership.role_id else None,
+            "status": membership.status,
+        }
+
+    @classmethod
+    def assign_role(
+        cls,
+        membership_id: str | uuid.UUID,
+        role_id: Optional[str | uuid.UUID],
+        company_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> CompanyMembership:
+        """
+        Assign, change, or clear (role_id=None) a membership's role.
+        """
+        with transaction.atomic():
+            membership = cls.get_membership_by_id(membership_id, company_id=company_id)
+            before_state = cls._membership_snapshot(membership)
+
+            role = None
+            if role_id is not None:
+                role = CompanyMembershipRepository.get_role_by_id(role_id)
+                validators.validate_role_belongs_to_company(role, membership.company_id)
+
+            membership = CompanyMembershipRepository.save(membership, {"role": role})
+
+            AuditLogService.record(
+                action=AuditAction.UPDATE,
+                entity_type="company_membership",
+                entity_id=membership.id,
+                company_id=membership.company_id,
+                actor_user=actor_user,
+                before_state=before_state,
+                after_state=cls._membership_snapshot(membership),
+                request=request,
+            )
+
+            return membership
+
+    @classmethod
+    def _set_status(
+        cls,
+        membership_id: str | uuid.UUID,
+        new_status: str,
+        company_id: Optional[str | uuid.UUID],
+        actor_user: Any,
+        request: Any,
+    ) -> CompanyMembership:
+        with transaction.atomic():
+            membership = cls.get_membership_by_id(membership_id, company_id=company_id)
+            before_state = cls._membership_snapshot(membership)
+
+            membership = CompanyMembershipRepository.save(membership, {"status": new_status})
+
+            AuditLogService.record(
+                action=AuditAction.UPDATE,
+                entity_type="company_membership",
+                entity_id=membership.id,
+                company_id=membership.company_id,
+                actor_user=actor_user,
+                before_state=before_state,
+                after_state=cls._membership_snapshot(membership),
+                request=request,
+            )
+
+            return membership
+
+    @classmethod
+    def suspend_member(
+        cls,
+        membership_id: str | uuid.UUID,
+        company_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> CompanyMembership:
+        return cls._set_status(
+            membership_id, CompanyMembershipStatus.REVOKED, company_id, actor_user, request
+        )
+
+    @classmethod
+    def reactivate_member(
+        cls,
+        membership_id: str | uuid.UUID,
+        company_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> CompanyMembership:
+        return cls._set_status(
+            membership_id, CompanyMembershipStatus.ACTIVE, company_id, actor_user, request
+        )
+
+    @classmethod
+    def remove_member(
+        cls,
+        membership_id: str | uuid.UUID,
+        company_id: Optional[str | uuid.UUID] = None,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> None:
+        with transaction.atomic():
+            membership = cls.get_membership_by_id(membership_id, company_id=company_id)
+            membership_id_val = membership.id
+            company_id_val = membership.company_id
+            before_state = cls._membership_snapshot(membership)
+
+            CompanyMembershipRepository.soft_delete(membership)
+
+            AuditLogService.record(
+                action=AuditAction.DELETE,
+                entity_type="company_membership",
+                entity_id=membership_id_val,
                 company_id=company_id_val,
                 actor_user=actor_user,
                 before_state=before_state,

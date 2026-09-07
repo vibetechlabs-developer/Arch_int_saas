@@ -33,6 +33,24 @@ class CompanyServiceTestCase(TestCase):
         self.assertIsNone(c.gst_number)
         self.assertIn("numbering", c.settings)
 
+    def test_create_company_auto_seeds_default_roles(self):
+        """
+        BE-049: a new company isn't empty-handed -- the documented default
+        roles (05_Security/Permissions.md §3) are auto-created, each with
+        its representative permission set.
+        """
+        from apps.users.models import Role
+        from apps.users.permission_catalog import DEFAULT_ROLE_PERMISSIONS
+        from apps.users.repositories import PermissionRepository
+
+        c = CompanyService.create_company(name="Fresh Tenant Co")
+
+        seeded_names = set(Role.objects.filter(company=c).values_list("name", flat=True))
+        self.assertEqual(seeded_names, set(DEFAULT_ROLE_PERMISSIONS.keys()))
+
+        owner_role = Role.objects.get(company=c, name="Owner")
+        self.assertTrue(len(PermissionRepository.codes_for_role(owner_role.id)) > 0)
+
     def test_get_company_by_id_success(self):
         """
         Verify retrieving existing company by ID.

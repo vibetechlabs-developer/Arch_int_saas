@@ -283,6 +283,7 @@ SPECTACULAR_SETTINGS = {
         "ProductStatusEnum": "apps.products.models.ProductStatus",
         "QuotationStatusEnum": "apps.quotations.models.QuotationStatus",
         "InvoiceStatusEnum": "apps.invoices.models.InvoiceStatus",
+        "CompanyMembershipStatusEnum": "apps.users.models.CompanyMembershipStatus",
     },
 }
 

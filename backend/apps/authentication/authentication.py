@@ -47,6 +47,7 @@ class TenantJWTAuthentication(JWTAuthentication):
             "/auth/logout",
             "/auth/me",
             "/auth/refresh",
+            "/auth/memberships",
             "/schema/",
             "/docs/",
             "/redoc/",

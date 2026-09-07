@@ -3,8 +3,8 @@ from typing import Optional
 
 from django.db.models import Q, QuerySet
 
-from apps.users.models import Role
-from apps.users.repositories import RoleRepository
+from apps.users.models import CompanyMembership, Role
+from apps.users.repositories import CompanyMembershipRepository, RoleRepository
 
 VALID_ORDER_FIELDS = {
     "created_at",
@@ -48,3 +48,46 @@ def list_roles(
     # resolution) have no defined relative order and can come back
     # differently across calls.
     return queryset.order_by(order_field, "id")
+
+
+MEMBERSHIP_ORDER_FIELDS = {"created_at", "-created_at", "status", "-status"}
+
+
+def list_memberships_for_company(
+    company_id: str | uuid.UUID,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    ordering: str = "-created_at",
+) -> QuerySet[CompanyMembership]:
+    """
+    Read-only, filtered/ordered CompanyMembership listing scoped to one
+    company (BE-052). Always company-scoped — there is no "list across
+    companies" mode for this endpoint, matching Role's list_roles pattern.
+    """
+    queryset = CompanyMembershipRepository.all().filter(company_id=company_id)
+
+    if status:
+        queryset = queryset.filter(status=status)
+
+    if search:
+        search_query = search.strip()
+        queryset = queryset.filter(
+            Q(user__email__icontains=search_query) | Q(user__name__icontains=search_query)
+        )
+
+    order_field = ordering if ordering in MEMBERSHIP_ORDER_FIELDS else "-created_at"
+    return queryset.order_by(order_field, "id")
+
+
+def list_memberships_for_user(user_id: str | uuid.UUID) -> QuerySet[CompanyMembership]:
+    """
+    A user's own active memberships across every company they belong to —
+    the one legitimate cross-tenant read in this codebase, since it is
+    scoped by user identity (not by a caller-supplied company id) and
+    returns only company id/name/status + role name (BE-053).
+    """
+    return (
+        CompanyMembershipRepository.all()
+        .filter(user_id=user_id, status="active")
+        .order_by("-created_at", "id")
+    )

@@ -5,7 +5,7 @@ from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
 from apps.company.models import Company
-from apps.users.models import Role
+from apps.users.models import CompanyMembership, Permission, Role, RolePermission, User
 
 
 class RoleRepository:
@@ -58,3 +58,126 @@ class RoleRepository:
             return Company.objects.get(id=company_id)
         except (Company.DoesNotExist, ValueError):
             raise drf_exceptions.NotFound("The specified company was not found.")
+
+
+class PermissionRepository:
+    """
+    Data-access layer for the global Permission catalog. Read-mostly — the
+    catalog is seeded via a data migration (0005), not created through the
+    application at runtime.
+    """
+
+    @staticmethod
+    def all() -> QuerySet[Permission]:
+        return Permission.objects.all()
+
+    @staticmethod
+    def codes_for_role(role_id: str | uuid.UUID) -> set[str]:
+        """
+        A role's active (non-soft-deleted) permission codes.
+
+        Deliberately queries RolePermission.objects (its soft-delete-aware
+        default manager) for the permission ids, then Permission.objects for
+        the codes -- rather than
+        `Permission.objects.filter(role_permissions__role_id=role_id)`,
+        which performs a raw SQL join across the relation and does NOT
+        respect RolePermission's soft-delete manager, so a soft-deleted
+        grant would still be counted as active.
+        """
+        permission_ids = RolePermission.objects.filter(role_id=role_id).values_list(
+            "permission_id", flat=True
+        )
+        return set(Permission.objects.filter(id__in=permission_ids).values_list("code", flat=True))
+
+    @staticmethod
+    def filter_by_codes(codes: list[str]) -> QuerySet[Permission]:
+        return Permission.objects.filter(code__in=codes)
+
+
+class RolePermissionRepository:
+    """
+    Data-access layer for Role <-> Permission grants.
+    """
+
+    @staticmethod
+    def replace_role_permissions(role: Role, permissions: list[Permission]) -> None:
+        """
+        Set a role's permission grants to exactly the given set: soft-deletes
+        any existing grant not in the new set, and creates any grant that
+        doesn't already exist (rather than delete-then-recreate everything,
+        which would needlessly churn created_at/audit-adjacent rows).
+        """
+        existing = {
+            rp.permission_id: rp
+            for rp in RolePermission.objects.filter(role=role)
+        }
+        target_ids = {p.id for p in permissions}
+
+        for permission_id, row in existing.items():
+            if permission_id not in target_ids:
+                row.delete()
+
+        existing_ids = set(existing.keys())
+        RolePermission.objects.bulk_create(
+            [
+                RolePermission(role=role, permission=permission)
+                for permission in permissions
+                if permission.id not in existing_ids
+            ]
+        )
+
+    @staticmethod
+    def grant(role: Role, permission: Permission) -> RolePermission:
+        return RolePermission.objects.get_or_create(role=role, permission=permission)[0]
+
+
+class CompanyMembershipRepository:
+    """
+    Data-access layer for CompanyMembership.
+    """
+
+    @staticmethod
+    def all() -> QuerySet[CompanyMembership]:
+        return CompanyMembership.objects.select_related("company", "user", "role")
+
+    @staticmethod
+    def get_by_id(membership_id: str | uuid.UUID) -> CompanyMembership:
+        try:
+            return CompanyMembershipRepository.all().get(id=membership_id)
+        except (CompanyMembership.DoesNotExist, ValueError):
+            raise drf_exceptions.NotFound("The requested membership was not found.")
+
+    @staticmethod
+    def active_membership_exists(company_id: str | uuid.UUID, user_id: str | uuid.UUID) -> bool:
+        return CompanyMembership.objects.filter(
+            company_id=company_id, user_id=user_id
+        ).exists()
+
+    @staticmethod
+    def create(**fields: Any) -> CompanyMembership:
+        return CompanyMembership.objects.create(**fields)
+
+    @staticmethod
+    def save(membership: CompanyMembership, fields: Optional[Dict[str, Any]] = None) -> CompanyMembership:
+        for field, value in (fields or {}).items():
+            setattr(membership, field, value)
+        membership.save()
+        return membership
+
+    @staticmethod
+    def soft_delete(membership: CompanyMembership) -> None:
+        membership.delete()
+
+    @staticmethod
+    def get_user_by_email(email: str) -> User:
+        try:
+            return User.objects.get(email__iexact=email.strip())
+        except User.DoesNotExist:
+            raise drf_exceptions.NotFound("No user exists with this email address.")
+
+    @staticmethod
+    def get_role_by_id(role_id: str | uuid.UUID) -> Role:
+        try:
+            return Role.objects.get(id=role_id)
+        except (Role.DoesNotExist, ValueError):
+            raise drf_exceptions.NotFound("The specified role was not found.")

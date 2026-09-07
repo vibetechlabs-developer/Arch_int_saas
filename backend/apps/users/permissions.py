@@ -3,7 +3,37 @@ from rest_framework.request import Request
 
 from apps.common.permissions import is_platform_admin
 
-__all__ = ["is_platform_admin", "RolePermission"]
+__all__ = ["is_platform_admin", "RolePermission", "CompanyMembershipPermission"]
+
+
+class CompanyMembershipPermission(permissions.BasePermission):
+    """
+    Permission class for CompanyMembership management endpoints (BE-052).
+    Mirrors RolePermission exactly — the same coarse tenant-membership gate,
+    not fine-grained permission codes yet (BE-054 is the deliberately
+    separate enforcement cutover once the RBAC architecture from BE-049 is
+    reviewed).
+
+    - Platform Super Admins have full access across all operations.
+    - Regular users can manage memberships only within the single company
+      TenantJWTAuthentication resolved for this request (request.company_id).
+    - Cross-tenant access is strictly denied.
+    """
+
+    def has_permission(self, request: Request, view) -> bool:
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        if is_platform_admin(request):
+            return True
+
+        return getattr(request, "company_id", None) is not None
+
+    def has_object_permission(self, request: Request, view, obj) -> bool:
+        if is_platform_admin(request):
+            return True
+
+        return str(getattr(request, "company_id", None)) == str(obj.company_id)
 
 
 class RolePermission(permissions.BasePermission):

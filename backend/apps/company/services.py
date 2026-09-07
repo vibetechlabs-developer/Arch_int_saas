@@ -38,10 +38,23 @@ class CompanyService:
     ) -> Company:
         """
         Create a new Company tenant.
+
+        Also auto-seeds the documented default roles (BE-049/§3) via
+        apps.users.services.RoleService.seed_default_roles_for_company() so
+        a new tenant isn't empty-handed. Imported locally (not at module
+        level) to avoid a load-order dependency between apps.company and
+        apps.users during Django app registry population — apps.users
+        already imports apps.company.models at module level, so a
+        module-level import here in the other direction would risk a
+        circular/partial-import at startup.
         """
         with transaction.atomic():
             fields = validators.build_create_fields(name, currency, gst_number, status, settings)
             company = CompanyRepository.create(**fields)
+
+            from apps.users.services import RoleService
+
+            RoleService.seed_default_roles_for_company(company)
 
             AuditLogService.record(
                 action=AuditAction.CREATE,

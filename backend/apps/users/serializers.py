@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
-from apps.users.models import CompanyMembership, Role, User
-from apps.users.selectors import VALID_ORDER_FIELDS
+from apps.users.models import CompanyMembership, CompanyMembershipStatus, Permission, Role, User
+from apps.users.selectors import MEMBERSHIP_ORDER_FIELDS, VALID_ORDER_FIELDS
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -50,6 +50,8 @@ class CompanyMembershipSerializer(serializers.ModelSerializer):
     userId = serializers.UUIDField(source="user_id", read_only=True)
     userEmail = serializers.EmailField(source="user.email", read_only=True)
     userName = serializers.CharField(source="user.name", read_only=True)
+    roleId = serializers.UUIDField(source="role_id", read_only=True, allow_null=True)
+    roleName = serializers.CharField(source="role.name", read_only=True, allow_null=True, default=None)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
 
@@ -63,21 +65,92 @@ class CompanyMembershipSerializer(serializers.ModelSerializer):
             "userId",
             "userEmail",
             "userName",
+            "roleId",
+            "roleName",
             "status",
             "createdAt",
             "updatedAt",
         ]
-        read_only_fields = [
-            "id",
-            "companyId",
-            "companyName",
-            "companyStatus",
-            "userId",
-            "userEmail",
-            "userName",
-            "createdAt",
-            "updatedAt",
-        ]
+        read_only_fields = fields
+
+
+class MyMembershipSerializer(serializers.ModelSerializer):
+    """
+    Minimal per-membership shape for GET /auth/memberships (BE-053) —
+    workspace switching only needs enough to label and select a company;
+    deliberately excludes anything not needed for that (e.g. other members,
+    company financial/settings data).
+    """
+
+    companyId = serializers.UUIDField(source="company_id", read_only=True)
+    companyName = serializers.CharField(source="company.name", read_only=True)
+    roleName = serializers.CharField(source="role.name", read_only=True, allow_null=True, default=None)
+
+    class Meta:
+        model = CompanyMembership
+        fields = ["companyId", "companyName", "status", "roleName"]
+        read_only_fields = fields
+
+
+class CompanyMembershipInviteSerializer(serializers.Serializer):
+    """
+    Input serializer for inviting an existing user into a company (BE-052).
+    """
+
+    email = serializers.EmailField(required=True)
+    roleId = serializers.UUIDField(source="role_id", required=False, allow_null=True, default=None)
+
+
+class CompanyMembershipAssignRoleSerializer(serializers.Serializer):
+    """
+    Input serializer for assigning/changing/clearing a membership's role.
+    roleId=null clears the role assignment.
+    """
+
+    roleId = serializers.UUIDField(source="role_id", required=True, allow_null=True)
+
+
+class CompanyMembershipListQuerySerializer(serializers.Serializer):
+    """
+    Validates ?status=/?search=/?ordering= query params for
+    GET /company-memberships.
+    """
+
+    status = serializers.ChoiceField(
+        choices=CompanyMembershipStatus.choices, required=False, allow_null=True, default=None
+    )
+    search = serializers.CharField(required=False, allow_blank=True, default="")
+    ordering = serializers.ChoiceField(
+        choices=sorted(MEMBERSHIP_ORDER_FIELDS), required=False, default="-created_at"
+    )
+
+
+class PermissionSerializer(serializers.ModelSerializer):
+    """
+    Read-only serializer for the global Permission catalog.
+    """
+
+    createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+
+    class Meta:
+        model = Permission
+        fields = ["id", "code", "module", "action", "description", "createdAt"]
+        read_only_fields = fields
+
+
+class RolePermissionAssignSerializer(serializers.Serializer):
+    """
+    Input serializer for replacing a role's permission-code grants
+    (BE-049/BE-051).
+    """
+
+    permissionCodes = serializers.ListField(
+        source="codes",
+        child=serializers.CharField(),
+        required=True,
+        allow_empty=True,
+        help_text="Full replacement set of `<module>.<action>` codes for this role.",
+    )
 
 
 class RoleSerializer(serializers.ModelSerializer):

@@ -1,21 +1,29 @@
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.common.pagination import StandardPagination
 from apps.common.responses import ApiResponse
 from apps.common.views import ObjectPermission404Mixin
-from apps.users.models import Role
-from apps.users.permissions import RolePermission, is_platform_admin
+from apps.users.models import CompanyMembership, Role
+from apps.users.permissions import CompanyMembershipPermission, RolePermission, is_platform_admin
 from apps.users.serializers import (
+    CompanyMembershipAssignRoleSerializer,
+    CompanyMembershipInviteSerializer,
+    CompanyMembershipListQuerySerializer,
+    CompanyMembershipSerializer,
+    PermissionSerializer,
     RoleCreateSerializer,
     RoleListQuerySerializer,
+    RolePermissionAssignSerializer,
     RoleSerializer,
     RoleUpdateSerializer,
 )
-from apps.users.services import RoleService
+from apps.users.services import CompanyMembershipService, PermissionService, RoleService
 
 
 @extend_schema_view(
@@ -224,3 +232,220 @@ class RoleViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
             data={"message": "Role deleted successfully."},
             request_id=request_id,
         )
+
+    @extend_schema(
+        summary="Assign Role Permissions",
+        description="Replace a role's permission-code grants with the given full set (BE-049/BE-051).",
+        request=RolePermissionAssignSerializer,
+        responses={status.HTTP_200_OK: RoleSerializer},
+        tags=["Role"],
+    )
+    @action(detail=True, methods=["put"], url_path="permissions")
+    def permissions_action(self, request: Request, pk: str = None) -> Response:
+        """
+        `PUT /roles/{id}/permissions` — replace this role's permission-code
+        grants. Not yet enforced by any view (BE-054 is separate); exists so
+        Company Admins can start composing role permission sets ahead of
+        that cutover.
+        """
+        role = RoleService.get_role_by_id(pk)
+        self.check_object_permissions(request, role)
+
+        serializer = RolePermissionAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        role = RoleService.assign_permissions(
+            role_id=pk,
+            codes=serializer.validated_data["codes"],
+            actor_user=request.user,
+            request=request,
+        )
+        response_data = RoleSerializer(role).data
+        request_id = getattr(request, "request_id", None)
+
+        return ApiResponse.success(data=response_data, request_id=request_id)
+
+
+class PermissionListView(APIView):
+    """
+    `GET /permissions` — the global Permission catalog (BE-049). Read-only;
+    the catalog is seeded via migration, not managed through this API.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="List Permissions",
+        description="List the global RBAC permission-code catalog.",
+        responses={status.HTTP_200_OK: PermissionSerializer(many=True)},
+        tags=["Role"],
+    )
+    def get(self, request: Request) -> Response:
+        permissions_qs = PermissionService.list_all_permissions()
+        data = PermissionSerializer(permissions_qs, many=True).data
+        request_id = getattr(request, "request_id", None)
+        return ApiResponse.success(data=data, request_id=request_id)
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="List Company Members",
+        description="List this company's memberships with status filtering, search, and pagination.",
+        parameters=[
+            OpenApiParameter(name="status", required=False, type=str),
+            OpenApiParameter(name="search", required=False, type=str),
+            OpenApiParameter(name="ordering", required=False, type=str),
+        ],
+        responses={status.HTTP_200_OK: CompanyMembershipSerializer(many=True)},
+        tags=["Company Membership"],
+    ),
+    create=extend_schema(
+        summary="Invite Member",
+        description="Invite an existing user (by email) into this company, optionally with a role.",
+        request=CompanyMembershipInviteSerializer,
+        responses={status.HTTP_201_CREATED: CompanyMembershipSerializer},
+        tags=["Company Membership"],
+    ),
+    retrieve=extend_schema(
+        summary="Retrieve Membership",
+        responses={status.HTTP_200_OK: CompanyMembershipSerializer},
+        tags=["Company Membership"],
+    ),
+    destroy=extend_schema(
+        summary="Remove Member",
+        description="Soft-delete a company membership.",
+        responses={status.HTTP_200_OK: None},
+        tags=["Company Membership"],
+    ),
+)
+class CompanyMembershipViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
+    """
+    ViewSet for Company Membership management (BE-052): invite, list,
+    retrieve, remove, suspend, reactivate, assign role. Mirrors RoleViewSet's
+    structure exactly (fully-overridden actions through
+    CompanyMembershipService, ObjectPermission404Mixin for cross-tenant
+    404s, standard ApiResponse envelopes).
+    """
+
+    permission_classes = [IsAuthenticated, CompanyMembershipPermission]
+    pagination_class = StandardPagination
+    serializer_class = CompanyMembershipSerializer
+    queryset = CompanyMembership.objects.none()
+
+    def list(self, request: Request) -> Response:
+        query = CompanyMembershipListQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        validated = query.validated_data
+
+        queryset = CompanyMembershipService.list_memberships(
+            company_id=request.company_id,
+            status=validated["status"],
+            search=validated["search"] or None,
+            ordering=validated["ordering"],
+        )
+
+        page = self.paginate_queryset(queryset)
+        request_id = getattr(request, "request_id", None)
+
+        if page is not None:
+            serializer = CompanyMembershipSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = CompanyMembershipSerializer(queryset, many=True)
+        return ApiResponse.success(data=serializer.data, request_id=request_id)
+
+    def create(self, request: Request) -> Response:
+        serializer = CompanyMembershipInviteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        membership = CompanyMembershipService.invite_member(
+            company_id=request.company_id,
+            email=serializer.validated_data["email"],
+            role_id=serializer.validated_data.get("role_id"),
+            actor_user=request.user,
+            request=request,
+        )
+
+        response_data = CompanyMembershipSerializer(membership).data
+        request_id = getattr(request, "request_id", None)
+        return ApiResponse.created(data=response_data, request_id=request_id)
+
+    def retrieve(self, request: Request, pk: str = None) -> Response:
+        membership = CompanyMembershipService.get_membership_by_id(pk)
+        self.check_object_permissions(request, membership)
+
+        response_data = CompanyMembershipSerializer(membership).data
+        request_id = getattr(request, "request_id", None)
+        return ApiResponse.success(data=response_data, request_id=request_id)
+
+    def destroy(self, request: Request, pk: str = None) -> Response:
+        membership = CompanyMembershipService.get_membership_by_id(pk)
+        self.check_object_permissions(request, membership)
+
+        CompanyMembershipService.remove_member(pk, actor_user=request.user, request=request)
+        request_id = getattr(request, "request_id", None)
+        return ApiResponse.success(
+            data={"message": "Membership removed successfully."},
+            request_id=request_id,
+        )
+
+    @extend_schema(
+        summary="Assign Member Role",
+        description="Assign, change, or clear (roleId=null) a membership's role.",
+        request=CompanyMembershipAssignRoleSerializer,
+        responses={status.HTTP_200_OK: CompanyMembershipSerializer},
+        tags=["Company Membership"],
+    )
+    @action(detail=True, methods=["post"], url_path="assign-role")
+    def assign_role(self, request: Request, pk: str = None) -> Response:
+        membership = CompanyMembershipService.get_membership_by_id(pk)
+        self.check_object_permissions(request, membership)
+
+        serializer = CompanyMembershipAssignRoleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        membership = CompanyMembershipService.assign_role(
+            membership_id=pk,
+            role_id=serializer.validated_data["role_id"],
+            actor_user=request.user,
+            request=request,
+        )
+        response_data = CompanyMembershipSerializer(membership).data
+        request_id = getattr(request, "request_id", None)
+        return ApiResponse.success(data=response_data, request_id=request_id)
+
+    @extend_schema(
+        summary="Suspend Member",
+        description="Revoke a company membership's active status.",
+        responses={status.HTTP_200_OK: CompanyMembershipSerializer},
+        tags=["Company Membership"],
+    )
+    @action(detail=True, methods=["post"], url_path="suspend")
+    def suspend(self, request: Request, pk: str = None) -> Response:
+        membership = CompanyMembershipService.get_membership_by_id(pk)
+        self.check_object_permissions(request, membership)
+
+        membership = CompanyMembershipService.suspend_member(
+            pk, actor_user=request.user, request=request
+        )
+        response_data = CompanyMembershipSerializer(membership).data
+        request_id = getattr(request, "request_id", None)
+        return ApiResponse.success(data=response_data, request_id=request_id)
+
+    @extend_schema(
+        summary="Reactivate Member",
+        description="Restore a revoked company membership to active status.",
+        responses={status.HTTP_200_OK: CompanyMembershipSerializer},
+        tags=["Company Membership"],
+    )
+    @action(detail=True, methods=["post"], url_path="reactivate")
+    def reactivate(self, request: Request, pk: str = None) -> Response:
+        membership = CompanyMembershipService.get_membership_by_id(pk)
+        self.check_object_permissions(request, membership)
+
+        membership = CompanyMembershipService.reactivate_member(
+            pk, actor_user=request.user, request=request
+        )
+        response_data = CompanyMembershipSerializer(membership).data
+        request_id = getattr(request, "request_id", None)
+        return ApiResponse.success(data=response_data, request_id=request_id)

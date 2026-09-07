@@ -18,7 +18,8 @@ from apps.authentication.serializers import (
 )
 from apps.authentication.services import AuthenticationService
 from apps.common.responses import ApiResponse
-from apps.users.serializers import UserSerializer
+from apps.users.serializers import MyMembershipSerializer, UserSerializer
+from apps.users.services import CompanyMembershipService
 
 
 class LoginView(APIView):
@@ -181,6 +182,35 @@ class MeView(APIView):
         user_data = UserSerializer(request.user).data
         request_id = getattr(request, "request_id", None)
         return ApiResponse.success(data=user_data, request_id=request_id)
+
+
+class MyMembershipsView(APIView):
+    """
+    Current user's own company memberships (BE-053) — enumerates every
+    active company this user belongs to, for workspace switching. The one
+    legitimate cross-tenant read in this codebase: scoped by the caller's
+    own user id (never a client-supplied company id), and returns only the
+    minimal fields a switcher needs (company id/name, membership status,
+    role name) — never other members, settings, or financial data.
+
+    Exempted from tenant resolution (see TenantJWTAuthentication.exempt_paths)
+    since its entire purpose is to work for a user with zero, one, or many
+    company memberships, not one already-resolved company.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="My Company Memberships",
+        description="List the authenticated user's own active company memberships, for workspace switching.",
+        responses={status.HTTP_200_OK: MyMembershipSerializer(many=True)},
+        tags=["Authentication"],
+    )
+    def get(self, request: Request) -> Response:
+        memberships = CompanyMembershipService.list_my_memberships(request.user.id)
+        data = MyMembershipSerializer(memberships, many=True).data
+        request_id = getattr(request, "request_id", None)
+        return ApiResponse.success(data=data, request_id=request_id)
 
 
 class ForgotPasswordView(APIView):

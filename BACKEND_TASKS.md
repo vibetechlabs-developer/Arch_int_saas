@@ -1234,6 +1234,97 @@ Depends On
 
 ---
 
+## Post-Sprint-7 Backend Completion Audit — 2026-09-07
+
+All of Sprints 1–7 (BE-001–BE-048) are confirmed **Done** against actual code (models/migrations/serializers/services/repositories/permissions/views/urls/tests), re-verified directly (not from task-status text alone). This audit re-inspected the live repository to identify every genuinely missing backend capability against `CLAUDE.md`, `05_Security/Permissions.md`, `05_Security/Tenant.md`, and `00_Development_Standards/`, per a "complete the entire backend" directive. Ground truth confirmed by reading code directly (not assumed from the earlier read-only System Audit artifact):
+
+- **RBAC is enforcement-by-tenant-only, not by permission.** Every permission class in the codebase (`RolePermission`, `ProjectPermission`, `ClientPermission`, and siblings in `products`/`boq`/`quotations`/`invoices`/`payments`/`expenses`) is textually near-identical: `has_permission` checks authentication + a resolved `request.company_id`; `has_object_permission` checks `str(request.company_id) == str(obj.company_id)`. Zero role- or permission-code differentiation exists anywhere.
+- **`Role` (BE-012) is not even wired to `CompanyMembership`.** `CompanyMembership` (`apps/users/models.py:74`) has only `company`, `user`, `status` — no `role` FK. A company can create `Role` rows via `/roles`, but nothing assigns a role to a member. RBAC is further from "labels only" than previously described — it's fully unwired at the data-model level.
+- **No `Permission`/`RolePermission` models exist.** `05_Security/Permissions.md` describes `User → Company Membership → Role → Permissions` and a `<module>.<action>` code format, but no model stores permission codes or links them to a `Role`.
+- **No Company Membership management API exists.** Only `/roles` and `/roles/{id}` are routed in `apps.users`. There is no invite/list/remove/suspend/reactivate/assign-role endpoint for `CompanyMembership`, despite the model existing since BE-007.
+- **No "my memberships" / workspace-switching endpoint exists.** `/auth/me` returns only the bare `User`; a multi-company user has no way to enumerate their memberships via API (confirmed gap the frontend Milestone-1 plan already flagged and deliberately routed around).
+- **`audit`/`reports`/`dashboard` endpoints are ID-less, tenant-scoped aggregates** (`GET /activity-logs`, `GET /reports/finance`, `GET /reports/expenses`, `GET /reports/dashboard` — confirmed via each app's `urls.py`), so classic per-object IDOR does not apply the same way it does to `documents`; the real, narrower gap is the absence of an explicit view-level regression test asserting each of these never leaks another tenant's rows (service-layer scoping is already tested in each app's `test_services.py`, but not re-asserted at the view/permission layer).
+- **`documents` DELETE is already correctly tenant-enforced and tested** (`DocumentDetailView.delete` calls `check_object_permissions` via `ObjectPermission404Mixin`; `documents/tests/test_views.py` already contains cross-tenant/404 cases) — the earlier read-only audit's "DELETE document" gap does not reproduce against current code and is considered closed; no action needed.
+- **`django-filter` is an installed, unused dependency.** All list/filter endpoints to date use hand-built selectors — confirmed as the codebase's one consistent filtering strategy; no second strategy exists to reconcile.
+- **No Celery task exists yet** despite `apps.authentication`/`config/celery.py` scaffolding from BE-003 — no async email, PDF, or reminder job has been built in any sprint so far.
+- **No file upload pipeline exists.** `documents`/`payments`/`expenses`/`products` all store `file_url`/`receipt_url`/`image_url` as plain URL fields — there is no upload endpoint, no storage abstraction, no MIME/size validation anywhere in the repo.
+- **Several free-text fields have no enum**, confirmed by direct model inspection: `Company.currency` (plain `CharField`, defaults `"INR"`, no ISO-4217 validation), `Payment.method`, `Expense.category`/`vendor`/`payment_method`, and `Project.priority` (already deliberately left free-text per an earlier Backend Lead decision recorded in its own `help_text`, since `01_Business/FRS.md §10` names the field but never defines values).
+- **No Phase 3–5 backend module has any code**: Leads/CRM pipeline, Site Visits, Design Management, Procurement, Notifications, Client Portal all have zero models/apps — matches `CLAUDE.md`'s explicit "do not build Phase 3–5 unless instructed" guidance, so these are recorded as backlog only, lowest priority, per the dependency map.
+
+### Open documentation conflict flagged before implementation (per `BACKEND_RULES.md`'s "stop and ask" rule)
+
+`05_Security/Permissions.md` §7 explicitly lists as an **open item**: *"Full canonical list of permission codes per module (to be enumerated alongside `04_API/` endpoint finalization)."* The doc gives a code **format** (`<module>.<action>`), an **action vocabulary** (view/create/edit/delete/approve/export/manage/financial_access), and one **worked example** (Accountant's permission set) — but not a finalized per-module code list, and it does not say whether the 7 named default roles (Owner/Admin/PM/Designer/Accountant/Sales/Supervisor) should be auto-seeded into every new company or are documentation-only references for an admin to hand-build. Per `BACKEND_RULES.md` and the master completion brief's own instruction ("do not invent the canonical permission-code list… create the smallest architecture capable of supporting them and flag the exact unresolved codes before enforcing invented permissions"), this was raised to the user directly rather than assumed — see chat for the resolution reached before BE-049 enforcement work began.
+
+### New backlog (this audit's deliverable — every item below is Todo unless noted)
+
+**P0 — RBAC & Tenant Completion**
+
+| ID | Task | Status |
+|---|---|---|
+| BE-049 | `Permission` model (`code`, `module`, `action`, `description`) + `RolePermission` (role↔permission, unique together) + migration. Seed codes/action-vocabulary per `Permissions.md` §2 format, scoped to modules that exist today. | Done |
+| BE-050 | Add `role` FK (nullable, `SET_NULL`, same-company validated) to `CompanyMembership` + migration; role-assignment validation (role must belong to the same company as the membership). | Done |
+| BE-051 | RBAC resolution service (`has_perm(request, code)`), shared `PermissionRequiredMixin`/permission-code-aware permission class; Platform Admin universal bypass preserved; company-scoped permission caching only if a real N+1 is measured. | Done |
+| BE-052 | Company Membership management module: repository/service/selector/serializers/permissions/views for invite, list, remove, suspend, reactivate, assign/change role — full `View → Serializer → Service → Repository` stack per `BACKEND_RULES.md`. Audit log entry on every mutation. | Done |
+| BE-053 | `GET /auth/memberships` (or equivalent) — current user's active memberships across companies, for workspace switching. Returns only company id/name, membership status, role name — no cross-tenant leakage. | Done |
+| BE-054 | Cut over existing `*Permission` classes (`Client`, `Project`, `Role`, `Product`, `BOQ`, `Quotation`, `Invoice`, `Payment`, `Expense`) from tenant-only to tenant + permission-code enforcement, module by module, each with its own test pass and commit — **only after** BE-049–BE-051 land and the canonical-code question is resolved. | Todo |
+| BE-055 | Audit-log role assignment/removal and permission grant/revoke as first-class audited events (extends BE-019's `apps.audit`). | Done |
+| BE-056 | View-level cross-tenant regression tests for `apps.audit`, `apps.reports`, `apps.dashboard` (company-A-never-sees-company-B, asserted through the view, not just the service). | Todo |
+
+#### BE-049–BE-053, BE-055 — RBAC Architecture, Company Membership Management, My Memberships — 2026-09-07
+
+**Status:** Done
+
+**Priority:** Critical (P0)
+
+**Owner:** Backend Team
+
+**Decision resolved before implementation:** `05_Security/Permissions.md` §7 flags the canonical per-module permission-code list as pending client sign-off. Per the Backend Lead's own "stop and ask" rule and the master completion brief's identical instruction, this was raised to the user directly rather than assumed. Resolution: (1) build the full RBAC architecture now and seed permission codes derived directly from the documented `<module>.<action>` format (`05_Security/Permissions.md` §2), without yet enforcing them on any existing endpoint; (2) auto-seed the 7 documented default roles (minus Site Supervisor, Phase 4, which has no module yet) onto every newly created company, each with its representative permission set from §3's role table.
+
+**Implementation notes:**
+
+- **Models** (`apps/users/models.py`): `PermissionAction` (view/create/edit/delete/approve/export/manage/financial_access, per §2), `Permission` (`code`, `module`, `action`, `description` — a global, non-tenant-scoped catalog), `RolePermission` (role↔permission join, unique-active constraint). Added a nullable `role` FK (`SET_NULL`) to `CompanyMembership` — previously `CompanyMembership` had no way to actually hold a role at all, so `Role` (BE-012) was unwired from any user even though the CRUD existed.
+- **Seed data** (`apps/users/permission_catalog.py`): a plain data module (no model imports, importable from both a migration and application code without circular-import or migration-drift risk) holding `PERMISSION_CATALOG` (41 codes across 15 existing modules — company/user/role/client/project/product/boq/quotation/invoice/payment/expense/document/audit/report) and `DEFAULT_ROLE_PERMISSIONS` (the 6 non-Phase-4 default roles → their representative code sets, derived directly from §3's table and worked Accountant example — Owner gets every code). Seeded into the database via data migration `0005_seed_permission_catalog.py`. Treated as an extensible catalog, not final — §7's open item is still open; codes can be added/renamed/removed later without a model change.
+- **`RoleService.seed_default_roles_for_company(company)`**: creates the 6 default `Role` rows + their `RolePermission` grants for a company. Wired into `CompanyService.create_company()` (`apps/company/services.py`) via a function-local import (avoids a module-level circular-import risk between `apps.company` and `apps.users`, since `apps.users` already imports `apps.company.models` at module level). Not backfilled onto companies that existed before this feature — only new companies get auto-seeded roles.
+- **`RoleService.assign_permissions(role_id, codes)`**: full-replacement semantics (not additive) for a role's permission-code grants; rejects unknown codes outright (400) rather than silently ignoring them. `PUT /roles/{id}/permissions`.
+- **`PermissionService`**: read-only RBAC resolution (`get_permission_codes_for_membership`, `has_permission`) — fails closed for `None`, a membership with no role, or a non-active membership. **Not wired into any view's `permission_classes` yet** — every existing `*Permission` class (`RolePermission`, `ProjectPermission`, `ClientPermission`, etc.) is untouched and still tenant-only. That cutover is BE-054, deliberately kept separate so this architecture could be reviewed on its own before any endpoint's live authorization behavior changes.
+- **`CompanyMembershipService`** (BE-052): invite (by email — invites an existing global `User` identity into a company, does not create a new account), list (company-scoped, status/search/ordering), retrieve, assign/change/clear role (validates same-company), suspend (→ `revoked`), reactivate (→ `active`), remove (soft delete). Every mutation audited via `AuditLogService` under `entity_type="company_membership"` (fields: `user_id`, `role_id`, `status` — added to `apps/audit/validators.py`'s allowlist). New `CompanyMembershipPermission` mirrors `RolePermission`'s coarse tenant-only pattern exactly (fine-grained enforcement is BE-054). Routes: `GET/POST /company-memberships`, `GET/DELETE /company-memberships/{id}`, `POST /company-memberships/{id}/assign-role`, `.../suspend`, `.../reactivate`. **Known limitation, not a bug:** unlike `/roles`, the list/create actions here don't yet accept a Platform-Admin `companyId` override — this module is scoped to company-user self-service management, matching its actual use case; a Platform Admin console view can be added later the same way `RoleViewSet` did it.
+- **`GET /auth/memberships`** (BE-053, `apps/authentication/views.py::MyMembershipsView`): the one legitimate cross-tenant read in the codebase — scoped by the caller's own `user_id`, never a client-supplied company id. Returns only `companyId`/`companyName`/`status`/`roleName` (`MyMembershipSerializer`) — never other members, settings, or financial data. Exempted from `TenantJWTAuthentication`'s tenant resolution (added to `exempt_paths` alongside `/auth/me`) so it works correctly for a user with zero, one, or many memberships rather than being rejected before reaching the view.
+- **`GET /permissions`**: read-only listing of the global Permission catalog (supports a future role-builder UI).
+- Registered `Permission`/`RolePermission` in Django admin; added `role` to `CompanyMembershipAdmin`'s `list_display`/`raw_id_fields`.
+- Added `CompanyMembershipStatus` to `SPECTACULAR_SETTINGS.ENUM_NAME_OVERRIDES` (`config/settings.py`) — a new `status` `ChoiceField` on `CompanyMembershipListQuerySerializer` collided with other modules' `status` enums during schema generation; same fix pattern already used for `Company`/`Project`/`Product`/`Quotation`/`Invoice`.
+
+**Real bug found and fixed during self-review (test-driven):** `PermissionRepository.codes_for_role()` originally queried `Permission.objects.filter(role_permissions__role_id=role_id)` — a reverse-relation filter that performs a raw SQL join and does **not** respect `RolePermission`'s soft-delete manager, so a soft-deleted (replaced/revoked) permission grant was still counted as active. Caught by `test_assign_permissions_replaces_previous_set`/`test_assign_permissions_empty_list_clears_all` failing on first run. Fixed by querying `RolePermission.objects` (its own soft-delete-aware default manager) for permission ids first, then `Permission.objects` for the codes.
+
+**Tests:** `apps/users/tests/test_permission_models.py` (catalog-seeded, code-format, `RolePermission` model/soft-delete/cascade), `test_rbac_services.py` (assign/replace/reject-unknown-codes/audit-log, `PermissionService` fail-closed cases, default-role seeding incl. Owner-gets-everything and Sales-cannot-approve-quotations), `test_membership_management_services.py` (invite/assign-role/suspend/reactivate/remove/list, cross-company role-assignment rejection, audit log), `test_membership_management_views.py` (full API + cross-tenant 404s for memberships and role-permission assignment), `apps/authentication/tests/test_memberships.py` (`/auth/memberships`: zero-memberships-returns-empty-not-403, multi-company listing, no leakage of other users' memberships), plus a `CompanyService` test confirming auto-seeding on creation. One pre-existing test (`test_membership_serializer_camel_case`) updated for the two new serializer fields (`roleId`/`roleName`).
+
+**Validation:** `apps/users`+`apps/company`+`apps/authentication`+`apps/audit`: **283 passed** (was 195 combined before this task; includes the fix above). Full backend suite re-verified green: **1048 passed, 0 failed** (was 986 after Sprint 7). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected. `spectacular --fail-on-warn`: clean (0 warnings after the `ENUM_NAME_OVERRIDES` fix).
+
+**P1 — Hardening**
+
+| ID | Task |
+|---|---|
+| BE-057 | General API throttling for business endpoints (reads/writes/reports/exports), env-configurable scopes, 429 via the standard error envelope. Auth throttling (existing) is out of scope. |
+| BE-058 | Real file upload pipeline (local storage in dev, S3-compatible in prod) for Documents/Payments receipts/Expense receipts/Product images: upload endpoint, MIME/extension/size validation, tenant-scoped storage paths, safe filenames, delete/archive, audit events. Includes a backward-compatible migration plan for existing `*_url` fields. |
+| BE-059 | Data-integrity enums: `Company.currency` (ISO-4217-validated choices), `Payment.method`, `Expense.category`/`vendor`/`payment_method`, and `Project.priority` (already a `CharField`, deliberately left free-text per an earlier Backend Lead decision since `01_Business/FRS.md §10` names the field but never defines its values — re-confirm that decision before constraining it) — pending confirmation of the exact allowed value sets (flagged, not invented). |
+
+**P2–P4 — Phase 3–5 (backlog only, not started, per `CLAUDE.md`'s explicit deferral)**
+
+| ID | Task |
+|---|---|
+| BE-061 | Leads/CRM pipeline (Lead, source, stage, assignment, conversion to Client/Project, follow-ups) |
+| BE-062 | Site Visits (scheduling, assignment, status, notes, photo/doc attachment, follow-up) |
+| BE-063 | Design Management (Design, DesignVersion, review/approval/revision cycle) |
+| BE-064 | Procurement (Vendor, Purchase Request, Purchase Order, delivery tracking, BOQ linkage) |
+| BE-065 | Notifications (model, in-app read/unread, tenant scope, event-driven creation, optional async email dispatch via Celery) |
+| BE-066 | Client Portal (scoped auth/access model, project/quotation/invoice/document visibility, strict per-client isolation) |
+| BE-067 | Background jobs via Celery (async email, PDF/report generation, scheduled reminders) — infra already scaffolded (BE-003), never used |
+
+Depends On
+
+- BE-048 (all Sprint 1–7 work)
+
+---
+
 # Backend Lead Workflow
 
 Before starting any task:
