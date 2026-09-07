@@ -295,6 +295,17 @@ CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS") if not DEBUG else env(
 )
 CORS_ALLOW_CREDENTIALS = True
 
+# Vite falls back to the next free port (5174, 5175, ...) whenever 5173 is
+# already in use, which silently breaks the fixed-origin allowlist above in
+# local dev. Only in DEBUG (never true in production, per this project's own
+# settings-hardening tests) also allow any localhost/127.0.0.1 port so a dev
+# server on a different port isn't blocked by CORS.
+if DEBUG:
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        r"^http://localhost:\d+$",
+        r"^http://127\.0\.0\.1:\d+$",
+    ]
+
 
 # --- Celery & Redis ---------------------------------------------------------
 # https://docs.celeryq.dev/
