@@ -66,6 +66,16 @@ class CompanyViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     # inert at runtime and exists solely so drf-spectacular (BE-016) can
     # resolve the response model for schema generation.
     queryset = Company.objects.none()
+    # BE-054 §7: Admin was corrected to hold both of these (see
+    # permission_catalog.py's DEFAULT_ROLE_PERMISSIONS reconciliation).
+    # list/create/destroy stay Platform-Admin-exclusive (no code needed —
+    # IsPlatformAdminOrCompanyAccess.has_permission denies non-admins
+    # outright before this map is even consulted).
+    permission_code_map = {
+        "retrieve": "company.view",
+        "partial_update": "company.manage",
+        "update": "company.manage",
+    }
 
     def list(self, request: Request) -> Response:
         """

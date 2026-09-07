@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.authentication.tokens import CompanyUserAccessToken, PlatformAdminAccessToken
+from apps.common.test_utils import make_full_access_membership
 from apps.company.models import Company, CompanyStatus
 from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role
 
@@ -41,9 +42,7 @@ class CompanyMembershipViewSetTestCase(TestCase):
         self.company1 = Company.objects.create(name="Studio One", status=CompanyStatus.ACTIVE)
         self.company2 = Company.objects.create(name="Studio Two", status=CompanyStatus.ACTIVE)
 
-        CompanyMembership.objects.create(
-            company=self.company1, user=self.admin_user, status=CompanyMembershipStatus.ACTIVE
-        )
+        make_full_access_membership(self.company1, self.admin_user)
         self.other_company_membership = CompanyMembership.objects.create(
             company=self.company2, user=self.non_member_user, status=CompanyMembershipStatus.ACTIVE
         )
@@ -67,7 +66,9 @@ class CompanyMembershipViewSetTestCase(TestCase):
     def test_invite_member_success(self):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.admin_token}")
         response = self.client.post(
-            "/company-memberships", {"email": self.invitee.email}, format="json"
+            "/company-memberships",
+            {"email": self.invitee.email, "roleId": str(self.role1.id)},
+            format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -75,6 +76,17 @@ class CompanyMembershipViewSetTestCase(TestCase):
         self.assertEqual(data["userEmail"], self.invitee.email)
         self.assertEqual(data["status"], "invited")
         self.assertEqual(data["companyId"], str(self.company1.id))
+
+    def test_invite_member_without_role_id_rejected_400(self):
+        """
+        BE-054 §1: roleId is now required — a new membership silently left
+        role-less would have zero permission codes under enforcement.
+        """
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.admin_token}")
+        response = self.client.post(
+            "/company-memberships", {"email": self.invitee.email}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_invite_member_with_role(self):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.admin_token}")
@@ -89,7 +101,9 @@ class CompanyMembershipViewSetTestCase(TestCase):
     def test_invite_member_unknown_email_404(self):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.admin_token}")
         response = self.client.post(
-            "/company-memberships", {"email": "ghost@example.com"}, format="json"
+            "/company-memberships",
+            {"email": "ghost@example.com", "roleId": str(self.role1.id)},
+            format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
@@ -187,9 +201,7 @@ class RolePermissionAssignmentViewTestCase(TestCase):
         self.admin_token = str(CompanyUserAccessToken.for_user(self.admin_user))
         self.company1 = Company.objects.create(name="Studio One", status=CompanyStatus.ACTIVE)
         self.company2 = Company.objects.create(name="Studio Two", status=CompanyStatus.ACTIVE)
-        CompanyMembership.objects.create(
-            company=self.company1, user=self.admin_user, status=CompanyMembershipStatus.ACTIVE
-        )
+        make_full_access_membership(self.company1, self.admin_user)
         self.role1 = Role.objects.create(company=self.company1, name="Custom", is_active=True)
         self.role_c2 = Role.objects.create(company=self.company2, name="OtherCo Role", is_active=True)
 

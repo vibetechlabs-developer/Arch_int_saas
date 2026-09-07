@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 from apps.authentication.tokens import CompanyUserAccessToken, PlatformAdminAccessToken
 from apps.clients.models import Client
 from apps.common.exceptions import ConflictError
+from apps.common.test_utils import make_full_access_membership
 from apps.company.models import Company, CompanyStatus
 from apps.projects.models import Project, ProjectMember
 from apps.projects.services import ProjectMemberService, ProjectService
@@ -167,9 +168,7 @@ class ProjectTeamViewTestCase(TestCase):
         self.company1 = Company.objects.create(name="Studio One", status=CompanyStatus.ACTIVE)
         self.company2 = Company.objects.create(name="Studio Two", status=CompanyStatus.ACTIVE)
 
-        CompanyMembership.objects.create(
-            company=self.company1, user=self.member_user, status=CompanyMembershipStatus.ACTIVE
-        )
+        make_full_access_membership(self.company1, self.member_user)
         CompanyMembership.objects.create(
             company=self.company1, user=self.teammate, status=CompanyMembershipStatus.ACTIVE
         )

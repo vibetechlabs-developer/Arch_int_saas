@@ -5,8 +5,9 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.authentication.tokens import CompanyUserAccessToken, PlatformAdminAccessToken
+from apps.common.test_utils import make_full_access_membership
 from apps.company.models import Company, CompanyStatus
-from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role
+from apps.users.models import Role
 
 User = get_user_model()
 
@@ -54,11 +55,7 @@ class RoleViewSetTestCase(TestCase):
         )
 
         # 5. Memberships
-        CompanyMembership.objects.create(
-            company=self.company1,
-            user=self.member_user,
-            status=CompanyMembershipStatus.ACTIVE,
-        )
+        make_full_access_membership(self.company1, self.member_user)
 
         # 6. Roles
         self.role1 = Role.objects.create(
@@ -105,8 +102,10 @@ class RoleViewSetTestCase(TestCase):
         data = response.json()
         self.assertTrue(data["success"])
         self.assertIn("pagination", data)
-        # Should see company1's 2 roles, but NOT company2's role
-        self.assertEqual(len(data["data"]), 2)
+        # Should see company1's 3 roles (Architect, Draftsman, plus the
+        # make_full_access_membership test-fixture role), but NOT
+        # company2's role.
+        self.assertEqual(len(data["data"]), 3)
         role_names = [r["name"] for r in data["data"]]
         self.assertIn("Architect", role_names)
         self.assertIn("Draftsman", role_names)
@@ -122,7 +121,9 @@ class RoleViewSetTestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response.json()
         self.assertTrue(data["success"])
-        self.assertEqual(len(data["data"]), 3)
+        # company1's 3 roles (incl. the make_full_access_membership
+        # test-fixture role) + company2's 1 role.
+        self.assertEqual(len(data["data"]), 4)
 
     def test_list_roles_filtering_and_search(self):
         """
@@ -134,8 +135,15 @@ class RoleViewSetTestCase(TestCase):
         resp_active = self.client.get("/roles?isActive=true")
         self.assertEqual(resp_active.status_code, status.HTTP_200_OK)
         data_active = resp_active.json()["data"]
-        self.assertEqual(len(data_active), 1)
-        self.assertEqual(data_active[0]["name"], "Architect")
+        # Architect + the make_full_access_membership test-fixture role
+        # (both active). Set comparison, not index/order: both are
+        # created within the same test-transaction and can tie at
+        # -created_at's microsecond resolution, in which case the "id"
+        # (UUID) tie-break decides order non-deterministically across
+        # runs (this is exactly what broke the analogous assertion in
+        # test_multi_company_tenant_resolution.py during BE-054's own
+        # validation).
+        self.assertEqual({r["name"] for r in data_active}, {"Architect", "Full Access (Test Fixture)"})
 
         # Search by keyword
         resp_search = self.client.get("/roles?search=Drafts")

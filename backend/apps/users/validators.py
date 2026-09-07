@@ -35,3 +35,17 @@ def validate_role_belongs_to_company(role, company_id) -> None:
         raise drf_exceptions.ValidationError(
             {"roleId": ["This role does not belong to the same company as this membership."]}
         )
+
+
+def validate_role_is_active(role) -> None:
+    """
+    An inactive role cannot be newly assigned to a membership (BE-054
+    §10) — a role can be deactivated without being deleted (e.g. while a
+    Company Admin reworks its permission set), and that should block new
+    assignments even though existing holders' access is governed purely
+    by PermissionService's own is_active check, not this one.
+    """
+    if not role.is_active:
+        raise drf_exceptions.ValidationError(
+            {"roleId": ["This role is inactive and cannot be assigned."]}
+        )

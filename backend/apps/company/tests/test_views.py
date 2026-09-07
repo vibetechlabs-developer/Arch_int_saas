@@ -5,6 +5,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.authentication.tokens import CompanyUserAccessToken, PlatformAdminAccessToken
+from apps.common.test_utils import make_full_access_membership
 from apps.company.models import Company, CompanyStatus
 from apps.users.models import CompanyMembership, CompanyMembershipStatus
 
@@ -58,11 +59,7 @@ class CompanyViewSetTestCase(TestCase):
         )
 
         # 5. Memberships
-        CompanyMembership.objects.create(
-            company=self.company1,
-            user=self.member_user,
-            status=CompanyMembershipStatus.ACTIVE,
-        )
+        make_full_access_membership(self.company1, self.member_user)
 
     def test_unauthenticated_requests_fail_401(self):
         """

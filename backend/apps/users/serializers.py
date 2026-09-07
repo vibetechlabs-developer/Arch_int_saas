@@ -95,10 +95,15 @@ class MyMembershipSerializer(serializers.ModelSerializer):
 class CompanyMembershipInviteSerializer(serializers.Serializer):
     """
     Input serializer for inviting an existing user into a company (BE-052).
+
+    roleId is required (BE-054 §1) — the product has no defined default
+    role for a new membership, so the inviter must explicitly pick one
+    rather than the platform silently leaving the membership role-less
+    (which, under enforcement, would mean zero permission codes).
     """
 
     email = serializers.EmailField(required=True)
-    roleId = serializers.UUIDField(source="role_id", required=False, allow_null=True, default=None)
+    roleId = serializers.UUIDField(source="role_id", required=True)
 
 
 class CompanyMembershipAssignRoleSerializer(serializers.Serializer):

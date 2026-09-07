@@ -52,6 +52,7 @@ class FinanceReportView(APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "report.financial_access"
 
     @extend_schema(
         summary="Finance Report",
@@ -87,6 +88,7 @@ class ExpenseReportView(APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "report.financial_access"
 
     @extend_schema(
         summary="Expense Report",

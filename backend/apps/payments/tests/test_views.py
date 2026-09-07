@@ -12,7 +12,8 @@ from apps.invoices.models import Invoice
 from apps.invoices.services import InvoiceService
 from apps.payments.models import Payment
 from apps.projects.models import Project
-from apps.users.models import CompanyMembership, CompanyMembershipStatus
+from apps.common.test_utils import make_full_access_membership
+from apps.users.models import CompanyMembershipStatus
 
 User = get_user_model()
 
@@ -34,7 +35,7 @@ class PaymentViewsTestCase(TestCase):
         self.company1 = Company.objects.create(name="Studio One", status=CompanyStatus.ACTIVE)
         self.company2 = Company.objects.create(name="Studio Two", status=CompanyStatus.ACTIVE)
 
-        CompanyMembership.objects.create(
+        make_full_access_membership(
             company=self.company1, user=self.member_user, status=CompanyMembershipStatus.ACTIVE
         )
 

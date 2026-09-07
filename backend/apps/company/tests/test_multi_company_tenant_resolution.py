@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.authentication.tokens import CompanyUserAccessToken
+from apps.common.test_utils import make_full_access_membership
 from apps.company.models import Company, CompanyStatus
 from apps.users.models import CompanyMembership, CompanyMembershipStatus
 
@@ -28,12 +29,8 @@ class MultiCompanyCompanyTenantResolutionTestCase(TestCase):
         self.multi_user = User.objects.create_user(
             email="multi@example.com", name="Multi Co", password="StrongPassword123!"
         )
-        CompanyMembership.objects.create(
-            company=self.company1, user=self.multi_user, status=CompanyMembershipStatus.ACTIVE
-        )
-        CompanyMembership.objects.create(
-            company=self.company2, user=self.multi_user, status=CompanyMembershipStatus.ACTIVE
-        )
+        make_full_access_membership(self.company1, self.multi_user)
+        make_full_access_membership(self.company2, self.multi_user)
         self.multi_token = str(CompanyUserAccessToken.for_user(self.multi_user))
 
     def test_multi_company_member_retrieves_first_company_via_explicit_company_id(self):

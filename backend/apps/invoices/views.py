@@ -29,6 +29,7 @@ class InvoiceListCreateView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code_map = {"get": "invoice.view", "post": "invoice.create"}
 
     @extend_schema(
         summary="List Project Invoices",
@@ -102,6 +103,7 @@ class InvoiceDetailView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code_map = {"get": "invoice.view", "patch": "invoice.edit"}
 
     @extend_schema(
         summary="Get Invoice",
@@ -154,7 +156,10 @@ class InvoiceDetailView(ObjectPermission404Mixin, APIView):
 class InvoiceSendView(ObjectPermission404Mixin, APIView):
     """`POST /invoices/{invoiceId}/send` (BE-042): draft -> sent."""
 
+    # BE-054 §5: Backend-Lead-approved provisional mapping (send ->
+    # invoice.edit) — see RBAC_Enforcement_Matrix.md.
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "invoice.edit"
 
     @extend_schema(
         summary="Send Invoice",
@@ -178,7 +183,10 @@ class InvoiceSendView(ObjectPermission404Mixin, APIView):
 class InvoiceCancelView(ObjectPermission404Mixin, APIView):
     """`POST /invoices/{invoiceId}/cancel` (BE-042)."""
 
+    # BE-054 §5: Backend-Lead-approved provisional mapping (cancel ->
+    # invoice.edit) — see RBAC_Enforcement_Matrix.md.
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "invoice.edit"
 
     @extend_schema(
         summary="Cancel Invoice",

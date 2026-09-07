@@ -25,6 +25,7 @@ class DocumentListCreateView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code_map = {"get": "document.view", "post": "document.manage"}
 
     @extend_schema(
         summary="List Project Documents",
@@ -92,6 +93,7 @@ class DocumentDetailView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code_map = {"get": "document.view", "delete": "document.manage"}
 
     @extend_schema(
         summary="Get Document",

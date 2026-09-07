@@ -7,10 +7,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.pagination import StandardPagination
+from apps.common.permissions import get_active_membership_for_request, is_platform_admin
 from apps.common.responses import ApiResponse
 from apps.common.views import ObjectPermission404Mixin
 from apps.users.models import CompanyMembership, Role
-from apps.users.permissions import CompanyMembershipPermission, RolePermission, is_platform_admin
+from apps.users.permissions import CompanyMembershipPermission, RolePermission
 from apps.users.serializers import (
     CompanyMembershipAssignRoleSerializer,
     CompanyMembershipInviteSerializer,
@@ -111,6 +112,19 @@ class RoleViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     # inert at runtime and exists solely so drf-spectacular (BE-016) can
     # resolve the response model for schema generation.
     queryset = Role.objects.none()
+    # BE-054: role.view covers read actions; role.manage covers every
+    # mutation, including the permission-assignment action below — RBAC
+    # configuring itself requires the same code as configuring roles
+    # generally, per the enforcement matrix.
+    permission_code_map = {
+        "list": "role.view",
+        "create": "role.manage",
+        "retrieve": "role.view",
+        "partial_update": "role.manage",
+        "update": "role.manage",
+        "destroy": "role.manage",
+        "permissions_action": "role.manage",
+    }
 
     def list(self, request: Request) -> Response:
         """
@@ -258,6 +272,7 @@ class RoleViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
             role_id=pk,
             codes=serializer.validated_data["codes"],
             actor_user=request.user,
+            actor_membership=None if is_platform_admin(request) else get_active_membership_for_request(request),
             request=request,
         )
         response_data = RoleSerializer(role).data
@@ -272,6 +287,10 @@ class PermissionListView(APIView):
     the catalog is seeded via migration, not managed through this API.
     """
 
+    # BE-054: deliberately left on bare IsAuthenticated, not
+    # TenantScopedPermission — a read-only, non-tenant-scoped reference
+    # catalog (per the enforcement matrix's explicit decision), not a
+    # business resource that needs a permission code.
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
@@ -331,6 +350,17 @@ class CompanyMembershipViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet
     pagination_class = StandardPagination
     serializer_class = CompanyMembershipSerializer
     queryset = CompanyMembership.objects.none()
+    # BE-054: user.view covers read actions; user.manage covers every
+    # membership-mutating action per the enforcement matrix.
+    permission_code_map = {
+        "list": "user.view",
+        "create": "user.manage",
+        "retrieve": "user.view",
+        "destroy": "user.manage",
+        "assign_role": "user.manage",
+        "suspend": "user.manage",
+        "reactivate": "user.manage",
+    }
 
     def list(self, request: Request) -> Response:
         query = CompanyMembershipListQuerySerializer(data=request.query_params)
@@ -363,6 +393,7 @@ class CompanyMembershipViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet
             email=serializer.validated_data["email"],
             role_id=serializer.validated_data.get("role_id"),
             actor_user=request.user,
+            actor_membership=None if is_platform_admin(request) else get_active_membership_for_request(request),
             request=request,
         )
 
@@ -408,6 +439,7 @@ class CompanyMembershipViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet
             membership_id=pk,
             role_id=serializer.validated_data["role_id"],
             actor_user=request.user,
+            actor_membership=None if is_platform_admin(request) else get_active_membership_for_request(request),
             request=request,
         )
         response_data = CompanyMembershipSerializer(membership).data

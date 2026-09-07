@@ -27,6 +27,7 @@ class ExpenseListCreateView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code_map = {"get": "expense.view", "post": "expense.create"}
 
     @extend_schema(
         summary="List Project Expenses",
@@ -112,6 +113,7 @@ class ExpenseDetailView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code_map = {"get": "expense.view", "patch": "expense.edit", "delete": "expense.delete"}
 
     @extend_schema(
         summary="Get Expense",
@@ -189,7 +191,10 @@ class ExpenseDetailView(ObjectPermission404Mixin, APIView):
 class ExpenseSubmitView(ObjectPermission404Mixin, APIView):
     """`POST /expenses/{expenseId}/submit` (BE-044): draft -> submitted."""
 
+    # BE-054 §5: Backend-Lead-approved provisional mapping (submit ->
+    # expense.edit) — see RBAC_Enforcement_Matrix.md.
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "expense.edit"
 
     @extend_schema(request=None, responses={status.HTTP_200_OK: ExpenseSerializer}, tags=["Expenses"])
     def post(self, request: Request, expense_id: str = None) -> Response:
@@ -207,6 +212,7 @@ class ExpenseApproveView(ObjectPermission404Mixin, APIView):
     """`POST /expenses/{expenseId}/approve` (BE-044): submitted -> approved."""
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "expense.approve"
 
     @extend_schema(request=None, responses={status.HTTP_200_OK: ExpenseSerializer}, tags=["Expenses"])
     def post(self, request: Request, expense_id: str = None) -> Response:
@@ -223,7 +229,11 @@ class ExpenseApproveView(ObjectPermission404Mixin, APIView):
 class ExpenseMarkPaidView(ObjectPermission404Mixin, APIView):
     """`POST /expenses/{expenseId}/mark-paid` (BE-044): approved -> paid."""
 
+    # BE-054 §5: Backend-Lead-approved provisional mapping (mark-paid ->
+    # expense.approve, same final-approver authority) — see
+    # RBAC_Enforcement_Matrix.md.
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "expense.approve"
 
     @extend_schema(request=None, responses={status.HTTP_200_OK: ExpenseSerializer}, tags=["Expenses"])
     def post(self, request: Request, expense_id: str = None) -> Response:

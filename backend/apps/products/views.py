@@ -88,6 +88,14 @@ class ProductCategoryViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     pagination_class = StandardPagination
     serializer_class = ProductCategorySerializer
     queryset = ProductCategory.objects.none()
+    permission_code_map = {
+        "list": "product.view",
+        "create": "product.manage",
+        "retrieve": "product.view",
+        "partial_update": "product.manage",
+        "update": "product.manage",
+        "destroy": "product.manage",
+    }
 
     def list(self, request: Request) -> Response:
         query = ProductCategoryListQuerySerializer(data=request.query_params)
@@ -192,6 +200,7 @@ class ProductSubcategoryListCreateView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProductCategoryPermission]
+    permission_code_map = {"get": "product.view", "post": "product.manage"}
 
     @extend_schema(
         summary="List Product Subcategories",
@@ -290,6 +299,12 @@ class ProductSubcategoryViewSet(ObjectPermission404Mixin, viewsets.GenericViewSe
     permission_classes = [IsAuthenticated, ProductCategoryPermission]
     serializer_class = ProductSubcategorySerializer
     queryset = ProductSubcategory.objects.none()
+    permission_code_map = {
+        "retrieve": "product.view",
+        "partial_update": "product.manage",
+        "update": "product.manage",
+        "destroy": "product.manage",
+    }
 
     def retrieve(self, request: Request, pk: str = None) -> Response:
         subcategory = ProductSubcategoryService.get_subcategory_by_id(pk)
@@ -418,6 +433,14 @@ class ProductViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     pagination_class = StandardPagination
     serializer_class = ProductSerializer
     queryset = Product.objects.none()
+    permission_code_map = {
+        "list": "product.view",
+        "create": "product.manage",
+        "retrieve": "product.view",
+        "partial_update": "product.manage",
+        "update": "product.manage",
+        "destroy": "product.manage",
+    }
 
     def list(self, request: Request) -> Response:
         query = ProductListQuerySerializer(data=request.query_params)

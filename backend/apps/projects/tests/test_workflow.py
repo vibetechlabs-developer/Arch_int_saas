@@ -6,6 +6,7 @@ from rest_framework.test import APIClient
 from apps.authentication.tokens import CompanyUserAccessToken
 from apps.clients.models import Client
 from apps.common.exceptions import ConflictError
+from apps.common.test_utils import make_full_access_membership
 from apps.company.models import Company, CompanyStatus
 from apps.projects.models import Project, ProjectStatus, get_allowed_next_statuses
 from apps.projects.services import ProjectService
@@ -157,9 +158,7 @@ class ProjectStatusEndpointTestCase(TestCase):
         self.company1 = Company.objects.create(name="Studio One", status=CompanyStatus.ACTIVE)
         self.company2 = Company.objects.create(name="Studio Two", status=CompanyStatus.ACTIVE)
 
-        CompanyMembership.objects.create(
-            company=self.company1, user=self.member_user, status=CompanyMembershipStatus.ACTIVE
-        )
+        make_full_access_membership(self.company1, self.member_user)
 
         self.client1 = Client.objects.create(company=self.company1, name="Client One")
         self.client2 = Client.objects.create(company=self.company2, name="Client Two")

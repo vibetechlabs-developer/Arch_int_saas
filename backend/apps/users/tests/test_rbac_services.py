@@ -58,6 +58,69 @@ class RoleAssignPermissionsTestCase(TestCase):
 
         self.assertEqual(PermissionRepository.codes_for_role(self.role.id), set())
 
+    def test_assign_permissions_escalation_guard_rejects_codes_beyond_actor(self):
+        """
+        BE-054 §12: a non-platform-admin actor (identified by passing
+        actor_membership) can't grant a role a permission code they don't
+        hold themselves -- otherwise a role.manage holder could hand any
+        role (including their own) codes beyond their own authority.
+        """
+        low_priv_role = Role.objects.create(company=self.company, name="Low Priv", is_active=True)
+        RoleService.assign_permissions(role_id=low_priv_role.id, codes=["role.manage"])
+        actor = User.objects.create_user(
+            email="actor@example.com", name="Actor", password="StrongPassword123!"
+        )
+        actor_membership = CompanyMembership.objects.create(
+            company=self.company,
+            user=actor,
+            role=low_priv_role,
+            status=CompanyMembershipStatus.ACTIVE,
+        )
+
+        with self.assertRaises(drf_exceptions.PermissionDenied):
+            RoleService.assign_permissions(
+                role_id=self.role.id,
+                codes=["invoice.view", "invoice.delete"],
+                actor_membership=actor_membership,
+            )
+
+        from apps.users.repositories import PermissionRepository
+
+        self.assertEqual(PermissionRepository.codes_for_role(self.role.id), set())
+
+    def test_assign_permissions_escalation_guard_allows_subset_of_actors_codes(self):
+        low_priv_role = Role.objects.create(company=self.company, name="Low Priv", is_active=True)
+        RoleService.assign_permissions(
+            role_id=low_priv_role.id, codes=["role.manage", "invoice.view", "invoice.create"]
+        )
+        actor = User.objects.create_user(
+            email="actor2@example.com", name="Actor Two", password="StrongPassword123!"
+        )
+        actor_membership = CompanyMembership.objects.create(
+            company=self.company,
+            user=actor,
+            role=low_priv_role,
+            status=CompanyMembershipStatus.ACTIVE,
+        )
+
+        RoleService.assign_permissions(
+            role_id=self.role.id, codes=["invoice.view"], actor_membership=actor_membership
+        )
+
+        from apps.users.repositories import PermissionRepository
+
+        self.assertEqual(PermissionRepository.codes_for_role(self.role.id), {"invoice.view"})
+
+    def test_assign_permissions_platform_admin_bypasses_escalation_guard(self):
+        """actor_membership=None (the platform-admin case) skips the check."""
+        RoleService.assign_permissions(
+            role_id=self.role.id, codes=list(ALL_PERMISSION_CODES), actor_membership=None
+        )
+
+        from apps.users.repositories import PermissionRepository
+
+        self.assertEqual(PermissionRepository.codes_for_role(self.role.id), set(ALL_PERMISSION_CODES))
+
 
 class PermissionServiceTestCase(TestCase):
     """
@@ -99,6 +162,64 @@ class PermissionServiceTestCase(TestCase):
         )
         self.assertTrue(PermissionService.has_permission(membership, "invoice.view"))
         self.assertFalse(PermissionService.has_permission(membership, "invoice.delete"))
+
+    def test_inactive_role_has_no_permissions_even_though_membership_is_active(self):
+        """
+        BE-054 test matrix item F: a role can be deactivated without being
+        deleted (e.g. while an Admin reworks its permission set) -- an
+        active membership pointing at it must lose access immediately.
+        """
+        self.role.is_active = False
+        self.role.save()
+        membership = CompanyMembership.objects.create(
+            company=self.company,
+            user=self.user,
+            role=self.role,
+            status=CompanyMembershipStatus.ACTIVE,
+        )
+        self.assertEqual(PermissionService.get_permission_codes_for_membership(membership), set())
+        self.assertFalse(PermissionService.has_permission(membership, "invoice.view"))
+
+    def test_malformed_or_nonexistent_permission_code_fails_closed(self):
+        """BE-054 test matrix item N."""
+        membership = CompanyMembership.objects.create(
+            company=self.company,
+            user=self.user,
+            role=self.role,
+            status=CompanyMembershipStatus.ACTIVE,
+        )
+        self.assertFalse(PermissionService.has_permission(membership, "not.a.real.code"))
+        self.assertFalse(PermissionService.has_permission(membership, ""))
+
+    def test_permission_replacement_old_permissions_no_longer_count(self):
+        """BE-054 test matrix item I."""
+        membership = CompanyMembership.objects.create(
+            company=self.company,
+            user=self.user,
+            role=self.role,
+            status=CompanyMembershipStatus.ACTIVE,
+        )
+        self.assertTrue(PermissionService.has_permission(membership, "invoice.view"))
+
+        RoleService.assign_permissions(role_id=self.role.id, codes=["client.view"])
+
+        self.assertFalse(PermissionService.has_permission(membership, "invoice.view"))
+        self.assertTrue(PermissionService.has_permission(membership, "client.view"))
+
+    def test_revoked_permission_immediately_denied(self):
+        """BE-054 test matrix item H -- no cache to invalidate, so a code
+        removed from a role is denied on the very next check."""
+        membership = CompanyMembership.objects.create(
+            company=self.company,
+            user=self.user,
+            role=self.role,
+            status=CompanyMembershipStatus.ACTIVE,
+        )
+        self.assertTrue(PermissionService.has_permission(membership, "invoice.view"))
+
+        RoleService.assign_permissions(role_id=self.role.id, codes=[])
+
+        self.assertFalse(PermissionService.has_permission(membership, "invoice.view"))
 
 
 class SeedDefaultRolesForCompanyTestCase(TestCase):

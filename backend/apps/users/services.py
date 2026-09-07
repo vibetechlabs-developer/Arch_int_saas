@@ -317,6 +317,7 @@ class RoleService:
         codes: list[str],
         company_id: Optional[str | uuid.UUID] = None,
         actor_user: Any = None,
+        actor_membership: Optional[CompanyMembership] = None,
         request: Any = None,
     ) -> Role:
         """
@@ -324,6 +325,14 @@ class RoleService:
         permission codes (BE-049/BE-051). Unknown codes are rejected rather
         than silently ignored, since a typo'd code would otherwise grant
         nothing while looking like it succeeded.
+
+        Privilege-escalation guard (BE-054 §12): a non-platform-admin actor
+        (identified by passing `actor_membership`) can never grant a role
+        permission codes beyond their own — otherwise a `role.manage`
+        holder could hand a role (including their own) codes they don't
+        themselves possess. `actor_membership=None` means the caller is a
+        platform admin (who has no CompanyMembership to check against) and
+        is exempt, per the standing platform-admin bypass.
         """
         with transaction.atomic():
             role = cls.get_role_by_id(role_id, company_id=company_id)
@@ -337,6 +346,15 @@ class RoleService:
                 raise drf_exceptions.ValidationError(
                     {"permissionCodes": [f"Unknown permission code(s): {', '.join(unknown_codes)}"]}
                 )
+
+            if actor_membership is not None:
+                actor_codes = PermissionService.get_permission_codes_for_membership(actor_membership)
+                escalating_codes = sorted(found_codes - actor_codes)
+                if escalating_codes:
+                    raise drf_exceptions.PermissionDenied(
+                        "Cannot grant a role permissions you do not hold yourself: "
+                        f"{', '.join(escalating_codes)}"
+                    )
 
             RolePermissionRepository.replace_role_permissions(role, permissions)
             after_codes = sorted(found_codes)
@@ -393,11 +411,8 @@ class RoleService:
 
 class PermissionService:
     """
-    Read-only RBAC resolution. Not yet wired into any view's
-    permission_classes (BE-054 is the deliberately separate enforcement
-    cutover) — exists so the architecture and its tests exist ahead of that
-    cutover, per the Backend Lead decision to build the smallest complete
-    architecture now and flag enforcement as a follow-up.
+    Read-only RBAC resolution, wired into the shared
+    `apps.common.permissions.TenantScopedPermission` as of BE-054.
     """
 
     @staticmethod
@@ -407,15 +422,21 @@ class PermissionService:
     @staticmethod
     def get_permission_codes_for_membership(membership: Optional[CompanyMembership]) -> set[str]:
         """
-        A membership with no role, no active status, or that is None has no
-        permission codes — fails closed rather than defaulting to "every
-        code" or "every code the company has ever granted".
+        A membership with no role, an inactive role, no active membership
+        status, or that is None has no permission codes — fails closed
+        rather than defaulting to "every code" or "every code the company
+        has ever granted".
         """
         if membership is None:
             return set()
         if membership.status != CompanyMembershipStatus.ACTIVE:
             return set()
         if membership.role_id is None:
+            return set()
+        # `membership.role` relies on the caller having select_related'd
+        # it (apps.common.permissions.get_active_membership_for_request
+        # does) — falls back to a query otherwise, never raises.
+        if membership.role is None or not membership.role.is_active:
             return set()
         return PermissionRepository.codes_for_role(membership.role_id)
 
@@ -467,8 +488,9 @@ class CompanyMembershipService:
         cls,
         company_id: str | uuid.UUID,
         email: str,
-        role_id: Optional[str | uuid.UUID] = None,
+        role_id: Optional[str | uuid.UUID],
         actor_user: Any = None,
+        actor_membership: Optional[CompanyMembership] = None,
         request: Any = None,
     ) -> CompanyMembership:
         """
@@ -478,6 +500,17 @@ class CompanyMembershipService:
         invited into a company it doesn't yet belong to. Creating a brand
         new user record for an email with no existing account is a
         registration/onboarding flow, out of this task's scope.
+
+        `role_id` is now required (BE-054 §1): a new membership silently
+        left with no role would have zero permission codes under
+        enforcement, which is a confusing dead end for whoever invited
+        them — the product has no defined default role, so the caller
+        must pick one explicitly rather than the platform guessing.
+
+        Privilege-escalation guard (BE-054 §12): mirrors
+        RoleService.assign_permissions — a non-platform-admin actor
+        (`actor_membership` given) can't invite someone directly into a
+        role that grants permission codes the actor doesn't hold.
         """
         with transaction.atomic():
             company = RoleRepository.get_company_by_id(company_id)
@@ -487,10 +520,24 @@ class CompanyMembershipService:
             if CompanyMembershipRepository.active_membership_exists(company.id, user.id):
                 raise ConflictError("This user already has a membership in this company.")
 
-            role = None
-            if role_id is not None:
-                role = CompanyMembershipRepository.get_role_by_id(role_id)
-                validators.validate_role_belongs_to_company(role, company.id)
+            if not role_id:
+                raise drf_exceptions.ValidationError(
+                    {"roleId": ["A role must be explicitly selected when inviting a member."]}
+                )
+
+            role = CompanyMembershipRepository.get_role_by_id(role_id)
+            validators.validate_role_belongs_to_company(role, company.id)
+            validators.validate_role_is_active(role)
+
+            if actor_membership is not None:
+                actor_codes = PermissionService.get_permission_codes_for_membership(actor_membership)
+                role_codes = PermissionRepository.codes_for_role(role.id)
+                escalating_codes = sorted(role_codes - actor_codes)
+                if escalating_codes:
+                    raise drf_exceptions.PermissionDenied(
+                        "Cannot invite a member into a role granting permissions you do not "
+                        f"hold yourself: {', '.join(escalating_codes)}"
+                    )
 
             try:
                 with transaction.atomic():
@@ -536,10 +583,20 @@ class CompanyMembershipService:
         role_id: Optional[str | uuid.UUID],
         company_id: Optional[str | uuid.UUID] = None,
         actor_user: Any = None,
+        actor_membership: Optional[CompanyMembership] = None,
         request: Any = None,
     ) -> CompanyMembership:
         """
         Assign, change, or clear (role_id=None) a membership's role.
+
+        Privilege-escalation guard (BE-054 §12/#10): clearing a role
+        (role_id=None) only ever removes access, so it's exempt from the
+        check below. Assigning/changing a role is guarded the same way as
+        RoleService.assign_permissions/invite_member — a non-platform-admin
+        actor can't grant a role whose permission codes exceed their own,
+        which also directly prevents self-escalation through a crafted
+        roleId (BE-054 §10/#O): an actor can never assign themselves (or
+        anyone else) a role more powerful than their own.
         """
         with transaction.atomic():
             membership = cls.get_membership_by_id(membership_id, company_id=company_id)
@@ -549,6 +606,19 @@ class CompanyMembershipService:
             if role_id is not None:
                 role = CompanyMembershipRepository.get_role_by_id(role_id)
                 validators.validate_role_belongs_to_company(role, membership.company_id)
+                validators.validate_role_is_active(role)
+
+                if actor_membership is not None:
+                    actor_codes = PermissionService.get_permission_codes_for_membership(
+                        actor_membership
+                    )
+                    role_codes = PermissionRepository.codes_for_role(role.id)
+                    escalating_codes = sorted(role_codes - actor_codes)
+                    if escalating_codes:
+                        raise drf_exceptions.PermissionDenied(
+                            "Cannot assign a role granting permissions you do not hold "
+                            f"yourself: {', '.join(escalating_codes)}"
+                        )
 
             membership = CompanyMembershipRepository.save(membership, {"role": role})
 

@@ -22,6 +22,7 @@ class PaymentListCreateView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code_map = {"get": "payment.view", "post": "payment.create"}
 
     @extend_schema(
         summary="List Invoice Payments",
@@ -81,6 +82,7 @@ class PaymentVoidView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "payment.delete"
 
     @extend_schema(
         summary="Void Payment",

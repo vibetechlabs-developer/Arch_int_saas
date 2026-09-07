@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.authentication.tokens import CompanyUserAccessToken, PlatformAdminAccessToken
+from apps.common.test_utils import make_full_access_membership
 from apps.company.models import Company, CompanyStatus
 from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role
 
@@ -69,11 +70,11 @@ class RoleSecurityAndPermissionsTestCase(TestCase):
         )
 
         # 3. Memberships
-        CompanyMembership.objects.create(
-            company=self.company1,
-            user=self.user_c1,
-            status=CompanyMembershipStatus.ACTIVE,
-        )
+        # user_c1 needs full permission codes in its own company so the
+        # cross-tenant IDOR tests below actually exercise the object-level
+        # (tenant-mismatch) 404 check, rather than failing earlier at the
+        # action-level permission-code check with an unrelated 403.
+        make_full_access_membership(self.company1, self.user_c1)
         CompanyMembership.objects.create(
             company=self.company2,
             user=self.user_c2,

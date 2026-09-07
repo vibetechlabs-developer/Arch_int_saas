@@ -1,7 +1,11 @@
 from rest_framework import permissions
 from rest_framework.request import Request
 
-from apps.common.permissions import is_platform_admin
+from apps.common.permissions import (
+    get_active_membership_for_request,
+    is_platform_admin,
+    resolve_required_permission_code,
+)
 
 __all__ = ["is_platform_admin", "IsPlatformAdmin", "IsPlatformAdminOrCompanyAccess"]
 
@@ -19,7 +23,10 @@ class IsPlatformAdminOrCompanyAccess(permissions.BasePermission):
     """
     Permission for Company endpoints:
     - Platform Super Admins have full access across all operations.
-    - Regular users can only retrieve or update companies where they hold active membership.
+    - Regular users can only retrieve or update companies where they hold
+      active membership, and only with the permission code
+      (`company.view`/`company.manage`, per CompanyViewSet's
+      `permission_code_map`) their role grants (BE-054).
     - Regular users cannot list all companies or delete companies.
     """
 
@@ -32,10 +39,17 @@ class IsPlatformAdminOrCompanyAccess(permissions.BasePermission):
 
         # Non-admins can only attempt retrieve (GET detail) or update (PATCH detail)
         # Create (POST), List (GET list), and Delete (DELETE) require Platform Admin
-        if view.action in ["retrieve", "partial_update", "update"]:
+        if view.action not in ["retrieve", "partial_update", "update"]:
+            return False
+
+        from apps.users.services import PermissionService
+
+        code = resolve_required_permission_code(request, view)
+        if code is None:
             return True
 
-        return False
+        membership = get_active_membership_for_request(request)
+        return PermissionService.has_permission(membership, code)
 
     def has_object_permission(self, request: Request, view, obj) -> bool:
         if is_platform_admin(request):

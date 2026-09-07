@@ -9,6 +9,7 @@ from apps.clients.models import Client
 from apps.company.models import Company, CompanyStatus
 from apps.products.models import Product, ProductCategory, ProductSubcategory, ProductUnit
 from apps.projects.models import Project
+from apps.common.test_utils import make_full_access_membership
 from apps.users.models import CompanyMembership, CompanyMembershipStatus
 
 User = get_user_model()
@@ -35,9 +36,7 @@ class BOQEndToEndIntegrationTestCase(TestCase):
         self.member_token = str(CompanyUserAccessToken.for_user(self.member_user))
 
         self.company = Company.objects.create(name="Studio One", status=CompanyStatus.ACTIVE)
-        CompanyMembership.objects.create(
-            company=self.company, user=self.member_user, status=CompanyMembershipStatus.ACTIVE
-        )
+        make_full_access_membership(self.company, self.member_user)
 
         self.client_obj = Client.objects.create(company=self.company, name="Jane Doe")
         self.project = Project.objects.create(

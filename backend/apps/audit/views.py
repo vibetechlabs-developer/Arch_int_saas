@@ -47,6 +47,7 @@ class ActivityLogListView(APIView):
 
     permission_classes = [IsAuthenticated, ProjectPermission]
     pagination_class = StandardPagination
+    permission_code = "audit.view"
 
     @extend_schema(
         summary="List Activity Logs",

@@ -32,6 +32,7 @@ class QuotationListCreateView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code_map = {"get": "quotation.view", "post": "quotation.create"}
 
     @extend_schema(
         summary="List Project Quotations",
@@ -111,6 +112,7 @@ class QuotationDetailView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "quotation.view"
 
     @extend_schema(
         summary="Get Quotation",
@@ -136,7 +138,10 @@ class QuotationReviseView(ObjectPermission404Mixin, APIView):
     partial-override semantics and the "only the latest version" guard.
     """
 
+    # BE-054 §5: Backend-Lead-approved provisional mapping (revise ->
+    # quotation.edit) — see RBAC_Enforcement_Matrix.md.
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "quotation.edit"
 
     @extend_schema(
         summary="Revise Quotation",
@@ -177,7 +182,10 @@ class QuotationSendView(ObjectPermission404Mixin, APIView):
     `POST /quotations/{quotationId}/send` (BE-041): draft -> sent.
     """
 
+    # BE-054 §5: Backend-Lead-approved provisional mapping (send ->
+    # quotation.edit) — see RBAC_Enforcement_Matrix.md.
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "quotation.edit"
 
     @extend_schema(
         summary="Send Quotation",
@@ -204,6 +212,7 @@ class QuotationApproveView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "quotation.approve"
 
     @extend_schema(
         summary="Approve Quotation",
@@ -232,7 +241,11 @@ class QuotationRejectView(ObjectPermission404Mixin, APIView):
     `revision_requested` outcome is offered here.
     """
 
+    # BE-054 §5: Backend-Lead-approved provisional mapping (reject ->
+    # quotation.approve, same reviewer authority as approve) — see
+    # RBAC_Enforcement_Matrix.md.
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "quotation.approve"
 
     @extend_schema(
         summary="Reject Quotation",

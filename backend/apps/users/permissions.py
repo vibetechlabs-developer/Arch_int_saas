@@ -1,68 +1,24 @@
-from rest_framework import permissions
-from rest_framework.request import Request
-
-from apps.common.permissions import is_platform_admin
+from apps.common.permissions import TenantScopedPermission, is_platform_admin
 
 __all__ = ["is_platform_admin", "RolePermission", "CompanyMembershipPermission"]
 
 
-class CompanyMembershipPermission(permissions.BasePermission):
+class CompanyMembershipPermission(TenantScopedPermission):
     """
-    Permission class for CompanyMembership management endpoints (BE-052).
-    Mirrors RolePermission exactly — the same coarse tenant-membership gate,
-    not fine-grained permission codes yet (BE-054 is the deliberately
-    separate enforcement cutover once the RBAC architecture from BE-049 is
-    reviewed).
-
-    - Platform Super Admins have full access across all operations.
-    - Regular users can manage memberships only within the single company
-      TenantJWTAuthentication resolved for this request (request.company_id).
-    - Cross-tenant access is strictly denied.
+    Permission class for Company Membership management endpoints
+    (BE-052/BE-054). Logic lives entirely in the shared
+    `TenantScopedPermission` — tenant isolation plus the permission code
+    `CompanyMembershipViewSet.permission_code_map` declares per action
+    (`user.view`/`user.manage`). Kept as a named subclass for import
+    stability and readability.
     """
 
-    def has_permission(self, request: Request, view) -> bool:
-        if not request.user or not request.user.is_authenticated:
-            return False
 
-        if is_platform_admin(request):
-            return True
-
-        return getattr(request, "company_id", None) is not None
-
-    def has_object_permission(self, request: Request, view, obj) -> bool:
-        if is_platform_admin(request):
-            return True
-
-        return str(getattr(request, "company_id", None)) == str(obj.company_id)
-
-
-class RolePermission(permissions.BasePermission):
+class RolePermission(TenantScopedPermission):
     """
-    Permission class for Role endpoints:
-    - Platform Super Admins have full access across all operations.
-    - Regular users can manage roles only within the single company
-      TenantJWTAuthentication resolved for this request (request.company_id)
-      — never re-derived from request.user.memberships here (BE-021: that
-      duplicated, and could diverge from, the authentication layer's own
-      resolution).
-    - Cross-tenant access is strictly denied.
+    Permission class for Role endpoints (BE-014/BE-054). Logic lives
+    entirely in the shared `TenantScopedPermission` — tenant isolation
+    plus the permission code `RoleViewSet.permission_code_map` declares
+    per action (`role.view`/`role.manage`). Kept as a named subclass for
+    import stability and readability.
     """
-
-    def has_permission(self, request: Request, view) -> bool:
-        if not request.user or not request.user.is_authenticated:
-            return False
-
-        if is_platform_admin(request):
-            return True
-
-        # TenantJWTAuthentication has already rejected any company user with
-        # no active membership (or an unresolved ambiguous one) before this
-        # ever runs, so a non-admin reaching here is guaranteed to have a
-        # resolved request.company_id.
-        return getattr(request, "company_id", None) is not None
-
-    def has_object_permission(self, request: Request, view, obj) -> bool:
-        if is_platform_admin(request):
-            return True
-
-        return str(getattr(request, "company_id", None)) == str(obj.company_id)

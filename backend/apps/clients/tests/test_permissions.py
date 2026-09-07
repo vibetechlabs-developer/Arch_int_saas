@@ -49,9 +49,23 @@ class ClientPermissionTestCase(TestCase):
         request = make_request(user=anon)
         self.assertFalse(self.permission.has_permission(request, view=None))
 
-    def test_company_user_with_resolved_company_id_allowed_view_permission(self):
+    def test_company_user_with_resolved_company_id_but_no_membership_or_code_denied(self):
+        """
+        BE-054: ClientPermission is now TenantScopedPermission, which also
+        requires a resolved permission code (from the view's
+        `permission_code`/`permission_code_map`) and the caller's real
+        CompanyMembership to hold it. `view=None` here resolves no code at
+        all (`_MISSING_CODE`, fail-closed) and `company_user` has no real
+        CompanyMembership row in this unit test's fixture — both correctly
+        deny, whereas before BE-054 tenant resolution alone was
+        sufficient. Full success-path coverage (a real membership + role
+        holding the endpoint's code) lives in the API-level test suites
+        (e.g. apps.clients.tests.test_views) and
+        apps.users.tests.test_rbac_role_matrix, which use real DB fixtures
+        rather than this file's lightweight SimpleNamespace fakes.
+        """
         request = make_request(user=self.company_user, company_id=self.company.id)
-        self.assertTrue(self.permission.has_permission(request, view=None))
+        self.assertFalse(self.permission.has_permission(request, view=None))
 
     def test_company_user_with_no_resolved_company_id_denied(self):
         request = make_request(user=self.company_user, company_id=None)

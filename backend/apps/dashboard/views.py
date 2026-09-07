@@ -20,7 +20,14 @@ class DashboardView(APIView):
     against, a company-wide aggregate.
     """
 
+    # BE-054 §6: gated with report.view, not report.financial_access — the
+    # dashboard mixes operational and financial fields in one payload with
+    # no split; gating the whole endpoint behind financial_access would
+    # cut PM/Designer off from the operational sections they should see.
+    # Deferred: split financial fields from operational ones and gate the
+    # former with report.financial_access (see BACKEND_TASKS.md BE-068).
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "report.view"
 
     @extend_schema(
         summary="Dashboard",

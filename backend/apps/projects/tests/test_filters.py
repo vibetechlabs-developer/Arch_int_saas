@@ -6,6 +6,7 @@ from rest_framework.test import APIClient
 
 from apps.authentication.tokens import CompanyUserAccessToken
 from apps.clients.models import Client
+from apps.common.test_utils import make_full_access_membership
 from apps.company.models import Company, CompanyStatus
 from apps.projects.models import Project, ProjectStatus
 from apps.projects.services import ProjectService
@@ -151,9 +152,7 @@ class ProjectListFilterEndpointTestCase(TestCase):
         self.member_token = str(CompanyUserAccessToken.for_user(self.member_user))
 
         self.company1 = Company.objects.create(name="Studio One", status=CompanyStatus.ACTIVE)
-        CompanyMembership.objects.create(
-            company=self.company1, user=self.member_user, status=CompanyMembershipStatus.ACTIVE
-        )
+        make_full_access_membership(self.company1, self.member_user)
 
         self.client1 = Client.objects.create(company=self.company1, name="Client One")
 

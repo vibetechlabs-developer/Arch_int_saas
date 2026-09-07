@@ -35,6 +35,7 @@ class BOQDetailView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "boq.view"
 
     @extend_schema(
         summary="Get Project BOQ",
@@ -65,6 +66,7 @@ class BOQSummaryView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "boq.view"
 
     @extend_schema(
         summary="Get BOQ Summary",
@@ -96,6 +98,7 @@ class BOQSectionListCreateView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "boq.create"
 
     @extend_schema(
         summary="Add BOQ Section",
@@ -165,6 +168,11 @@ class BOQSectionViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated, ProjectPermission]
     serializer_class = BOQSectionSerializer
     queryset = BOQSection.objects.none()
+    permission_code_map = {
+        "partial_update": "boq.edit",
+        "update": "boq.edit",
+        "destroy": "boq.delete",
+    }
 
     def partial_update(self, request: Request, pk: str = None) -> Response:
         section = BOQSectionService.get_section_by_id(pk)
@@ -214,6 +222,7 @@ class BOQItemListCreateView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "boq.create"
 
     @extend_schema(
         summary="Add BOQ Item",
@@ -291,6 +300,11 @@ class BOQItemViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated, ProjectPermission]
     serializer_class = BOQItemSerializer
     queryset = BOQItem.objects.none()
+    permission_code_map = {
+        "partial_update": "boq.edit",
+        "update": "boq.edit",
+        "destroy": "boq.delete",
+    }
 
     def partial_update(self, request: Request, pk: str = None) -> Response:
         item = BOQItemService.get_item_by_id(pk)

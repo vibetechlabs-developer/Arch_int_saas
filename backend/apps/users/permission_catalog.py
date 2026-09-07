@@ -100,14 +100,37 @@ PERMISSION_CATALOG: list[tuple[str, str, str, str]] = [
 
 ALL_PERMISSION_CODES: list[str] = [row[0] for row in PERMISSION_CATALOG]
 
+# Legacy Member (BE-054 §1) is deliberately NOT a DEFAULT_ROLE_PERMISSIONS
+# entry — it is not auto-seeded for new companies via
+# RoleService.seed_default_roles_for_company. It exists only as a one-time
+# backfill role, created and granted every catalog code by the BE-054 data
+# migration for pre-existing memberships that had no role assigned before
+# enforcement began, to preserve their prior (unrestricted-within-tenant)
+# access. See RBAC_Enforcement_Matrix.md's "Legacy Member" section — this
+# is documented transitional technical debt, not a role a company should
+# ever assign to a new member going forward.
+LEGACY_MEMBER_ROLE_NAME = "Legacy Member"
+
 # Representative default-role -> permission-code mapping, derived directly
 # from 05_Security/Permissions.md §3's role table and worked Accountant
 # example. "Site Supervisor" (Phase 4) is deliberately excluded — its
 # module (Site Visits, BE-062) has no code yet, so seeding an empty role
 # would be a placeholder with no real capability; add it once BE-062 lands.
+#
+# BE-054 §7 correction: Admin gained `company.view`/`company.manage` (a
+# strictly-enforced Admin previously couldn't view/edit their own
+# company's profile at all — an oversight, not a deliberate restriction).
+# Accountant lost `expense.create`/`expense.approve` (BE-049 had extended
+# Accountant beyond `05_Security/Permissions.md` §3's literal worked
+# example — "View Expense" only — as a plausible but undocumented
+# inference; removed per Backend Lead instruction pending explicit product
+# sign-off, so no seeded role currently holds expense.create/approve
+# except Owner and the transitional Legacy Member).
 DEFAULT_ROLE_PERMISSIONS: dict[str, list[str] | str] = {
     "Owner": "__all__",
     "Admin": [
+        "company.view",
+        "company.manage",
         "user.view",
         "user.manage",
         "role.view",
@@ -137,6 +160,12 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str] | str] = {
         "quotation.view",
         "document.view",
         "document.manage",
+        # BE-054 §6 consequence: the dashboard is gated with report.view
+        # (not financial_access) specifically to preserve operational
+        # dashboard access for roles like this one — that only actually
+        # works if the role holds report.view. Found and fixed during
+        # BE-054's own role-matrix test pass (RBAC_Enforcement_Matrix.md).
+        "report.view",
     ],
     "Designer / Architect": [
         "project.view",
@@ -144,6 +173,7 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str] | str] = {
         "quotation.view",
         "document.view",
         "document.manage",
+        "report.view",
     ],
     "Accountant / Finance": [
         "client.view",
@@ -161,9 +191,7 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str] | str] = {
         "payment.create",
         "payment.delete",
         "expense.view",
-        "expense.create",
         "expense.edit",
-        "expense.approve",
         "report.view",
         "report.financial_access",
         "report.export",
@@ -176,5 +204,6 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str] | str] = {
         "boq.view",
         "quotation.view",
         "quotation.create",
+        "report.view",
     ],
 }

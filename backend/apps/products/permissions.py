@@ -1,37 +1,13 @@
-from rest_framework import permissions
-from rest_framework.request import Request
-
-from apps.common.permissions import is_platform_admin
+from apps.common.permissions import TenantScopedPermission
 
 __all__ = ["ProductCategoryPermission"]
 
 
-class ProductCategoryPermission(permissions.BasePermission):
+class ProductCategoryPermission(TenantScopedPermission):
     """
-    Permission class for ProductCategory endpoints. Mirrors
-    apps.clients.permissions.ClientPermission exactly — the same coarse
-    tenant-membership gate, not fine-grained `product.view`/`product.manage`
-    permission codes (BOQ_API.md documents those, but no Permission/
-    RolePermission model exists yet — same standing Backend Lead decision
-    applied to every module so far).
-
-    - Platform Super Admins have full access across all operations.
-    - Regular users can manage categories only within the single company
-      TenantJWTAuthentication resolved for this request (request.company_id).
-    - Cross-tenant access is strictly denied.
+    Permission class for Product/Category/Subcategory endpoints. As of
+    BE-054, logic lives entirely in the shared `TenantScopedPermission` —
+    tenant isolation plus the permission code each view's
+    `permission_code_map` declares (`product.view`/`product.manage`).
+    Kept as a named subclass for import stability and readability.
     """
-
-    def has_permission(self, request: Request, view) -> bool:
-        if not request.user or not request.user.is_authenticated:
-            return False
-
-        if is_platform_admin(request):
-            return True
-
-        return getattr(request, "company_id", None) is not None
-
-    def has_object_permission(self, request: Request, view, obj) -> bool:
-        if is_platform_admin(request):
-            return True
-
-        return str(getattr(request, "company_id", None)) == str(obj.company_id)

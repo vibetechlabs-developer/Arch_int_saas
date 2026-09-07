@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 from apps.audit.models import AuditAction
 from apps.audit.services import AuditLogService
 from apps.authentication.tokens import CompanyUserAccessToken
+from apps.common.test_utils import make_full_access_membership
 from apps.company.models import Company, CompanyStatus
 from apps.users.models import CompanyMembership, CompanyMembershipStatus
 
@@ -30,9 +31,7 @@ class ActivityLogListViewTestCase(TestCase):
         self.company1 = Company.objects.create(name="Studio One", status=CompanyStatus.ACTIVE)
         self.company2 = Company.objects.create(name="Studio Two", status=CompanyStatus.ACTIVE)
 
-        CompanyMembership.objects.create(
-            company=self.company1, user=self.member_user, status=CompanyMembershipStatus.ACTIVE
-        )
+        make_full_access_membership(self.company1, self.member_user)
 
         AuditLogService.record(
             action=AuditAction.CREATE, entity_type="role", entity_id=uuid.uuid4(),

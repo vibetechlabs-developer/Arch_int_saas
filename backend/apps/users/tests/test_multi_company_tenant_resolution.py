@@ -4,8 +4,9 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.authentication.tokens import CompanyUserAccessToken
+from apps.common.test_utils import make_full_access_membership
 from apps.company.models import Company, CompanyStatus
-from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role
+from apps.users.models import Role
 
 User = get_user_model()
 
@@ -30,12 +31,8 @@ class MultiCompanyRoleTenantResolutionTestCase(TestCase):
         self.multi_user = User.objects.create_user(
             email="multi@example.com", name="Multi Co", password="StrongPassword123!"
         )
-        CompanyMembership.objects.create(
-            company=self.company1, user=self.multi_user, status=CompanyMembershipStatus.ACTIVE
-        )
-        CompanyMembership.objects.create(
-            company=self.company2, user=self.multi_user, status=CompanyMembershipStatus.ACTIVE
-        )
+        make_full_access_membership(self.company1, self.multi_user)
+        make_full_access_membership(self.company2, self.multi_user)
         self.multi_token = str(CompanyUserAccessToken.for_user(self.multi_user))
 
         self.role_c1 = Role.objects.create(company=self.company1, name="C1 Role", is_active=True)
@@ -52,7 +49,9 @@ class MultiCompanyRoleTenantResolutionTestCase(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         names = [r["name"] for r in response.json()["data"]]
-        self.assertEqual(set(names), {"C1 Role", "C1 Second Role"})
+        # Includes the make_full_access_membership test-fixture role
+        # created in company1's setUp, alongside the two real test roles.
+        self.assertEqual(set(names), {"C1 Role", "C1 Second Role", "Full Access (Test Fixture)"})
 
     def test_multi_company_member_lists_roles_for_the_other_company(self):
         """
@@ -64,7 +63,12 @@ class MultiCompanyRoleTenantResolutionTestCase(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         names = [r["name"] for r in response.json()["data"]]
-        self.assertEqual(names, ["C2 Role"])
+        # Set comparison, not exact order: both roles are created within
+        # the same test-transaction and can tie at -created_at's
+        # microsecond resolution, in which case the "id" (UUID) tie-break
+        # decides order non-deterministically across runs -- exact-order
+        # assertion here would be a flaky test, not a real behavior check.
+        self.assertEqual(set(names), {"C2 Role", "Full Access (Test Fixture)"})
 
     def test_multi_company_member_without_company_id_is_rejected_as_ambiguous(self):
         """

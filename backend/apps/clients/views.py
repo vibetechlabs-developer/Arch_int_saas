@@ -91,6 +91,14 @@ class ClientViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     # self.get_queryset()/self.get_object()) — exists solely so
     # drf-spectacular can resolve the response model for schema generation.
     queryset = Client.objects.none()
+    permission_code_map = {
+        "list": "client.view",
+        "create": "client.create",
+        "retrieve": "client.view",
+        "partial_update": "client.edit",
+        "update": "client.edit",
+        "destroy": "client.delete",
+    }
 
     def list(self, request: Request) -> Response:
         """

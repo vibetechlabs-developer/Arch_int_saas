@@ -1266,7 +1266,7 @@ All of Sprints 1–7 (BE-001–BE-048) are confirmed **Done** against actual cod
 | BE-051 | RBAC resolution service (`has_perm(request, code)`), shared `PermissionRequiredMixin`/permission-code-aware permission class; Platform Admin universal bypass preserved; company-scoped permission caching only if a real N+1 is measured. | Done |
 | BE-052 | Company Membership management module: repository/service/selector/serializers/permissions/views for invite, list, remove, suspend, reactivate, assign/change role — full `View → Serializer → Service → Repository` stack per `BACKEND_RULES.md`. Audit log entry on every mutation. | Done |
 | BE-053 | `GET /auth/memberships` (or equivalent) — current user's active memberships across companies, for workspace switching. Returns only company id/name, membership status, role name — no cross-tenant leakage. | Done |
-| BE-054 | Cut over existing `*Permission` classes (`Client`, `Project`, `Role`, `Product`, `BOQ`, `Quotation`, `Invoice`, `Payment`, `Expense`) from tenant-only to tenant + permission-code enforcement, module by module, each with its own test pass and commit — **only after** BE-049–BE-051 land and the canonical-code question is resolved. | Todo |
+| BE-054 | Cut over existing `*Permission` classes (`Client`, `Project`, `Role`, `Product`, `BOQ`, `Quotation`, `Invoice`, `Payment`, `Expense`) from tenant-only to tenant + permission-code enforcement, module by module, each with its own test pass and commit — **only after** BE-049–BE-051 land and the canonical-code question is resolved. | **Review** |
 | BE-055 | Audit-log role assignment/removal and permission grant/revoke as first-class audited events (extends BE-019's `apps.audit`). | Done |
 | BE-056 | View-level cross-tenant regression tests for `apps.audit`, `apps.reports`, `apps.dashboard` (company-A-never-sees-company-B, asserted through the view, not just the service). | Todo |
 
@@ -1299,6 +1299,37 @@ All of Sprints 1–7 (BE-001–BE-048) are confirmed **Done** against actual cod
 
 **Validation:** `apps/users`+`apps/company`+`apps/authentication`+`apps/audit`: **283 passed** (was 195 combined before this task; includes the fix above). Full backend suite re-verified green: **1048 passed, 0 failed** (was 986 after Sprint 7). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected. `spectacular --fail-on-warn`: clean (0 warnings after the `ENUM_NAME_OVERRIDES` fix).
 
+#### BE-054 — RBAC Enforcement Cutover — 2026-09-07
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** Critical (P0)
+
+**Owner:** Backend Team
+
+Full detail lives in `05_Security/RBAC_Enforcement_Matrix.md` §7 — this entry summarizes it. Implements the Backend Lead's explicit decisions on every item the enforcement matrix (§§1–6 of that doc) flagged for approval.
+
+**Implementation notes:**
+
+- **Shared mechanism:** `apps/common/permissions.py::TenantScopedPermission` replaces every duplicated tenant-only permission class (`ClientPermission`, `ProjectPermission`, `ProductCategoryPermission`, `RolePermission`, `CompanyMembershipPermission` are now thin subclasses). `has_permission` adds a permission-code check (declarative per-view `permission_code`/`permission_code_map`, fails closed if a view declares neither) on top of the unchanged tenant/platform-admin check; `has_object_permission` is deliberately untouched, so cross-tenant access still 404s independently of the new 403-on-missing-permission-code path. Every business endpoint across `companies`/`roles`/`company-memberships`/`clients`/`projects`(+team)/`products`(+categories/subcategories)/`boq`(+sections/items)/`quotations`/`invoices`/`payments`/`expenses`/`documents`/`reports`/`dashboard`/`audit` now declares a code — full table in the enforcement matrix §7.10.
+- **Explicitly-documented codes** (`invoice.view/create/edit`, `payment.view/create`, `expense.view`, `report.financial_access`) used exactly where endpoint semantics match. **Backend-Lead-approved provisional mappings** for workflow actions with no dedicated code (quotation send/revise→`quotation.edit`, reject→`quotation.approve`; invoice send/cancel→`invoice.edit`; expense submit→`expense.edit`, mark-paid→`expense.approve`; project status transition→`project.edit`) — no new workflow-specific code was invented, per instruction.
+- **Dashboard** (`GET /reports/dashboard`) gated with `report.view`, not `report.financial_access`, to preserve operational access for non-financial roles — deferred follow-up to split the payload's financial fields is BE-068.
+- **Privilege-escalation guard:** `RoleService.assign_permissions`, `CompanyMembershipService.invite_member`/`assign_role` all accept `actor_membership`; a non-platform-admin actor can never grant codes beyond their own, including to themselves via a crafted `roleId`.
+- **Legacy Member migration** (`0006_backfill_legacy_member_role.py`): idempotent, per-company backfill of every pre-existing role-less `CompanyMembership` onto a new "Legacy Member" role holding every catalog code (excludes superuser-owned memberships). Never auto-seeded for new companies. `CompanyMembershipInviteSerializer.roleId` is now required, so no new membership can silently end up role-less.
+- **Default-role corrections:** Admin gained `company.view`/`company.manage` (BE-049 omission). Accountant lost `expense.create`/`expense.approve` (undocumented beyond `Permissions.md` §3's worked example — the Backend Lead named only these 2 codes for removal, so the rest of Accountant's broader-than-the-worked-example set was kept, not truncated to exactly 7 codes). Reconciliation migration `0007` backfills both onto already-seeded companies.
+- **`report.view` gap found and fixed** (this task's own bug, not BE-049's): Project Manager, Designer, and Sales were seeded without `report.view`, which broke the entire premise of the dashboard decision above — they'd have gotten 403 from the dashboard. Fixed in `permission_catalog.py` + backfill migration `0008`.
+- **Two real bugs found and fixed** during this task's own validation: (1) `PermissionRepository.codes_for_role` bypassed `RolePermission`'s soft-delete manager via a raw-join reverse-relation filter — a revoked grant still counted as active; (2) `PermissionService` didn't check `role.is_active` — a deactivated role's holders kept full access. Both fixed with regression tests.
+- **Migration safety finding, not fixed in this task (flagged, needs a decision):** migrations `0006`–`0008` identify their target role(s) by exact `name` match — `Role` has no field distinguishing a platform-seeded default role from a company's own custom one. No real risk today (no production deployment, no real customer roles yet), but the same pattern would misfire against real customer data in the future (e.g. a customer's own role coincidentally/deliberately named "Admin" or "Accountant / Finance" would get silently mutated). Proper fix needs a stable non-user-editable `Role` identifier — tracked as BE-069, deliberately not undertaken as a side effect of this task.
+- **Infrastructure lesson (not a code defect):** four parallel test-fixing agents plus this session's own validation runs collided on the shared Postgres test database mid-task, producing two spurious full-suite runs (274 and 10 apparent failures) that fully vanished once the stale database was dropped and one clean serial run was performed. Never run more than one pytest process against `test_int_projects_dev` at a time.
+
+**Tests:** every existing app test suite's "member" fixtures updated via a new shared helper (`apps/common/test_utils.py::make_full_access_membership`) for generic CRUD success paths; dedicated narrow-role tests added for every item in the required RBAC test matrix (allowed/denied, cross-tenant 404 vs. same-tenant 403, role-less/inactive-role/revoked-membership fail-closed, permission replacement/revocation, malformed-code fail-closed, privilege escalation incl. self-escalation, platform-admin bypass, financial-access separation, dashboard operational access, Legacy Member) across `apps/users/tests/test_rbac_role_matrix.py` (new), `test_rbac_services.py`, `test_membership_management_services.py`, `test_membership_management_views.py`, plus existing per-app suites.
+
+**Validation:** full backend suite, single serial process, fresh test database (no `--reuse-db`): **1078 passed, 0 failed, 0 errors, exit 0** (runtime 21m52s). `manage.py check`: clean (0 issues). `makemigrations --check --dry-run`: no changes detected. `spectacular --fail-on-warn`: clean.
+
+Depends On
+
+- BE-049, BE-050, BE-051, BE-052, BE-053
+
 **P1 — Hardening**
 
 | ID | Task |
@@ -1306,6 +1337,8 @@ All of Sprints 1–7 (BE-001–BE-048) are confirmed **Done** against actual cod
 | BE-057 | General API throttling for business endpoints (reads/writes/reports/exports), env-configurable scopes, 429 via the standard error envelope. Auth throttling (existing) is out of scope. |
 | BE-058 | Real file upload pipeline (local storage in dev, S3-compatible in prod) for Documents/Payments receipts/Expense receipts/Product images: upload endpoint, MIME/extension/size validation, tenant-scoped storage paths, safe filenames, delete/archive, audit events. Includes a backward-compatible migration plan for existing `*_url` fields. |
 | BE-059 | Data-integrity enums: `Company.currency` (ISO-4217-validated choices), `Payment.method`, `Expense.category`/`vendor`/`payment_method`, and `Project.priority` (already a `CharField`, deliberately left free-text per an earlier Backend Lead decision since `01_Business/FRS.md §10` names the field but never defines its values — re-confirm that decision before constraining it) — pending confirmation of the exact allowed value sets (flagged, not invented). |
+| BE-068 | Split `GET /reports/dashboard`'s payload into operational vs. financial fields, gating only the latter with `report.financial_access` — deferred from BE-054 §6 (dashboard currently gated with `report.view` only, so any role with dashboard access sees the financial KPIs too). |
+| BE-069 | Add a stable, non-user-editable identifier to `Role` (e.g. a `system_key` field, never exposed via `/roles`) so default-role reconciliation migrations (`0006`–`0008`) stop matching by exact display `name` — a real forward risk once customer-created roles exist, flagged during BE-054's migration safety review. |
 
 **P2–P4 — Phase 3–5 (backlog only, not started, per `CLAUDE.md`'s explicit deferral)**
 

@@ -87,6 +87,19 @@ class ProjectViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     pagination_class = StandardPagination
     serializer_class = ProjectSerializer
     queryset = Project.objects.none()
+    # BE-054: status_transition uses project.edit per the Backend-Lead-
+    # approved provisional mapping (RBAC_Enforcement_Matrix.md §4) — a
+    # dedicated project.status_manage code was considered and explicitly
+    # deferred, not introduced in this task.
+    permission_code_map = {
+        "list": "project.view",
+        "create": "project.create",
+        "retrieve": "project.view",
+        "partial_update": "project.edit",
+        "update": "project.edit",
+        "destroy": "project.delete",
+        "status_transition": "project.edit",
+    }
 
     def list(self, request: Request) -> Response:
         query = ProjectListQuerySerializer(data=request.query_params)
@@ -238,6 +251,7 @@ class ProjectTeamView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code_map = {"get": "project.view", "post": "project.manage"}
 
     @extend_schema(
         summary="List Project Team",
@@ -290,6 +304,7 @@ class ProjectTeamMemberView(ObjectPermission404Mixin, APIView):
     """
 
     permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "project.manage"
 
     @extend_schema(
         summary="Remove Project Team Member",
