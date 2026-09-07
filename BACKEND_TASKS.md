@@ -571,7 +571,7 @@ _(Renumbered 2026-08-27: originally BE-021–BE-044. BE-021 collided with the Sp
 
 _(Renumbered again 2026-08-27, BE-025 onward: inserted "BE-025 – Project CRUD" — Sprint 2 had given Client both a Module task (BE-022) and a separate CRUD task (BE-023), but Project only got Module (BE-024) with no CRUD task before jumping to Members. Project Members cannot be meaningfully built without Project creation/retrieval existing first. Every ID from the old BE-025 onward shifted forward by one to make room; Sprints 3–6 shifted by one accordingly (Sprint 3 now starts at BE-031, Sprint 6 now ends at BE-046). No code references any of the shifted IDs — confirmed by search before renumbering.)_
 
-Status: In Progress — all tasks implemented (BE-022, BE-023, BE-024 Done; BE-025–BE-030 Review, awaiting Backend Lead approval)
+Status: Done
 
 ---
 
@@ -646,7 +646,7 @@ Depends On
 
 ### BE-025 – Project CRUD
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -674,7 +674,7 @@ Depends On
 
 ### BE-026 – Project Members
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -702,7 +702,7 @@ Depends On
 
 ### BE-027 – Project Workflow
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -728,7 +728,7 @@ Depends On
 
 ### BE-028 – Project Filters
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Medium
 
@@ -752,7 +752,7 @@ Depends On
 
 ### BE-029 – Project Audit Logs
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -776,7 +776,7 @@ Depends On
 
 ### BE-030 – CRM Tests
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -809,13 +809,13 @@ _(Renumbered 2026-08-31, Sprint 3 planning: dropped the standalone "BE-034 – U
 - BE-033 – Products
 - BE-034 – Catalog APIs
 
-Status: In Progress — all tasks implemented (BE-031–BE-034 Review, awaiting Backend Lead approval)
+Status: Done
 
 ---
 
 ### BE-031 – Categories
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -839,7 +839,7 @@ Depends On
 
 ### BE-032 – Subcategories
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -863,7 +863,7 @@ Depends On
 
 ### BE-033 – Products
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -893,7 +893,7 @@ Depends On
 
 ### BE-034 – Catalog APIs
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Medium
 
@@ -915,13 +915,13 @@ Depends On
 
 # Sprint 4 – BOQ
 
-Status: In Progress — all tasks implemented (BE-035–BE-038 Review, awaiting Backend Lead approval)
+Status: Done
 
 ---
 
 ### BE-035 – BOQ Module
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -948,7 +948,7 @@ Depends On
 
 ### BE-036 – BOQ Items
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -980,7 +980,7 @@ Depends On
 
 ### BE-037 – BOQ Calculations
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Critical
 
@@ -1004,7 +1004,7 @@ Depends On
 
 ### BE-038 – BOQ APIs
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Medium
 
@@ -1026,7 +1026,7 @@ Depends On
 
 ## BE-039 – Quotation
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -1046,7 +1046,7 @@ Depends On
 
 ## BE-040 – Versioning
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -1064,7 +1064,7 @@ Depends On
 
 ## BE-041 – Approval Workflow
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -1088,7 +1088,7 @@ Depends On
 
 ## BE-042 – Invoice
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -1110,7 +1110,7 @@ Depends On
 
 ## BE-043 – Payment
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -1128,7 +1128,7 @@ Depends On
 
 ## BE-044 – Expense
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** High
 
@@ -1146,7 +1146,7 @@ Depends On
 
 ## BE-045 – Financial Reports
 
-**Status:** Review
+**Status:** Done
 
 **Priority:** Medium
 
@@ -1226,7 +1226,7 @@ Depends On
 
 **Tests:** `apps/dashboard/tests/test_services.py` (9), `test_views.py` (2) -- KPI arithmetic reuse, active-project exclusion of terminal statuses, distinct-quote-number counting, pending/overdue invoice listing, the 30-day upcoming-deadline window, per-project profitability, and company-tenant isolation.
 
-**Sprint 7 status:** every task BE-046–BE-048 is implemented, verified, tested, and marked **Done**, completing Sprint 7 (Platform). Full `apps/documents` + `apps/audit` + `apps/dashboard` suite: **56 passed** (24 + 21 + 11). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected. `spectacular --fail-on-warn`: clean.
+**Sprint 7 status:** every task BE-046–BE-048 is implemented, verified, tested, and marked **Done**, completing Sprint 7 (Platform). Full `apps/documents` + `apps/audit` + `apps/dashboard` suite: **56 passed** (24 + 21 + 11). `manage.py check`: 0 issues. `makemigrations --check --dry-run`: no changes detected. `spectacular --fail-on-warn`: clean. Full backend suite re-verified green via `pytest` as the sprint-closing gate: **986 passed, 0 failed** (was 944 after Sprint 6). (Note: the first sign-off attempt hit a one-off Postgres deadlock from a stale test-DB connection left by an earlier interrupted run, unrelated to Sprint 7's code — a clean rerun confirmed the real result above.)
 
 Depends On
 
