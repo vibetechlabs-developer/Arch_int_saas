@@ -66,6 +66,7 @@ export interface ProjectListParams {
   priority?: string;
   ordering?: ProjectOrdering;
   page?: number;
+  pageSize?: number;
 }
 
 export interface ProjectMutableInput {
@@ -104,6 +105,7 @@ export async function getProjects(
         priority: params.priority || undefined,
         ordering: params.ordering,
         page: params.page,
+        pageSize: params.pageSize,
       },
     }),
   );

@@ -98,3 +98,16 @@ export const documentKeys = {
   all: ['documents'] as const,
   project: (projectId: string) => [...documentKeys.all, 'project', projectId] as const,
 };
+
+// Only two report endpoints exist (GET /reports/finance, GET
+// /reports/expenses), both taking the same filter shape — no
+// reportKeys.dashboard(), since Dashboard already has its own ['dashboard']
+// key and is a separate, un-filtered endpoint this module deliberately
+// does not touch.
+export const reportKeys = {
+  all: ['reports'] as const,
+  finance: (filters: { projectId?: string; dateFrom?: string; dateTo?: string }) =>
+    [...reportKeys.all, 'finance', filters] as const,
+  expenses: (filters: { projectId?: string; dateFrom?: string; dateTo?: string }) =>
+    [...reportKeys.all, 'expenses', filters] as const,
+};

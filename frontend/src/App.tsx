@@ -9,6 +9,7 @@ import { Shell } from '@/components/shell/Shell';
 import { queryClient } from '@/lib/queryClient';
 import LoginPage from '@/pages/LoginPage';
 import DashboardPage from '@/pages/DashboardPage';
+import ReportsPage from '@/pages/ReportsPage';
 import ClientsListPage from '@/pages/clients/ClientsListPage';
 import ClientDetailPage from '@/pages/clients/ClientDetailPage';
 import ProjectsListPage from '@/pages/projects/ProjectsListPage';
@@ -44,6 +45,7 @@ const App: React.FC = () => {
                         <Routes>
                           <Route path="/" element={<Navigate to="/dashboard" replace />} />
                           <Route path="/dashboard" element={<DashboardPage />} />
+                          <Route path="/reports" element={<ReportsPage />} />
                           <Route path="/clients" element={<ClientsListPage />} />
                           <Route path="/clients/:clientId" element={<ClientDetailPage />} />
                           <Route path="/projects" element={<ProjectsListPage />} />
