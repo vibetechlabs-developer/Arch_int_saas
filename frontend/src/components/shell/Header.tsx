@@ -68,13 +68,19 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
     }
   } else if (quotationMatch?.params.quotationId) {
     const cached = queryClient.getQueryData<Quotation>(quotationKeys.detail(quotationMatch.params.quotationId));
-    breadcrumb = cached?.quoteNumber ? ['Quotations', cached.quoteNumber] : ['Quotations'];
+    // Quotation/Invoice/Expense detail pages live at top-level routes
+    // (/quotations/:id, not nested under /projects/:projectId/), but each
+    // one's own record carries projectId/projectName — used here to
+    // rebuild the full "Projects / <Project> / Quotations / QT-0001"
+    // chain rather than leaving the breadcrumb floating with no project
+    // context, matching the chain a project-workspace tab already shows.
+    breadcrumb = cached?.quoteNumber ? ['Projects', cached.projectName, 'Quotations', cached.quoteNumber] : ['Quotations'];
   } else if (invoiceMatch?.params.invoiceId) {
     const cached = queryClient.getQueryData<Invoice>(invoiceKeys.detail(invoiceMatch.params.invoiceId));
-    breadcrumb = cached?.invoiceNumber ? ['Invoices', cached.invoiceNumber] : ['Invoices'];
+    breadcrumb = cached?.invoiceNumber ? ['Projects', cached.projectName, 'Invoices', cached.invoiceNumber] : ['Invoices'];
   } else if (expenseMatch?.params.expenseId) {
     const cached = queryClient.getQueryData<Expense>(expenseKeys.detail(expenseMatch.params.expenseId));
-    breadcrumb = cached ? ['Expenses', cached.category || 'Uncategorized'] : ['Expenses'];
+    breadcrumb = cached ? ['Projects', cached.projectName, 'Expenses', cached.category || 'Uncategorized'] : ['Expenses'];
   } else if (productMatch?.params.productId) {
     const cached = queryClient.getQueryData<Product>(productKeys.detail(productMatch.params.productId));
     breadcrumb = cached?.name ? ['Products', cached.name] : ['Products'];

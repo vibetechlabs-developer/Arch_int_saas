@@ -52,6 +52,17 @@ describe('ProjectWorkspaceLayout', () => {
     expect(screen.getByText('High')).toBeInTheDocument();
   });
 
+  it('shows every implemented workspace tab, and never an Activity tab (blocked module)', async () => {
+    mockedGetProject.mockResolvedValue(project);
+    renderWithProviders(<ProjectWorkspaceLayout />, { route: '/projects/p1/overview', path: '/projects/:projectId/*' });
+    await screen.findByText('Villa Renovation');
+
+    for (const label of ['Overview', 'Team', 'BOQ', 'Quotations', 'Invoices', 'Expenses', 'Documents']) {
+      expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('link', { name: /activity/i })).not.toBeInTheDocument();
+  });
+
   it('shows a dedicated Project Not Found state on a 404, not a generic error', async () => {
     mockedGetProject.mockRejectedValue(new ApiError('NOT_FOUND', 'The requested project was not found.'));
     renderWithProviders(<ProjectWorkspaceLayout />, { route: '/projects/p1/overview', path: '/projects/:projectId/*' });
