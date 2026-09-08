@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -12,11 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { CategoryCombobox } from '@/components/products/CategoryCombobox';
 import { SubcategoryCombobox } from '@/components/products/SubcategoryCombobox';
-import { ProductThumbnail } from '@/components/products/ProductThumbnail';
+import { ProductImagePicker, validateProductImageFile } from '@/components/products/ProductImagePicker';
 import { ApiError } from '@/lib/api/client';
 import {
   createProduct,
   updateProduct,
+  uploadProductImage,
   PRODUCT_UNITS,
   type Product,
   type ProductMutableInput,
@@ -32,7 +33,6 @@ const decimalField = z
 
 const productSchema = z.object({
   name: z.string().trim().min(1, 'Product name is required').max(255),
-  imageUrl: z.string().url('Enter a valid image URL').optional().or(z.literal('')),
   defaultCost: decimalField,
   defaultSellingRate: decimalField,
   taxRate: decimalField,
@@ -40,7 +40,7 @@ const productSchema = z.object({
 
 type ProductFormValues = z.infer<typeof productSchema>;
 
-const EMPTY_VALUES: ProductFormValues = { name: '', imageUrl: '', defaultCost: '', defaultSellingRate: '', taxRate: '' };
+const EMPTY_VALUES: ProductFormValues = { name: '', defaultCost: '', defaultSellingRate: '', taxRate: '' };
 
 export interface ProductFormSheetProps {
   open: boolean;
@@ -62,24 +62,41 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
   const [unit, setUnit] = useState<ProductUnit | ''>('');
   const [statusValue, setStatusValue] = useState<ProductStatus>('active');
 
+  // Image state lives outside react-hook-form, mirroring unit/status above —
+  // "current effective URL" (persisted or manually typed), a not-yet-
+  // uploaded local file, and its own inline error. The image is
+  // deliberately NOT uploaded on selection — only at Save time, inside the
+  // single combined mutation below — so cancelling the Sheet after merely
+  // picking a file never orphans an upload no Product ever referenced.
+  const [imageUrl, setImageUrl] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [saveStage, setSaveStage] = useState<'idle' | 'uploading' | 'saving'>('idle');
+  // Caches the last file this Sheet actually uploaded, so retrying Save
+  // after a Product-save failure (upload already succeeded) reuses that
+  // URL instead of uploading the same file again.
+  const uploadedFileRef = useRef<File | null>(null);
+  const uploadedUrlRef = useRef<string | null>(null);
+  const uploadStageFailedRef = useRef(false);
+
   const {
     register,
     handleSubmit,
     reset,
-    watch,
     setError,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<ProductFormValues>({ resolver: zodResolver(productSchema), defaultValues: EMPTY_VALUES });
-
-  const imageUrl = watch('imageUrl');
 
   useEffect(() => {
     if (!open) return;
     setSubcategoryError(null);
+    setImageError(null);
+    setSelectedFile(null);
+    uploadedFileRef.current = null;
+    uploadedUrlRef.current = null;
     if (product) {
       reset({
         name: product.name,
-        imageUrl: product.imageUrl,
         defaultCost: product.defaultCost ?? '',
         defaultSellingRate: product.defaultSellingRate ?? '',
         taxRate: product.taxRate ?? '',
@@ -88,20 +105,43 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
       setSubcategoryId(product.subcategoryId);
       setUnit(product.unit);
       setStatusValue(product.status);
+      setImageUrl(product.imageUrl);
     } else {
       reset(EMPTY_VALUES);
       setCategoryId(null);
       setSubcategoryId(null);
       setUnit('');
       setStatusValue('active');
+      setImageUrl('');
     }
   }, [open, product, reset]);
 
   const mutation = useMutation({
-    mutationFn: (values: ProductFormValues) => {
+    mutationFn: async (values: ProductFormValues) => {
+      uploadStageFailedRef.current = false;
+      let resolvedImageUrl = imageUrl;
+
+      if (selectedFile) {
+        if (uploadedFileRef.current === selectedFile && uploadedUrlRef.current) {
+          resolvedImageUrl = uploadedUrlRef.current;
+        } else {
+          setSaveStage('uploading');
+          try {
+            const uploaded = await uploadProductImage(selectedFile);
+            uploadedFileRef.current = selectedFile;
+            uploadedUrlRef.current = uploaded.url;
+            resolvedImageUrl = uploaded.url;
+          } catch (uploadError) {
+            uploadStageFailedRef.current = true;
+            throw uploadError;
+          }
+        }
+      }
+
+      setSaveStage('saving');
       const mutableInput: ProductMutableInput = {
         name: values.name,
-        imageUrl: values.imageUrl || '',
+        imageUrl: resolvedImageUrl,
         unit: unit || '',
         defaultCost: values.defaultCost || null,
         defaultSellingRate: values.defaultSellingRate || null,
@@ -113,6 +153,7 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
         : createProduct({ ...mutableInput, subcategoryId: subcategoryId! });
     },
     onSuccess: (saved) => {
+      setSaveStage('idle');
       queryClient.invalidateQueries({ queryKey: productKeys.lists() });
       if (isEdit) queryClient.invalidateQueries({ queryKey: productKeys.detail(saved.id) });
       toast.success(isEdit ? 'Product updated' : 'Product created');
@@ -120,10 +161,21 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
       onSaved?.(saved);
     },
     onError: (error: unknown) => {
+      setSaveStage('idle');
+
+      if (uploadStageFailedRef.current) {
+        setImageError(error instanceof ApiError ? error.message : 'Failed to upload image. Please try again.');
+        return;
+      }
+
       if (error instanceof ApiError && error.code === 'VALIDATION_ERROR') {
         for (const detail of error.details) {
           if (detail.field === 'subcategoryId') {
             setSubcategoryError(detail.issue);
+            continue;
+          }
+          if (detail.field === 'imageUrl') {
+            setImageError(detail.issue);
             continue;
           }
           if (detail.field in EMPTY_VALUES) {
@@ -142,6 +194,30 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
       return;
     }
     mutation.mutate(values);
+  };
+
+  const handleFileSelect = (file: File) => {
+    const validationMessage = validateProductImageFile(file);
+    if (validationMessage) {
+      setImageError(validationMessage);
+      return;
+    }
+    setImageError(null);
+    setSelectedFile(file);
+  };
+
+  const handleRemoveImage = () => {
+    setSelectedFile(null);
+    setImageUrl('');
+    setImageError(null);
+    uploadedFileRef.current = null;
+    uploadedUrlRef.current = null;
+  };
+
+  const handleUrlChange = (value: string) => {
+    setImageUrl(value);
+    setSelectedFile(null);
+    setImageError(null);
   };
 
   return (
@@ -205,16 +281,16 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
             </div>
           )}
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="product-image-url">Image URL</Label>
-            <Input id="product-image-url" placeholder="https://…" invalid={!!errors.imageUrl} {...register('imageUrl')} />
-            {errors.imageUrl && <p className="text-small text-danger-text">{errors.imageUrl.message}</p>}
-            {imageUrl && (
-              <div className="mt-1">
-                <ProductThumbnail imageUrl={imageUrl} alt="Preview" size="lg" />
-              </div>
-            )}
-          </div>
+          <ProductImagePicker
+            currentUrl={imageUrl}
+            pendingFile={selectedFile}
+            onFileSelect={handleFileSelect}
+            onRemove={handleRemoveImage}
+            onUrlChange={handleUrlChange}
+            error={imageError}
+            uploading={mutation.isPending && saveStage === 'uploading'}
+            disabled={mutation.isPending}
+          />
 
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
@@ -286,19 +362,39 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
             {errors.taxRate && <p className="text-small text-danger-text">{errors.taxRate.message}</p>}
           </div>
 
-          {mutation.isError && !(mutation.error instanceof ApiError && mutation.error.code === 'VALIDATION_ERROR') && (
-            <Alert variant="destructive">
-              {mutation.error instanceof ApiError ? mutation.error.message : 'Something went wrong.'}
-            </Alert>
-          )}
+          {mutation.isError &&
+            !uploadStageFailedRef.current &&
+            !(mutation.error instanceof ApiError && mutation.error.code === 'VALIDATION_ERROR') && (
+              <Alert variant="destructive">
+                {mutation.error instanceof ApiError ? mutation.error.message : 'Something went wrong.'}
+              </Alert>
+            )}
 
-          <div className="mt-auto flex justify-end gap-2 border-t border-border-subtle pt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" loading={isSubmitting}>
-              {isEdit ? 'Save changes' : 'Create product'}
-            </Button>
+          <div className="mt-auto flex flex-col gap-2 border-t border-border-subtle pt-4">
+            {mutation.isPending && (
+              <p aria-live="polite" className="self-end text-small text-text-tertiary">
+                {saveStage === 'uploading' ? 'Uploading image…' : 'Saving…'}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={mutation.isPending}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                loading={mutation.isPending}
+                aria-label={
+                  mutation.isPending
+                    ? saveStage === 'uploading'
+                      ? 'Uploading image…'
+                      : 'Saving…'
+                    : undefined
+                }
+              >
+                {isEdit ? 'Save changes' : 'Create product'}
+              </Button>
+            </div>
           </div>
         </form>
       </SheetContent>

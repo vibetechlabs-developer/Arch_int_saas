@@ -92,3 +92,21 @@ export async function updateProduct(id: string, input: Partial<ProductMutableInp
 export async function deleteProduct(id: string): Promise<void> {
   await apiClient.delete(`/products/${id}`);
 }
+
+// Mirrors backend/apps/products/serializers.py::ProductImageUploadSerializer.
+export interface UploadedProductImage {
+  url: string;
+  fileName: string;
+  contentType: string;
+  size: number;
+}
+
+// Multipart upload — the browser/axios set the Content-Type boundary
+// automatically from the FormData body; never set it manually. Returns an
+// absolute URL that the caller then sets through the ordinary imageUrl
+// field on create/update — this endpoint never touches Product itself.
+export async function uploadProductImage(file: File): Promise<UploadedProductImage> {
+  const formData = new FormData();
+  formData.append('image', file);
+  return unwrap<UploadedProductImage>(apiClient.post('/products/images/upload', formData));
+}
