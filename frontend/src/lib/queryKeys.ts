@@ -43,3 +43,12 @@ export const subcategoryKeys = {
   forCategory: (categoryId: string) => [...subcategoryKeys.all, 'category', categoryId] as const,
   detail: (id: string) => [...subcategoryKeys.all, 'detail', id] as const,
 };
+
+// GET /projects/{id}/boq returns the whole tree in one call (no separate
+// section/item list endpoints exist), so there's no boqKeys.section()/
+// item() — a single project(id) key covers the entire tree.
+export const boqKeys = {
+  all: ['boq'] as const,
+  project: (projectId: string) => [...boqKeys.all, 'project', projectId] as const,
+  summary: (projectId: string) => [...boqKeys.all, 'summary', projectId] as const,
+};

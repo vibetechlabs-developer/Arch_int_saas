@@ -43,6 +43,7 @@ export interface ProductListParams {
   status?: ProductStatus;
   ordering?: ProductOrdering;
   page?: number;
+  pageSize?: number;
 }
 
 export interface ProductMutableInput {
@@ -70,6 +71,7 @@ export async function getProducts(
         status: params.status || undefined,
         ordering: params.ordering,
         page: params.page,
+        pageSize: params.pageSize,
       },
     }),
   );

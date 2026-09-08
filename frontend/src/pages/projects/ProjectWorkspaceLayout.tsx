@@ -29,6 +29,7 @@ import { StatusTransitionDialog } from '@/components/projects/StatusTransitionDi
 const WORKSPACE_TABS = [
   { label: 'Overview', path: 'overview' },
   { label: 'Team', path: 'team' },
+  { label: 'BOQ', path: 'boq' },
 ];
 
 export default function ProjectWorkspaceLayout() {

@@ -51,8 +51,11 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
     const cached = queryClient.getQueryData<Project>(projectKeys.detail(projectMatch.params.projectId));
     breadcrumb = ['Projects'];
     // Only append once the real name has loaded — never flash the raw UUID.
-    if (cached?.name) breadcrumb.push(cached.name);
-    if (cached?.name && location.pathname.endsWith('/team')) breadcrumb.push('Team');
+    if (cached?.name) {
+      breadcrumb.push(cached.name);
+      if (location.pathname.endsWith('/team')) breadcrumb.push('Team');
+      else if (location.pathname.endsWith('/boq')) breadcrumb.push('BOQ');
+    }
   } else if (productMatch?.params.productId) {
     const cached = queryClient.getQueryData<Product>(productKeys.detail(productMatch.params.productId));
     breadcrumb = cached?.name ? ['Products', cached.name] : ['Products'];
