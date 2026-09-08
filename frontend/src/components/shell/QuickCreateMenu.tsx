@@ -1,4 +1,4 @@
-import { FolderKanban, Plus, UserRound } from 'lucide-react';
+import { FolderKanban, Package, Plus, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
@@ -30,6 +30,10 @@ export function QuickCreateMenu() {
         <DropdownMenuItem onSelect={() => navigate('/projects?new=true')}>
           <FolderKanban className="size-4" />
           New Project
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => navigate('/products?new=true')}>
+          <Package className="size-4" />
+          New Product
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -15,8 +15,9 @@ import { QuickCreateMenu } from './QuickCreateMenu';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/theme/ThemeProvider';
 import { NAV_GROUPS } from './navConfig';
-import { projectKeys } from '@/lib/queryKeys';
+import { productKeys, projectKeys } from '@/lib/queryKeys';
 import type { Project } from '@/lib/api/projects';
+import type { Product } from '@/lib/api/products';
 
 export interface HeaderProps {
   onOpenCommandPalette: () => void;
@@ -42,6 +43,8 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
   // of the routed content under Shell, not a descendant of it, so it has
   // no other way to know the current :projectId.
   const projectMatch = useMatch('/projects/:projectId/*');
+  const productMatch = useMatch('/products/:productId');
+  const categoriesMatch = useMatch('/settings/product-categories');
 
   let breadcrumb: string[];
   if (projectMatch?.params.projectId) {
@@ -50,6 +53,11 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
     // Only append once the real name has loaded — never flash the raw UUID.
     if (cached?.name) breadcrumb.push(cached.name);
     if (cached?.name && location.pathname.endsWith('/team')) breadcrumb.push('Team');
+  } else if (productMatch?.params.productId) {
+    const cached = queryClient.getQueryData<Product>(productKeys.detail(productMatch.params.productId));
+    breadcrumb = cached?.name ? ['Products', cached.name] : ['Products'];
+  } else if (categoriesMatch) {
+    breadcrumb = ['Product Categories'];
   } else {
     // Exact match first, then the longest nav path that's a parent of the
     // current route (e.g. /clients/:id under the "Clients" nav item) — a

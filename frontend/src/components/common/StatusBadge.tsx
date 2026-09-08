@@ -29,6 +29,9 @@ const STATUS_SEMANTICS: Record<string, Semantic> = {
   overdue: 'danger',
   // Expense
   submitted: 'info',
+  // Product catalog
+  active: 'success',
+  inactive: 'neutral',
 };
 
 export function humanizeStatus(status: string): string {

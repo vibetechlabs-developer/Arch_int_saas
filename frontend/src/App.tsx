@@ -15,6 +15,9 @@ import ProjectsListPage from '@/pages/projects/ProjectsListPage';
 import ProjectWorkspaceLayout from '@/pages/projects/ProjectWorkspaceLayout';
 import ProjectOverviewTab from '@/pages/projects/ProjectOverviewTab';
 import ProjectTeamTab from '@/pages/projects/ProjectTeamTab';
+import ProductsListPage from '@/pages/products/ProductsListPage';
+import ProductDetailPage from '@/pages/products/ProductDetailPage';
+import ProductCategoriesPage from '@/pages/settings/ProductCategoriesPage';
 
 const App: React.FC = () => {
   return (
@@ -41,6 +44,9 @@ const App: React.FC = () => {
                             <Route path="overview" element={<ProjectOverviewTab />} />
                             <Route path="team" element={<ProjectTeamTab />} />
                           </Route>
+                          <Route path="/products" element={<ProductsListPage />} />
+                          <Route path="/products/:productId" element={<ProductDetailPage />} />
+                          <Route path="/settings/product-categories" element={<ProductCategoriesPage />} />
                           <Route path="*" element={<Navigate to="/dashboard" replace />} />
                         </Routes>
                       </Shell>

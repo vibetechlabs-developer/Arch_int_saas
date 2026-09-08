@@ -25,6 +25,8 @@ export interface ComboboxProps {
   invalid?: boolean;
   /** Shown on the trigger while `value` isn't present in the current (search-filtered) `options` list — e.g. an already-selected item when editing. */
   selectedLabel?: string | null;
+  /** True for a fully-preloaded, un-searchable-server-side option set (e.g. product categories — no `search` param exists on that endpoint) — cmdk filters `options` locally instead of trusting the caller to have already filtered them via the API. */
+  shouldFilter?: boolean;
 }
 
 // A server-searched single-select combobox (Popover + cmdk Command,
@@ -45,6 +47,7 @@ export function Combobox({
   disabled,
   invalid,
   selectedLabel,
+  shouldFilter = false,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const selectedOption = options.find((option) => option.value === value);
@@ -71,7 +74,7 @@ export function Combobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-        <Command shouldFilter={false}>
+        <Command shouldFilter={shouldFilter}>
           <CommandInput placeholder={searchPlaceholder} value={searchValue} onValueChange={onSearchChange} />
           <CommandList>
             {isLoading ? (
