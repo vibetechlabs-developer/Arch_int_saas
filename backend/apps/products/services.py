@@ -1,6 +1,9 @@
+import os
 import uuid
 from decimal import Decimal
 from typing import Any, Dict, Optional
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
@@ -625,3 +628,57 @@ class ProductService:
                 before_state=before_state,
                 request=request,
             )
+
+
+def _safe_display_filename(original_name: str) -> str:
+    """
+    Cosmetic only — never used as a storage key or filesystem path. Strips
+    directory components (defends against a client sending a path-
+    traversal-shaped `name`, e.g. "../../etc/passwd.jpg") and truncates to
+    a sane display length.
+    """
+    return os.path.basename(original_name or "image")[:255]
+
+
+class ProductImageService:
+    """
+    Stores a validated product image via Django's storage abstraction
+    (`default_storage` — `FileSystemStorage` against `MEDIA_ROOT` in
+    development today, swappable to S3/object storage later purely via
+    settings, with no business-logic change) and returns a URL the caller
+    persists through the ordinary `Product.imageUrl` field. Deliberately
+    has no model of its own — an uploaded image is not a first-class
+    tenant entity the way Document is; it is a blob a Product's own
+    `imageUrl` field will end up referencing, mirroring the "smallest
+    correct design" the image-upload brief calls for.
+    """
+
+    @classmethod
+    def upload_image(
+        cls,
+        company_id: str | uuid.UUID,
+        uploaded_file: Any,
+        request: Any = None,
+    ) -> Dict[str, Any]:
+        extension, content_type = validators.validate_product_image(uploaded_file)
+
+        # UUID-based storage key, namespaced by company — never the raw
+        # user filename (collision + path-traversal risk) and never
+        # exposes anything about the tenant beyond its own id, which the
+        # URL's caller already necessarily knows.
+        storage_key = f"products/{company_id}/{uuid.uuid4()}.{extension}"
+        saved_path = default_storage.save(storage_key, ContentFile(uploaded_file.read()))
+        relative_url = default_storage.url(saved_path)
+
+        # Product.imageUrl is a plain URLField requiring an absolute URL
+        # (scheme + host) — default_storage.url() returns a path relative
+        # to MEDIA_URL, so it must be resolved against the current request
+        # before it can ever be round-tripped back through that field.
+        url = request.build_absolute_uri(relative_url) if request is not None else relative_url
+
+        return {
+            "url": url,
+            "fileName": _safe_display_filename(getattr(uploaded_file, "name", "")),
+            "contentType": content_type,
+            "size": uploaded_file.size,
+        }

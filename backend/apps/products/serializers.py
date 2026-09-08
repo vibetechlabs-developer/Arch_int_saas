@@ -293,6 +293,20 @@ class ProductUpdateSerializer(serializers.Serializer):
         return cleaned
 
 
+class ProductImageUploadSerializer(serializers.Serializer):
+    """
+    Output shape for `POST /products/images/upload` — a plain Serializer
+    over ProductImageService.upload_image's returned dict (no model
+    behind this endpoint), matching FinanceReportSerializer's precedent
+    for a computed, non-persisted response.
+    """
+
+    url = serializers.URLField()
+    fileName = serializers.CharField()
+    contentType = serializers.CharField()
+    size = serializers.IntegerField()
+
+
 class ProductListQuerySerializer(serializers.Serializer):
     """
     Validates GET /products query params (BE-034): category/subcategory/

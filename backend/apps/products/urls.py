@@ -2,6 +2,7 @@ from django.urls import re_path
 
 from apps.products.views import (
     ProductCategoryViewSet,
+    ProductImageUploadView,
     ProductSubcategoryListCreateView,
     ProductSubcategoryViewSet,
     ProductViewSet,
@@ -66,6 +67,11 @@ urlpatterns = [
         name="product-subcategory-detail",
     ),
     re_path(r"^products/?$", product_list, name="product-list"),
+    re_path(
+        r"^products/images/upload/?$",
+        ProductImageUploadView.as_view(),
+        name="product-image-upload",
+    ),
     re_path(
         r"^products/(?P<pk>[0-9a-fA-F-]{36})/?$",
         product_detail,

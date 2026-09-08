@@ -15,6 +15,8 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 from rest_framework.permissions import AllowAny
@@ -71,3 +73,11 @@ urlpatterns = [
     path("", include("apps.audit.urls")),
     path("", include("apps.dashboard.urls")),
 ]
+
+# Development-only: serve MEDIA_ROOT (uploaded product images, etc.) over
+# MEDIA_URL. `static()` itself already no-ops when DEBUG is False, but the
+# explicit guard keeps intent obvious and matches Django's own documented
+# pattern — production serves MEDIA_ROOT via the web server / object
+# storage, never through Django's dev static-file handler.
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -1,5 +1,7 @@
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
+from rest_framework import exceptions as drf_exceptions
 from rest_framework import status, viewsets
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -16,6 +18,7 @@ from apps.products.serializers import (
     ProductCategorySerializer,
     ProductCategoryUpdateSerializer,
     ProductCreateSerializer,
+    ProductImageUploadSerializer,
     ProductListQuerySerializer,
     ProductSerializer,
     ProductSubcategoryCreateSerializer,
@@ -24,7 +27,12 @@ from apps.products.serializers import (
     ProductSubcategoryUpdateSerializer,
     ProductUpdateSerializer,
 )
-from apps.products.services import ProductCategoryService, ProductService, ProductSubcategoryService
+from apps.products.services import (
+    ProductCategoryService,
+    ProductImageService,
+    ProductService,
+    ProductSubcategoryService,
+)
 from apps.users.permissions import is_platform_admin
 
 
@@ -541,4 +549,47 @@ class ProductViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         return ApiResponse.success(
             data={"message": "Product deleted successfully."},
             request_id=request_id,
+        )
+
+
+class ProductImageUploadView(APIView):
+    """
+    `POST /products/images/upload`. Deliberately its own top-level route
+    (not nested under `ProductViewSet`) — an uploaded image is not yet
+    attached to any particular Product (it may back a Create Product form
+    before that Product exists at all), so there is no `{id}` to nest
+    under. Gated by `product.manage` — the same code Product create/update
+    already require — since selecting a catalog image is part of managing
+    the catalog, not merely viewing it.
+    """
+
+    permission_classes = [IsAuthenticated, ProductCategoryPermission]
+    parser_classes = [MultiPartParser, FormParser]
+    permission_code = "product.manage"
+
+    @extend_schema(
+        summary="Upload Product Image",
+        description="Upload a JPEG/PNG/WEBP product image (multipart/form-data, field name `image`, max 5 MB). Returns an absolute URL usable as Product.imageUrl.",
+        request={"multipart/form-data": {"type": "object", "properties": {"image": {"type": "string", "format": "binary"}}}},
+        responses={status.HTTP_201_CREATED: ProductImageUploadSerializer},
+        tags=["Product Catalog"],
+    )
+    def post(self, request: Request) -> Response:
+        if is_platform_admin(request):
+            company_id = request.query_params.get("companyId")
+            if not company_id:
+                raise drf_exceptions.ValidationError(
+                    {"companyId": ["companyId is required for platform admin image upload."]}
+                )
+        else:
+            company_id = request.company_id
+
+        uploaded_file = request.FILES.get("image")
+        result = ProductImageService.upload_image(
+            company_id=company_id, uploaded_file=uploaded_file, request=request
+        )
+
+        response_data = ProductImageUploadSerializer(result).data
+        return ApiResponse.created(
+            data=response_data, request_id=getattr(request, "request_id", None)
         )
