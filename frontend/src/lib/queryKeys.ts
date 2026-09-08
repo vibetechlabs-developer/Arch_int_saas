@@ -62,3 +62,12 @@ export const quotationKeys = {
   project: (projectId: string) => [...quotationKeys.all, 'project', projectId] as const,
   detail: (id: string) => [...quotationKeys.all, 'detail', id] as const,
 };
+
+// GET /projects/{id}/invoices returns every invoice for the project,
+// unpaginated (no separate item endpoints — items are always nested and
+// only ever change via a full-array PATCH on the invoice itself).
+export const invoiceKeys = {
+  all: ['invoices'] as const,
+  project: (projectId: string) => [...invoiceKeys.all, 'project', projectId] as const,
+  detail: (id: string) => [...invoiceKeys.all, 'detail', id] as const,
+};
