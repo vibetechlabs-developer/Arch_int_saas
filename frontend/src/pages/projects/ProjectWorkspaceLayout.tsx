@@ -32,6 +32,7 @@ const WORKSPACE_TABS = [
   { label: 'BOQ', path: 'boq' },
   { label: 'Quotations', path: 'quotations' },
   { label: 'Invoices', path: 'invoices' },
+  { label: 'Expenses', path: 'expenses' },
 ];
 
 export default function ProjectWorkspaceLayout() {

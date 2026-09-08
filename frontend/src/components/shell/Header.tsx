@@ -15,11 +15,12 @@ import { QuickCreateMenu } from './QuickCreateMenu';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/theme/ThemeProvider';
 import { NAV_GROUPS } from './navConfig';
-import { invoiceKeys, productKeys, projectKeys, quotationKeys } from '@/lib/queryKeys';
+import { expenseKeys, invoiceKeys, productKeys, projectKeys, quotationKeys } from '@/lib/queryKeys';
 import type { Project } from '@/lib/api/projects';
 import type { Product } from '@/lib/api/products';
 import type { Quotation } from '@/lib/api/quotations';
 import type { Invoice } from '@/lib/api/invoices';
+import type { Expense } from '@/lib/api/expenses';
 
 export interface HeaderProps {
   onOpenCommandPalette: () => void;
@@ -49,6 +50,7 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
   const categoriesMatch = useMatch('/settings/product-categories');
   const quotationMatch = useMatch('/quotations/:quotationId');
   const invoiceMatch = useMatch('/invoices/:invoiceId');
+  const expenseMatch = useMatch('/expenses/:expenseId');
 
   let breadcrumb: string[];
   if (projectMatch?.params.projectId) {
@@ -61,6 +63,7 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
       else if (location.pathname.endsWith('/boq')) breadcrumb.push('BOQ');
       else if (location.pathname.endsWith('/quotations')) breadcrumb.push('Quotations');
       else if (location.pathname.endsWith('/invoices')) breadcrumb.push('Invoices');
+      else if (location.pathname.endsWith('/expenses')) breadcrumb.push('Expenses');
     }
   } else if (quotationMatch?.params.quotationId) {
     const cached = queryClient.getQueryData<Quotation>(quotationKeys.detail(quotationMatch.params.quotationId));
@@ -68,6 +71,9 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
   } else if (invoiceMatch?.params.invoiceId) {
     const cached = queryClient.getQueryData<Invoice>(invoiceKeys.detail(invoiceMatch.params.invoiceId));
     breadcrumb = cached?.invoiceNumber ? ['Invoices', cached.invoiceNumber] : ['Invoices'];
+  } else if (expenseMatch?.params.expenseId) {
+    const cached = queryClient.getQueryData<Expense>(expenseKeys.detail(expenseMatch.params.expenseId));
+    breadcrumb = cached ? ['Expenses', cached.category || 'Uncategorized'] : ['Expenses'];
   } else if (productMatch?.params.productId) {
     const cached = queryClient.getQueryData<Product>(productKeys.detail(productMatch.params.productId));
     breadcrumb = cached?.name ? ['Products', cached.name] : ['Products'];

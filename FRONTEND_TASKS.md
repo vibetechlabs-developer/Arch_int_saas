@@ -125,6 +125,24 @@ Commit: `a767a6e` (`feat(frontend): implement project BOQ workspace`).
 - Full lifecycle (client → project → BOQ → quotation → send → approve → invoice → attempted payment on draft (409) → send invoice → partial payment → verify `partially_paid` → overpayment accepted (`paid`, no rejection) → void the first payment (status stays `paid` since the second payment alone still covers the total) → confirmed voided payment excluded from the list → confirmed no `GET /payments/{id}` exists (405) → cleanup) verified live against the running backend.
 - Frontend tests: 142 passed, 6 skipped — **zero new skips**.
 
+## Phase 8 — Expenses
+
+| Task | Description | Status |
+|---|---|---|
+| F17 | Expense list with real server-side filters (category/vendor/status/date range) + create (new Project Workspace tab) | Review |
+| F18 | Project Expense Workspace (Expense detail route, edit, delete, submit/approve/mark-paid workflow) | Review |
+
+**Implementation notes (F17/F18):**
+- Backend contract audited directly from `apps/expenses` (models/urls/serializers/views/services/selectors/repositories/validators/tests), plus `apps/reports` for a possible aggregate. Workflow is strictly linear — `draft → submitted → approved → paid` — with **no reject/cancel state and no reject endpoint at all** (confirmed both in the enum and live: `POST .../reject` 404s). Delete and PATCH are both draft-only, 409 otherwise, confirmed live.
+- **No `ExpenseType`/category model exists anywhere** — `category` (like `vendor` and `paymentMethod`) is unconstrained free text, so all three are plain `Input`s on create/edit and plain exact-match text filters on the list, never a hardcoded Select of invented values (no "Materials/Labour/Travel" dropdown).
+- **No `paymentDate`, no reference/invoice-number field, and mark-paid takes no payload** — it's a pure `approved → paid` status flip with nothing captured. Expense's "paid" is entirely separate from the Payments module; it does not create a Payment record or touch any Invoice.
+- **Authoritative summary: `GET /reports/expenses` exists** (real, `Sum("amount")`-backed category/project/vendor/employee/date breakdown, accepts `?projectId=`) but was deliberately **not embedded** in the Expense workspace — it requires `report.financial_access`, a materially more privileged permission code than any `expense.*` code, so surfacing it inline would make a "core" widget silently vanish for most users who can otherwise fully use expenses. Noted as a future Reports-module enhancement rather than built here, per the explicit "don't build it merely because the endpoint exists" guidance.
+- Employee selection reuses the existing `CompanyMemberCombobox` (same component/validator ProjectTeam's `assignedTo` uses) — unlike BOQItemFormSheet's static-in-edit-mode product reference, Expense's `employeeId` genuinely stays mutable via PATCH while draft, so the combobox stays interactive in both create and edit.
+- `ExpenseFilterBar` adds real server-side filtering (category/vendor/status/date-range) to a project-scoped list for the first time in this app (Quotations/Invoices/Payments are all unfiltered) — each filter change re-keys the TanStack Query cache rather than filtering an already-loaded array. Category/vendor use a short debounce to avoid a request per keystroke; the Status Select's open-and-choose interaction is (consistent with every prior module) not exercised via `userEvent` in tests, so the date-range inputs (plain `<input type="date">`) carry that coverage instead.
+- Async mutation safety: every new Expense mutation form uses `mutation.isPending` (not `isSubmitting`) for its submit-button disabled/loading state, applying the pattern identified during the Payments phase from the start rather than retrofitting it.
+- Full lifecycle (client → project → create expense → retrieve → edit while draft → invalid approve-before-submit (409) → submit → invalid PATCH-after-submit (409) → invalid delete-after-submit (409) → approve → mark paid → confirmed no reject endpoint (404) → confirmed delete is genuinely draft-only by attempting it on the now-paid expense (409) → category/status filters verified → cleanup via project cascade, since a paid expense cannot itself be deleted) verified live against the running backend.
+- Frontend tests: 174 passed, 6 skipped — **zero new skips**.
+
 ## Not Yet Started
 
-Expenses, Documents, Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment.
+Documents, Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment.

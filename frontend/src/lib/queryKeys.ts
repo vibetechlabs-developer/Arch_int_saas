@@ -79,3 +79,14 @@ export const paymentKeys = {
   all: ['payments'] as const,
   invoice: (invoiceId: string) => [...paymentKeys.all, 'invoice', invoiceId] as const,
 };
+
+// GET /projects/{id}/expenses supports real server-side filters/ordering
+// (unlike Quotations/Invoices/Payments) but no pagination — the params
+// object is folded straight into the list key so each distinct filter
+// combination gets its own cache entry, the same convention productKeys/
+// clientKeys already use for their paginated lists.
+export const expenseKeys = {
+  all: ['expenses'] as const,
+  project: (projectId: string, params: Record<string, unknown> = {}) => [...expenseKeys.all, 'project', projectId, params] as const,
+  detail: (id: string) => [...expenseKeys.all, 'detail', id] as const,
+};
