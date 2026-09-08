@@ -16,6 +16,8 @@ import ProjectWorkspaceLayout from '@/pages/projects/ProjectWorkspaceLayout';
 import ProjectOverviewTab from '@/pages/projects/ProjectOverviewTab';
 import ProjectTeamTab from '@/pages/projects/ProjectTeamTab';
 import ProjectBOQTab from '@/pages/projects/ProjectBOQTab';
+import ProjectQuotationsTab from '@/pages/projects/ProjectQuotationsTab';
+import QuotationDetailPage from '@/pages/QuotationDetailPage';
 import ProductsListPage from '@/pages/products/ProductsListPage';
 import ProductDetailPage from '@/pages/products/ProductDetailPage';
 import ProductCategoriesPage from '@/pages/settings/ProductCategoriesPage';
@@ -45,7 +47,9 @@ const App: React.FC = () => {
                             <Route path="overview" element={<ProjectOverviewTab />} />
                             <Route path="team" element={<ProjectTeamTab />} />
                             <Route path="boq" element={<ProjectBOQTab />} />
+                            <Route path="quotations" element={<ProjectQuotationsTab />} />
                           </Route>
+                          <Route path="/quotations/:quotationId" element={<QuotationDetailPage />} />
                           <Route path="/products" element={<ProductsListPage />} />
                           <Route path="/products/:productId" element={<ProductDetailPage />} />
                           <Route path="/settings/product-categories" element={<ProductCategoriesPage />} />

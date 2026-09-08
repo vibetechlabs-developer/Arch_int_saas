@@ -15,9 +15,10 @@ import { QuickCreateMenu } from './QuickCreateMenu';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/theme/ThemeProvider';
 import { NAV_GROUPS } from './navConfig';
-import { productKeys, projectKeys } from '@/lib/queryKeys';
+import { productKeys, projectKeys, quotationKeys } from '@/lib/queryKeys';
 import type { Project } from '@/lib/api/projects';
 import type { Product } from '@/lib/api/products';
+import type { Quotation } from '@/lib/api/quotations';
 
 export interface HeaderProps {
   onOpenCommandPalette: () => void;
@@ -45,6 +46,7 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
   const projectMatch = useMatch('/projects/:projectId/*');
   const productMatch = useMatch('/products/:productId');
   const categoriesMatch = useMatch('/settings/product-categories');
+  const quotationMatch = useMatch('/quotations/:quotationId');
 
   let breadcrumb: string[];
   if (projectMatch?.params.projectId) {
@@ -55,7 +57,11 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
       breadcrumb.push(cached.name);
       if (location.pathname.endsWith('/team')) breadcrumb.push('Team');
       else if (location.pathname.endsWith('/boq')) breadcrumb.push('BOQ');
+      else if (location.pathname.endsWith('/quotations')) breadcrumb.push('Quotations');
     }
+  } else if (quotationMatch?.params.quotationId) {
+    const cached = queryClient.getQueryData<Quotation>(quotationKeys.detail(quotationMatch.params.quotationId));
+    breadcrumb = cached?.quoteNumber ? ['Quotations', cached.quoteNumber] : ['Quotations'];
   } else if (productMatch?.params.productId) {
     const cached = queryClient.getQueryData<Product>(productKeys.detail(productMatch.params.productId));
     breadcrumb = cached?.name ? ['Products', cached.name] : ['Products'];

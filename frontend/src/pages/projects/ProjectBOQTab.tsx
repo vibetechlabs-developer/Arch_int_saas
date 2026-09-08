@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/common/EmptyState';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
 import { Money } from '@/components/common/Money';
+import { FinancialSummary } from '@/components/common/FinancialSummary';
 import { ApiError } from '@/lib/api/client';
 import { PRODUCT_UNITS } from '@/lib/api/products';
 import {
@@ -117,12 +118,14 @@ export default function ProjectBOQTab() {
             </span>
             <span>Last updated {formatDateTime(boq.updatedAt)}</span>
           </div>
-          <div className="grid grid-cols-2 gap-4 border-t border-border-subtle pt-4 sm:grid-cols-4">
-            <SummaryStat label="Subtotal" value={summary?.subtotal} loading={summaryLoading} />
-            <SummaryStat label="Discount" value={summary?.discount} loading={summaryLoading} />
-            <SummaryStat label="Tax" value={summary?.tax} loading={summaryLoading} />
-            <SummaryStat label="Grand Total" value={summary?.total} loading={summaryLoading} emphasize />
-          </div>
+          <FinancialSummary
+            subtotal={summary?.subtotal}
+            discount={summary?.discount}
+            tax={summary?.tax}
+            total={summary?.total}
+            loading={summaryLoading}
+            className="border-t border-border-subtle pt-4"
+          />
         </CardContent>
       </Card>
 
@@ -208,29 +211,6 @@ export default function ProjectBOQTab() {
         loading={deleteItemMutation.isPending}
         onConfirm={() => deletingItem && deleteItemMutation.mutate(deletingItem.id)}
       />
-    </div>
-  );
-}
-
-function SummaryStat({
-  label,
-  value,
-  loading,
-  emphasize,
-}: {
-  label: string;
-  value: string | undefined;
-  loading: boolean;
-  emphasize?: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-label text-text-tertiary">{label}</span>
-      {loading || value === undefined ? (
-        <Skeleton className="h-6 w-20" />
-      ) : (
-        <Money value={value} className={emphasize ? 'text-h3 font-medium text-text-primary' : 'text-body text-text-primary'} />
-      )}
     </div>
   );
 }

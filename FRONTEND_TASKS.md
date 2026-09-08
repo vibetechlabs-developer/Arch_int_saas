@@ -71,6 +71,22 @@ Commit: `a767a6e` (`feat(frontend): implement project BOQ workspace`).
 - Full lifecycle (project/category/subcategory/product → BOQ → section → product-referenced item → summary → edit section/item → 409 delete-guard → delete → cleanup) verified live against the running backend.
 - Frontend tests: 79 passed, 6 skipped — **zero new skips**. Every BOQ-specific interaction (including section/item delete, product-combobox integration, decimal-string preservation, summary refetch after mutation, and mobile item-card rendering) is fully automated; none required a skip.
 
+## Phase 5 — Quotations
+
+| Task | Description | Status |
+|---|---|---|
+| F11 | Quotation list + BOQ-derived create flow (new Project Workspace tab) | Review |
+| F12 | Quotation Detail commercial workspace (line items, financial summary, workflow actions, revision lineage) | Review |
+
+**Implementation notes (F11/F12):**
+- Backend contract audited directly from `apps/quotations` before writing UI. There is **no PATCH or DELETE endpoint for Quotation at all** — content only ever changes by creating a new version via `POST .../revise`; the detail view is otherwise fully read-only, and no delete UI was built anywhere in this module.
+- Creation has two request shapes selected by whether the `items` key is present at all: omitting it (this module's only flow) tells the backend to snapshot the project's current BOQ verbatim; the BOQ-derived branch **silently ignores** any `discount`/`tax` sent, so the Create/Revise forms deliberately expose only `validUntil`/`terms`/`notes` — no discount/tax/line-item fields, to avoid a misleading no-op input.
+- Versioning: `revise` always creates a new row sharing the same `quoteNumber` with `version` incremented; it has **no status precondition** (only "must be the latest version"), so Revise is offered regardless of status, while Send/Approve/Reject are each a single fixed transition (`draft→sent`, `sent→approved`, `sent→rejected`) gated on both status and latest-version, confirmed via a live 409 on every invalid transition tried (see below). Revision lineage ("Version X of Y", Previous/Next) is built entirely from the project's existing unpaginated quotation list, filtered client-side by `quoteNumber` — no dedicated lineage endpoint exists or was needed.
+- New shared `FinancialSummary` component (extracted from BOQ's previously-local summary block, now used by both) renders Subtotal/Discount/Tax/Grand Total straight from backend decimal strings — zero frontend financial math anywhere in this module.
+- Workflow actions (Send/Approve/Reject) each call their own dedicated endpoint behind a `ConfirmationDialog`, with loading/duplicate-submit protection and cache invalidation of the affected detail + project list; Send explicitly does not claim to dispatch an email, since the backend only flips status.
+- Full lifecycle (client → project → BOQ section/item → create quotation → retrieve → verify line snapshot + totals → send → approve → two invalid-transition 409s → revise an approved quotation into v2 → attempt to act on the now-superseded v1 → confirm 409 → confirm no PATCH/DELETE exist → cleanup) verified live against the running backend.
+- Frontend tests: 100 passed, 6 skipped — **zero new skips**. Every interaction (list, latest-version-only grouping, create, financial rendering, all three workflow actions, revision with prefill and navigation, version lineage gating/navigation, 404/error/empty states) is fully automated using plain buttons and Sheet/Dialog forms, none of which require opening a Radix Popper-based overlay.
+
 ## Not Yet Started
 
-Quotations, Invoices, Payments, Expenses, Documents, Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment.
+Invoices, Payments, Expenses, Documents, Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment.

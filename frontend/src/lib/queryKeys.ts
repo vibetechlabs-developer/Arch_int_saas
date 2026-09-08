@@ -52,3 +52,13 @@ export const boqKeys = {
   project: (projectId: string) => [...boqKeys.all, 'project', projectId] as const,
   summary: (projectId: string) => [...boqKeys.all, 'summary', projectId] as const,
 };
+
+// GET /projects/{id}/quotations returns every version, unpaginated (no
+// separate item endpoints — items are always nested), so there's no
+// quotationKeys.items(). `project(id)` backs both the list tab and
+// QuotationDetailPage's revision-lineage lookup (same cache entry).
+export const quotationKeys = {
+  all: ['quotations'] as const,
+  project: (projectId: string) => [...quotationKeys.all, 'project', projectId] as const,
+  detail: (id: string) => [...quotationKeys.all, 'detail', id] as const,
+};
