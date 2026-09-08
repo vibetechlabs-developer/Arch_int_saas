@@ -106,6 +106,25 @@ Commit: `a767a6e` (`feat(frontend): implement project BOQ workspace`).
 - Full lifecycle (client → project → BOQ → quotation → send → approve → invoice-from-quotation → invoice-ad-hoc → PATCH the draft ad hoc invoice → send the quotation-derived invoice → invalid re-send 409 → invalid PATCH-after-send 409 → cancel → invalid re-cancel 409 → confirmed no DELETE support (403, permission-checked before method dispatch, since `delete` has no RBAC code mapped) → cleanup) verified live against the running backend.
 - Frontend tests: 126 passed, 6 skipped — **zero new skips**. The Tabs mode-switcher and the plain-button quotation-picker (a bordered `role="radio"` card list, not a Radix Select/Popover) were both chosen specifically to stay outside the previously-diagnosed Radix Popper/jsdom hang, and both were verified interaction-tested without issue.
 
+## Phase 7 — Payments
+
+| Task | Description | Status |
+|---|---|---|
+| F15 | Payment recording + history (integrated into Invoice detail, not a standalone module) | Review |
+| F16 | Invoice Payment Experience (Payment History section, Record Payment sheet, void workflow) | Review |
+
+**Implementation notes (F15/F16):**
+- Backend contract audited directly from `apps/payments` (models/urls/serializers/views/services/selectors/repositories/validators/tests), plus `apps/reports` to rule out a reusable aggregate. Endpoints are `GET/POST /invoices/{id}/payments` and `DELETE /payments/{id}` (void) only — **no GET single-payment endpoint and no PATCH/PUT anywhere**, so no Edit action and no `/payments/:paymentId` route were built.
+- **PAYMENT AGGREGATE API GAP: YES.** No endpoint anywhere returns a per-invoice `paidAmount`/`outstandingAmount`. `PaymentRepository.sum_active_amount_for_invoice` exists but is server-internal only (used by `InvoiceService.recompute_status_from_payments`), never serialized; `/reports/finance`'s `outstanding` figure is a company-wide overdue aggregate, not a per-invoice value. Per standing instruction, this was **not** worked around by summing `sum(payments.amount)` or computing `total − sum(payments)` client-side — no Payment Summary component exists; the invoice's own (already-authoritative) status badge is the only "is this paid" signal shown. Recommended backend follow-up: add `paidAmount`/`outstandingAmount` to `InvoiceSerializer`, computed the same way `recompute_status_from_payments` already does internally.
+- `method` has **no backend enum** (`Payment.method` docstring: "no documented value domain") — rendered as a plain free-text `Input`, not a Select of invented options (Cash/UPI/Bank Transfer/etc., none of which exist server-side).
+- **Overpayment is genuinely allowed** — confirmed by reading `PaymentService.create_payment` (only `require_positive_amount` validates the amount; nothing compares it to any outstanding balance) and verified live (a payment pushing paid-total to 700 against a 500 total returned 201, not a 409). The Record Payment form therefore never blocks, warns, or silently caps an entered amount.
+- Payments are **append-only with void, not edit/delete/reverse** — `DELETE /payments/{id}` soft-deletes ("voids") and triggers `InvoiceService.recompute_status_from_payments` from the remaining active payments; represented as a "Void" action (`Undo2` icon, destructive `ConfirmationDialog`) that explicitly says "audit-logged, not deleted."
+- No project-scoped `/projects/:projectId/payments` route and no Payments tab were added to Project Workspace — the backend has no project-scoped payment-listing endpoint, only invoice-scoped, so a project-level page would have nothing real to call.
+- `PaymentHistory` (billing-lines-style dual desktop-table/mobile-card list) and `RecordPaymentSheet` are both embedded directly into `InvoiceDetailPage` — Date/Method/Reference/Amount columns, `Money`/tabular-nums, right-aligned amount. `Record Payment` is hidden exactly when the backend would reject it (`draft`/`cancelled`, mirroring `UNPAYABLE_INVOICE_STATUSES` precisely) and deliberately stays visible on a `paid` invoice, since the backend does not reject further payments there.
+- Every Payment mutation (record, void) invalidates the invoice's payment list, the Invoice detail query (so status transitions like `sent→partially_paid→paid` render from the real refetched response, never recreated client-side), and that invoice's project invoice-list cache — nothing broader.
+- Full lifecycle (client → project → BOQ → quotation → send → approve → invoice → attempted payment on draft (409) → send invoice → partial payment → verify `partially_paid` → overpayment accepted (`paid`, no rejection) → void the first payment (status stays `paid` since the second payment alone still covers the total) → confirmed voided payment excluded from the list → confirmed no `GET /payments/{id}` exists (405) → cleanup) verified live against the running backend.
+- Frontend tests: 142 passed, 6 skipped — **zero new skips**.
+
 ## Not Yet Started
 
-Payments, Expenses, Documents, Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment.
+Expenses, Documents, Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment.

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import InvoiceDetailPage from '@/pages/InvoiceDetailPage';
 import { cancelInvoice, getInvoice, sendInvoice, updateInvoice, type Invoice } from '@/lib/api/invoices';
 import { getQuotation, type Quotation } from '@/lib/api/quotations';
+import { createPayment, getPayments, type Payment } from '@/lib/api/payments';
 import { ApiError } from '@/lib/api/client';
 
 jest.mock('@/lib/api/invoices', () => ({
@@ -18,6 +19,11 @@ jest.mock('@/lib/api/quotations', () => ({
   ...jest.requireActual('@/lib/api/quotations'),
   getQuotation: jest.fn(),
 }));
+jest.mock('@/lib/api/payments', () => ({
+  ...jest.requireActual('@/lib/api/payments'),
+  getPayments: jest.fn(),
+  createPayment: jest.fn(),
+}));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
 
 const mockedGetInvoice = getInvoice as jest.Mock;
@@ -25,6 +31,27 @@ const mockedSend = sendInvoice as jest.Mock;
 const mockedCancel = cancelInvoice as jest.Mock;
 const mockedUpdate = updateInvoice as jest.Mock;
 const mockedGetQuotation = getQuotation as jest.Mock;
+const mockedGetPayments = getPayments as jest.Mock;
+const mockedCreatePayment = createPayment as jest.Mock;
+
+function makePayment(overrides: Partial<Payment> = {}): Payment {
+  return {
+    id: 'pay1',
+    companyId: 'c1',
+    invoiceId: 'inv1',
+    clientId: 'cl1',
+    projectId: 'p1',
+    paymentDate: '2026-09-01',
+    amount: '200.00',
+    method: 'Bank transfer',
+    referenceNumber: '',
+    receiptUrl: '',
+    notes: '',
+    createdAt: '2026-09-01T00:00:00Z',
+    updatedAt: '2026-09-01T00:00:00Z',
+    ...overrides,
+  };
+}
 
 function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
   return {
@@ -92,6 +119,7 @@ function renderPage(id = 'inv1') {
 }
 
 describe('InvoiceDetailPage', () => {
+  beforeEach(() => mockedGetPayments.mockResolvedValue([]));
   afterEach(() => jest.clearAllMocks());
 
   it('renders billing lines and the financial summary using exact backend decimal strings', async () => {
@@ -265,5 +293,49 @@ describe('InvoiceDetailPage', () => {
     expect(mobileScope.getByText('Modular switchboard')).toBeInTheDocument();
     expect(mobileScope.getByText('2.00 nos')).toBeInTheDocument();
     expect(mobileScope.getByText('Amount')).toBeInTheDocument();
+  });
+
+  it('shows a Payment History section on Invoice detail', async () => {
+    mockedGetInvoice.mockResolvedValue(makeInvoice({ status: 'sent' }));
+    renderPage();
+
+    expect(await screen.findByText('Payment History')).toBeInTheDocument();
+  });
+
+  it('loads the payment list for the correct invoice', async () => {
+    mockedGetInvoice.mockResolvedValue(makeInvoice({ id: 'inv1', status: 'sent' }));
+    mockedGetPayments.mockResolvedValue([makePayment()]);
+    renderPage('inv1');
+
+    await waitFor(() => expect(mockedGetPayments).toHaveBeenCalledWith('inv1'));
+    expect((await screen.findAllByText('Bank transfer')).length).toBeGreaterThan(0);
+  });
+
+  it('refreshes the authoritative Invoice detail after recording a payment, rendering the backend-refetched status', async () => {
+    mockedGetInvoice
+      .mockResolvedValueOnce(makeInvoice({ status: 'sent' }))
+      .mockResolvedValueOnce(makeInvoice({ status: 'partially_paid' }));
+    mockedGetPayments.mockResolvedValue([]);
+    mockedCreatePayment.mockResolvedValue(makePayment());
+    renderPage();
+
+    await screen.findByText('No payments recorded yet');
+    expect(screen.getByText('Sent')).toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Record Payment' })[0]);
+    await userEvent.type(screen.getByLabelText('Payment date'), '2026-09-01');
+    await userEvent.type(screen.getByLabelText('Amount'), '200.00');
+    await userEvent.click(screen.getByRole('button', { name: 'Record payment' }));
+
+    await waitFor(() => expect(mockedGetInvoice).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('Partially Paid')).toBeInTheDocument();
+  });
+
+  it('shows a permission-denied error rather than the invoice when the request is forbidden', async () => {
+    mockedGetInvoice.mockRejectedValue(new ApiError('PERMISSION_ERROR', 'You do not have permission to perform this action.'));
+    renderPage();
+
+    expect(await screen.findByText('You do not have permission to perform this action.')).toBeInTheDocument();
+    expect(screen.queryByText('Payment History')).not.toBeInTheDocument();
   });
 });

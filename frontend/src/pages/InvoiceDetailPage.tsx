@@ -19,6 +19,7 @@ import { invoiceKeys, quotationKeys } from '@/lib/queryKeys';
 import { formatDate, formatDateTime } from '@/lib/format';
 import { pageTransition, pageTransitionReduced } from '@/lib/motion';
 import { EditInvoiceSheet } from '@/components/invoices/EditInvoiceSheet';
+import { PaymentHistory } from '@/components/payments/PaymentHistory';
 
 type WorkflowAction = 'send' | 'cancel';
 
@@ -80,6 +81,11 @@ export default function InvoiceDetailPage() {
   const canEdit = invoice?.status === 'draft';
   const canSend = invoice?.status === 'draft';
   const canCancel = invoice?.status === 'draft' || invoice?.status === 'sent' || invoice?.status === 'partially_paid';
+  // Mirrors PaymentService.UNPAYABLE_INVOICE_STATUSES exactly (draft and
+  // cancelled reject a payment with a 409) — every other status,
+  // including 'paid', genuinely accepts more payments server-side, so
+  // Record Payment stays available rather than being guessed-hidden.
+  const canRecordPayment = invoice?.status !== 'draft' && invoice?.status !== 'cancelled';
 
   return (
     <motion.div
@@ -224,6 +230,8 @@ export default function InvoiceDetailPage() {
               />
             </CardContent>
           </Card>
+
+          <PaymentHistory invoice={invoice} canRecordPayment={canRecordPayment} />
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card>

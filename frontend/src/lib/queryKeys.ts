@@ -71,3 +71,11 @@ export const invoiceKeys = {
   project: (projectId: string) => [...invoiceKeys.all, 'project', projectId] as const,
   detail: (id: string) => [...invoiceKeys.all, 'detail', id] as const,
 };
+
+// GET /invoices/{id}/payments is the only read endpoint Payment has (no
+// GET /payments/{id}, no project-scoped list) — so there's no
+// paymentKeys.detail()/project(), only the one key this app ever fetches.
+export const paymentKeys = {
+  all: ['payments'] as const,
+  invoice: (invoiceId: string) => [...paymentKeys.all, 'invoice', invoiceId] as const,
+};
