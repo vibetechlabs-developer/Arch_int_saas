@@ -143,6 +143,24 @@ Commit: `a767a6e` (`feat(frontend): implement project BOQ workspace`).
 - Full lifecycle (client → project → create expense → retrieve → edit while draft → invalid approve-before-submit (409) → submit → invalid PATCH-after-submit (409) → invalid delete-after-submit (409) → approve → mark paid → confirmed no reject endpoint (404) → confirmed delete is genuinely draft-only by attempting it on the now-paid expense (409) → category/status filters verified → cleanup via project cascade, since a paid expense cannot itself be deleted) verified live against the running backend.
 - Frontend tests: 174 passed, 6 skipped — **zero new skips**.
 
+## Phase 9 — Documents
+
+| Task | Description | Status |
+|---|---|---|
+| F19 | Document list with register-by-URL create (new Project Workspace tab) | Review |
+| F20 | Project Document Workspace (open/delete actions, restrained file-type iconography, image thumbnails) | Review |
+
+**Implementation notes (F19/F20):**
+- Backend contract audited directly from `apps/documents` (models/urls/serializers/views/services/selectors/repositories/validators/tests). The entire field set is `id, companyId, projectId, entityType, entityId, fileUrl, version, uploadedById, uploadedByName, uploadedAt` — **no title, description, category, MIME type, file size, or original filename exist anywhere**, and **no PATCH endpoint exists at all** (confirmed live: 403, since `patch` has no RBAC code mapped, same permission-checked-before-dispatch behavior found on Invoice's DELETE earlier). No 409 case exists for Document anywhere in this app — delete has no constraints at all.
+- **No file upload endpoint exists anywhere in this codebase** (confirmed verbatim in the model's own docstring and by the create serializer accepting only `fileUrl`) — a document is registered by URL, the exact same pattern already established for Payment/Expense receipts and Product images. `RegisterDocumentSheet` therefore has exactly one field. No `<input type="file">`, no dropzone, no upload progress UI were built, since there is nothing to upload to.
+- **Versioning nuance, confirmed live**: `version` auto-increments as `max(version for this exact (entityType, entityId) pair) + 1`. Since every document from this workspace defaults to the shared target `(entityType="project", entityId=<project id>)`, `version` is really a sequential counter across *all* of a project's general documents, not "revisions of the same file" — verified live (uploading a second, unrelated file gave it `version: 2`). There is no upload-new-version endpoint, no parent-document link, and no "latest version" flag, so no version-history UI was built; the raw number is shown plainly (`v1`, `v2`, …) as real data, not as a revision-navigation feature.
+- **Categories: not supported** (no field/enum/model). **Folders: not supported** (no field). **File size: not supported** (no bytes field returned — no size is ever shown, fabricated, or estimated). A filename is derived presentationally from the URL's last path segment (`displayFileName`) purely for display, explicitly never treated as validated or security-relevant data; the same derivation feeds a restrained, one-family (lucide) file-type icon by extension.
+- **No preview beyond a best-effort image thumbnail** — `fileUrl` is an arbitrary external URL uploaded out-of-band with no backend-confirmed access pattern, so there is no PDF iframe embed and no assumption that any URL is authenticated-browser-accessible. Image-extension URLs get a small `<img>` thumbnail with a React-state (not DOM-mutating) broken-image fallback; everything else gets an icon plus a plain `target="_blank" rel="noreferrer"` "Open" link — never a fabricated "Download" semantic, since the API gives no dedicated download endpoint.
+- No `/documents/:documentId` detail route was built — with no editable metadata and every field already visible in the list row, a dedicated route would exist "just for two fields," which the brief explicitly warns against.
+- Security review: no `dangerouslySetInnerHTML`, no `javascript:`-link risk, no object-URL creation/cleanup needed (no blob URLs used); the derived filename is always rendered as plain JSX text (auto-escaped) — verified with a test asserting a filename containing literal `<img onerror=...>` text renders as inert text, not markup.
+- Full lifecycle (client → project → register a document → retrieve → list → re-upload to the same default target and confirm version increments to 2 → missing-`fileUrl` 400 → confirmed no PATCH exists (403) → delete → confirmed 404 → cleanup) verified live against the running backend.
+- Frontend tests: 190 passed, 6 skipped — **zero new skips**.
+
 ## Not Yet Started
 
-Documents, Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment.
+Activity Log, Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment.

@@ -90,3 +90,11 @@ export const expenseKeys = {
   project: (projectId: string, params: Record<string, unknown> = {}) => [...expenseKeys.all, 'project', projectId, params] as const,
   detail: (id: string) => [...expenseKeys.all, 'detail', id] as const,
 };
+
+// No detail route exists for Documents — the list row already carries
+// every field the API returns, and there is no GET-by-id use case in
+// this workspace, so there's no documentKeys.detail().
+export const documentKeys = {
+  all: ['documents'] as const,
+  project: (projectId: string) => [...documentKeys.all, 'project', projectId] as const,
+};

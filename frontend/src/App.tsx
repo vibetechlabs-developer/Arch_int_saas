@@ -22,6 +22,7 @@ import ProjectInvoicesTab from '@/pages/projects/ProjectInvoicesTab';
 import InvoiceDetailPage from '@/pages/InvoiceDetailPage';
 import ProjectExpensesTab from '@/pages/projects/ProjectExpensesTab';
 import ExpenseDetailPage from '@/pages/ExpenseDetailPage';
+import ProjectDocumentsTab from '@/pages/projects/ProjectDocumentsTab';
 import ProductsListPage from '@/pages/products/ProductsListPage';
 import ProductDetailPage from '@/pages/products/ProductDetailPage';
 import ProductCategoriesPage from '@/pages/settings/ProductCategoriesPage';
@@ -54,6 +55,7 @@ const App: React.FC = () => {
                             <Route path="quotations" element={<ProjectQuotationsTab />} />
                             <Route path="invoices" element={<ProjectInvoicesTab />} />
                             <Route path="expenses" element={<ProjectExpensesTab />} />
+                            <Route path="documents" element={<ProjectDocumentsTab />} />
                           </Route>
                           <Route path="/quotations/:quotationId" element={<QuotationDetailPage />} />
                           <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />

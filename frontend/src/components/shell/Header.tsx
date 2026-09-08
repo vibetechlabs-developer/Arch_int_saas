@@ -64,6 +64,7 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
       else if (location.pathname.endsWith('/quotations')) breadcrumb.push('Quotations');
       else if (location.pathname.endsWith('/invoices')) breadcrumb.push('Invoices');
       else if (location.pathname.endsWith('/expenses')) breadcrumb.push('Expenses');
+      else if (location.pathname.endsWith('/documents')) breadcrumb.push('Documents');
     }
   } else if (quotationMatch?.params.quotationId) {
     const cached = queryClient.getQueryData<Quotation>(quotationKeys.detail(quotationMatch.params.quotationId));
