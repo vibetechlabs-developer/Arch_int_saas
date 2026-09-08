@@ -56,6 +56,21 @@ Commit: `1a5042b` (`feat(frontend): implement product catalog experience`).
 - Full catalog lifecycle (category → subcategory → product → retrieve → update → filter → both 409 delete-guards → cleanup) verified live against the running backend.
 - Frontend tests: 58 passed, 6 skipped — **the skip count did not increase** from the Projects module. Every new test was deliberately designed to avoid the previously-diagnosed Radix Select/Popover/DropdownMenu jsdom hang (Category/Subcategory forms are plain-text dialogs with no combobox; Product edit shows category/subcategory as static text). The few scenarios that genuinely require opening a combobox via the UI (category/subcategory list filters, create-with-a-real-picked-subcategory, category-change-clears-subcategory) were not automated as a 7th+ skip; they're covered by the live API smoke test instead, per the explicit instruction not to grow the skip count.
 
+## Phase 4 — BOQ Workspace
+
+| Task | Description | Status |
+|---|---|---|
+| F10 | BOQ Workspace (new Project Workspace tab — sections, items, backend-authoritative summary totals) | Review |
+
+Commit: `a767a6e` (`feat(frontend): implement project BOQ workspace`).
+
+**Implementation notes (F10):**
+- Backend contract audited directly from `apps/boq` before writing UI. `GET /projects/{id}/boq` returns the entire section+item tree in one call (no pagination anywhere in this app); the BOQ auto-creates on first access (no POST endpoint); sections have no reorder API, so no drag-and-drop was built. The exact product→item default mapping was confirmed from `BOQItemService` before writing the prefill logic: `description ← product.name`, `unit ← product.unit`, `rate ← product.defaultSellingRate` (**not** `defaultCost`), `tax ← product.taxRate`.
+- All financial totals (subtotal/discount/tax/grand total) come from the backend's `GET .../boq/summary` — zero tax/discount/rounding math computed on the frontend. Per-section totals were deliberately **not** built (the backend provides none), to avoid any frontend financial computation whatsoever; only plain item *counts* (integers) are shown at the section level.
+- Section and item row actions use plain inline icon buttons rather than a `DropdownMenu` — both a better fit for a fast, dense estimation workspace and a deliberate way to avoid the previously-diagnosed Radix DropdownMenu/Select/Popover jsdom hang for this module's own new code.
+- Full lifecycle (project/category/subcategory/product → BOQ → section → product-referenced item → summary → edit section/item → 409 delete-guard → delete → cleanup) verified live against the running backend.
+- Frontend tests: 79 passed, 6 skipped — **zero new skips**. Every BOQ-specific interaction (including section/item delete, product-combobox integration, decimal-string preservation, summary refetch after mutation, and mobile item-card rendering) is fully automated; none required a skip.
+
 ## Not Yet Started
 
-BOQ, Quotations, Invoices, Payments, Expenses, Documents, Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment.
+Quotations, Invoices, Payments, Expenses, Documents, Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment.
