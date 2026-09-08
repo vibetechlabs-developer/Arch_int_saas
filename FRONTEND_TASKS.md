@@ -161,6 +161,15 @@ Commit: `a767a6e` (`feat(frontend): implement project BOQ workspace`).
 - Full lifecycle (client → project → register a document → retrieve → list → re-upload to the same default target and confirm version increments to 2 → missing-`fileUrl` 400 → confirmed no PATCH exists (403) → delete → confirmed 404 → cleanup) verified live against the running backend.
 - Frontend tests: 190 passed, 6 skipped — **zero new skips**.
 
+## Phase 10 — Activity Log
+
+| Task | Description | Status |
+|---|---|---|
+| F21 | Activity Log | **Blocked** |
+| F22 | Project Activity Timeline | **Blocked** |
+
+**Why blocked (full detail in the ACTIVITY FRONTEND REPORT delivered with this entry):** the only backend surface (`GET /activity-logs`, built directly over the `AuditLog` table — there is no separate, safer Activity model) has no `project_id` field at all, so there is no way to query "everything that happened in project X" — only one exact `(entityType, entityId)` pair at a time, or the whole tenant. It also carries no entity display name (a bare `entityId` UUID is all that identifies a non-project entity) and returns internal audit fields (`ipAddress`, `requestId`, raw `before/afterState` JSON) unredacted. Worse, its permission code (`audit.view`) is seeded **only to Owner and Admin** in `permission_catalog.py` — Project Manager, Designer, Accountant, and Sales (the roles who actually live inside Project Workspace) don't hold it, so the tab as specified would 403 for its intended everyday audience. Dashboard's existing "Recent Activity" section already proves the *safe-subset rendering* half of this is solvable (it renders only `actorUserName`/`action`/`entityType`/`createdAt` from this same shape) — the blocker is purely the missing project-scoping and the admin-only gate, not an inability to format the data safely. No Django was modified; no workaround (client-side aggregation across per-entity queries, or parsing internal fields) was attempted. Recommended smallest backend change: add a `project_id` field to `AuditLog` (populated the same way `entity_type`/`entity_id` already are) plus a `GET /projects/{id}/activity` endpoint gated by an ordinary project permission (e.g. `project.view`) that also resolves a human-readable entity label instead of a bare UUID.
+
 ## Not Yet Started
 
-Activity Log, Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment.
+Reports, Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment. Activity Log is blocked (see above), not merely deferred.
