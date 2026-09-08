@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, UserRound, Users } from 'lucide-react';
+import { FolderKanban, LayoutDashboard, UserRound, Users } from 'lucide-react';
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 
 export interface CommandPaletteImplProps {
@@ -35,11 +35,19 @@ export function CommandPaletteImpl({ open, onOpenChange }: CommandPaletteImplPro
             <Users className="size-4" />
             Clients
           </CommandItem>
+          <CommandItem onSelect={() => go('/projects')}>
+            <FolderKanban className="size-4" />
+            Projects
+          </CommandItem>
         </CommandGroup>
         <CommandGroup heading="Create">
           <CommandItem onSelect={() => go('/clients?new=true')}>
             <UserRound className="size-4" />
             New Client
+          </CommandItem>
+          <CommandItem onSelect={() => go('/projects?new=true')}>
+            <FolderKanban className="size-4" />
+            New Project
           </CommandItem>
         </CommandGroup>
         <CommandEmpty>Nothing found yet — more modules become searchable as they ship.</CommandEmpty>

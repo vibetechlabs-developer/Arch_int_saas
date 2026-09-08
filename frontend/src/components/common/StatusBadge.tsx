@@ -31,7 +31,7 @@ const STATUS_SEMANTICS: Record<string, Semantic> = {
   submitted: 'info',
 };
 
-function humanize(status: string): string {
+export function humanizeStatus(status: string): string {
   return status
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -41,5 +41,5 @@ function humanize(status: string): string {
 export function StatusBadge({ status }: { status: string }) {
   const key = status.toLowerCase();
   const variant = STATUS_SEMANTICS[key] ?? 'neutral';
-  return <Badge variant={variant}>{humanize(key)}</Badge>;
+  return <Badge variant={variant}>{humanizeStatus(key)}</Badge>;
 }

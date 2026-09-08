@@ -11,6 +11,10 @@ import LoginPage from '@/pages/LoginPage';
 import DashboardPage from '@/pages/DashboardPage';
 import ClientsListPage from '@/pages/clients/ClientsListPage';
 import ClientDetailPage from '@/pages/clients/ClientDetailPage';
+import ProjectsListPage from '@/pages/projects/ProjectsListPage';
+import ProjectWorkspaceLayout from '@/pages/projects/ProjectWorkspaceLayout';
+import ProjectOverviewTab from '@/pages/projects/ProjectOverviewTab';
+import ProjectTeamTab from '@/pages/projects/ProjectTeamTab';
 
 const App: React.FC = () => {
   return (
@@ -31,6 +35,12 @@ const App: React.FC = () => {
                           <Route path="/dashboard" element={<DashboardPage />} />
                           <Route path="/clients" element={<ClientsListPage />} />
                           <Route path="/clients/:clientId" element={<ClientDetailPage />} />
+                          <Route path="/projects" element={<ProjectsListPage />} />
+                          <Route path="/projects/:projectId" element={<ProjectWorkspaceLayout />}>
+                            <Route index element={<Navigate to="overview" replace />} />
+                            <Route path="overview" element={<ProjectOverviewTab />} />
+                            <Route path="team" element={<ProjectTeamTab />} />
+                          </Route>
                           <Route path="*" element={<Navigate to="/dashboard" replace />} />
                         </Routes>
                       </Shell>

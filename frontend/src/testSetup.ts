@@ -43,3 +43,34 @@ if (typeof window.PointerEvent === 'undefined') {
   // @ts-expect-error jsdom has no native PointerEvent constructor
   window.PointerEvent = PointerEventPolyfill;
 }
+
+// cmdk (the Combobox/Command palette's underlying library) uses
+// ResizeObserver to auto-size its list; jsdom has no implementation at all.
+if (typeof window.ResizeObserver === 'undefined') {
+  class ResizeObserverPolyfill {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  window.ResizeObserver = ResizeObserverPolyfill;
+}
+
+// jsdom's layout engine always returns an all-zero rect. Radix's Popper
+// positioning (Popover/Select/DropdownMenu) treats a real, stable, non-zero
+// rect as a signal that measurement has settled — with everything stuck at
+// zero, its measurement effect never stabilizes and a real click through
+// an open popover hangs indefinitely (a genuine jsdom-only livelock, not a
+// bug in the component). A fixed plausible size resolves it immediately.
+Element.prototype.getBoundingClientRect = () => ({
+  width: 120,
+  height: 40,
+  top: 0,
+  left: 0,
+  right: 120,
+  bottom: 40,
+  x: 0,
+  y: 0,
+  toJSON() {
+    return this;
+  },
+});

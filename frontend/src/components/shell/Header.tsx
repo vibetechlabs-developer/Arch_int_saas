@@ -1,5 +1,6 @@
 import { Bell, LogOut, Menu, Moon, Search, Sun, User as UserIcon } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useMatch, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -14,6 +15,8 @@ import { QuickCreateMenu } from './QuickCreateMenu';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/theme/ThemeProvider';
 import { NAV_GROUPS } from './navConfig';
+import { projectKeys } from '@/lib/queryKeys';
+import type { Project } from '@/lib/api/projects';
 
 export interface HeaderProps {
   onOpenCommandPalette: () => void;
@@ -32,18 +35,34 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
   const { isDark, toggleTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
-  // Exact match first, then the longest nav path that's a parent of the
-  // current route (e.g. /clients/:id under the "Clients" nav item) — a
-  // detail page itself carries the specific title in its own PageHeader,
-  // so the top bar staying at the module label is a deliberate choice,
-  // not a fallback bug.
-  const currentItem =
-    ALL_NAV_ITEMS.find((item) => item.path === location.pathname) ??
-    ALL_NAV_ITEMS.filter((item) => location.pathname.startsWith(`${item.path}/`)).sort(
-      (a, b) => b.path.length - a.path.length,
-    )[0];
-  const pageTitle = currentItem?.label ?? 'INT Projects';
+  // `useMatch` works from anywhere in the tree (it matches against the
+  // current location directly), unlike `useParams` — Header is a sibling
+  // of the routed content under Shell, not a descendant of it, so it has
+  // no other way to know the current :projectId.
+  const projectMatch = useMatch('/projects/:projectId/*');
+
+  let breadcrumb: string[];
+  if (projectMatch?.params.projectId) {
+    const cached = queryClient.getQueryData<Project>(projectKeys.detail(projectMatch.params.projectId));
+    breadcrumb = ['Projects'];
+    // Only append once the real name has loaded — never flash the raw UUID.
+    if (cached?.name) breadcrumb.push(cached.name);
+    if (cached?.name && location.pathname.endsWith('/team')) breadcrumb.push('Team');
+  } else {
+    // Exact match first, then the longest nav path that's a parent of the
+    // current route (e.g. /clients/:id under the "Clients" nav item) — a
+    // detail page itself carries the specific title in its own PageHeader,
+    // so the top bar staying at the module label is a deliberate choice,
+    // not a fallback bug.
+    const currentItem =
+      ALL_NAV_ITEMS.find((item) => item.path === location.pathname) ??
+      ALL_NAV_ITEMS.filter((item) => location.pathname.startsWith(`${item.path}/`)).sort(
+        (a, b) => b.path.length - a.path.length,
+      )[0];
+    breadcrumb = [currentItem?.label ?? 'INT Projects'];
+  }
 
   const handleLogout = async () => {
     await logout();
@@ -62,7 +81,14 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
         >
           <Menu />
         </Button>
-        <h1 className="text-h4 text-text-primary">{pageTitle}</h1>
+        <h1 className="flex items-center gap-1.5 text-h4 text-text-primary">
+          {breadcrumb.map((crumb, i) => (
+            <span key={i} className="flex items-center gap-1.5">
+              {i > 0 && <span className="text-text-tertiary">/</span>}
+              <span className={i < breadcrumb.length - 1 ? 'text-text-secondary' : undefined}>{crumb}</span>
+            </span>
+          ))}
+        </h1>
       </div>
 
       <div className="flex items-center gap-1.5">

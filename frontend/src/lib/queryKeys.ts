@@ -8,3 +8,17 @@ export const clientKeys = {
   list: (params: Record<string, unknown>) => [...clientKeys.lists(), params] as const,
   detail: (id: string) => [...clientKeys.all, 'detail', id] as const,
 };
+
+export const projectKeys = {
+  all: ['projects'] as const,
+  lists: () => [...projectKeys.all, 'list'] as const,
+  list: (params: Record<string, unknown>) => [...projectKeys.lists(), params] as const,
+  details: () => [...projectKeys.all, 'detail'] as const,
+  detail: (id: string) => [...projectKeys.details(), id] as const,
+  team: (id: string) => [...projectKeys.detail(id), 'team'] as const,
+};
+
+export const membershipKeys = {
+  all: ['companyMemberships'] as const,
+  search: (query: string) => [...membershipKeys.all, 'search', query] as const,
+};
