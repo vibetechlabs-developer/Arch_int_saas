@@ -1,8 +1,8 @@
 from django.contrib.auth import get_user_model
-from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from apps.authentication.tests.base import ThrottleIsolatedTestCase
 from apps.authentication.tokens import CompanyUserAccessToken
 from apps.company.models import Company, CompanyStatus
 from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role
@@ -10,7 +10,7 @@ from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role
 User = get_user_model()
 
 
-class MyMembershipsViewTestCase(TestCase):
+class MyMembershipsViewTestCase(ThrottleIsolatedTestCase):
     """
     Integration tests for `GET /auth/memberships` (BE-053) -- the
     workspace-switching endpoint flagged as missing during the frontend

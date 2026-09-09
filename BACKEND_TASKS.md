@@ -1339,6 +1339,38 @@ Depends On
 | BE-059 | Data-integrity enums: `Company.currency` (ISO-4217-validated choices), `Payment.method`, `Expense.category`/`vendor`/`payment_method`, and `Project.priority` (already a `CharField`, deliberately left free-text per an earlier Backend Lead decision since `01_Business/FRS.md §10` names the field but never defines its values — re-confirm that decision before constraining it) — pending confirmation of the exact allowed value sets (flagged, not invented). |
 | BE-068 | Split `GET /reports/dashboard`'s payload into operational vs. financial fields, gating only the latter with `report.financial_access` — deferred from BE-054 §6 (dashboard currently gated with `report.view` only, so any role with dashboard access sees the financial KPIs too). |
 | BE-069 | Add a stable, non-user-editable identifier to `Role` (e.g. a `system_key` field, never exposed via `/roles`) so default-role reconciliation migrations (`0006`–`0008`) stop matching by exact display `name` — a real forward risk once customer-created roles exist, flagged during BE-054's migration safety review. |
+| BE-070 | Fix `apps.authentication` throttle-cache test-isolation leak reproducible under `manage.py test` (13 failures + 3 errors) — see writeup below. | **Review** |
+
+#### BE-070 — Authentication Throttle Test-Isolation Fix — 2026-09-09
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** P0 (test-infrastructure stabilization)
+
+**Owner:** Backend Team
+
+**Problem:** A prior completion audit reported 13 failures + 3 errors in `apps.authentication`'s test suite, concentrated in `test_throttling.py`, `test_login.py`, `test_forgot_password.py`, `test_reset_password.py`, claimed reproducible in both a full-suite run and an isolated `apps.authentication` run.
+
+**Reproduction:** Did not reproduce via `pytest apps/authentication` (70 passed, 0 failed, both isolated and as part of the full suite) — but reproduced **exactly** via `python manage.py test apps.authentication --noinput` (13 failures + 3 errors, identical test names, identical assertion lines, e.g. `AssertionError: 429 != 200` on `test_valid_login_returns_token_pair_and_user_profile`).
+
+**Root cause:** `backend/conftest.py` already has an autouse `_clear_throttle_cache` pytest fixture (added Sprint 1, commit `4990ceab`) that clears Django's cache before/after every test — this is why `pytest` runs were always clean. Pytest fixtures are a pytest-only mechanism, however: `conftest.py` is never read and `@pytest.fixture` never executes under Django's own `manage.py test` runner. Every `TestCase` in `apps/authentication/tests/` inherited bare `django.test.TestCase` with no isolation of its own, so under `manage.py test` specifically, `ScopedRateThrottle`'s cache-backed request counters (keyed `throttle_{scope}_{ident}`, `ident` = client IP for these anonymous pre-auth endpoints, which the Django test client always presents identically) accumulated across every test method and file in the run, eventually tripping 429 on ordinary tests that expected 200/401/400 and shifting the intentional throttling tests' own loop boundaries.
+
+**Affected cache keys/scopes:** `throttle_auth_login_<test-client-ip>`, `throttle_auth_forgot_password_<ip>`, `throttle_auth_reset_password_<ip>`, `throttle_auth_refresh_<ip>`, `throttle_platform_auth_login_<ip>` — all five throttled auth scopes, shared across every TestCase in the app within one process.
+
+**Fix:** New `apps/authentication/tests/base.py::ThrottleIsolatedTestCase(TestCase)`, clearing `django.core.cache.cache` from `_pre_setup`/`_post_teardown` (the same hooks Django's own `SimpleTestCase` uses for its DB-transaction wrapping) rather than `setUp`/`tearDown` — this fires unconditionally before/after every test method regardless of whether a subclass's own `setUp`/`tearDown` calls `super()` (none of this app's existing ones do), and executes identically under both `pytest` and `manage.py test` since it relies on no pytest-specific mechanism. All 9 TestCases in `apps/authentication/tests/` now inherit it instead of bare `TestCase`. The pre-existing pytest conftest fixture is left in place (harmless, and still the correct backstop for any other app's tests that might one day call a throttled endpoint under `pytest`).
+
+**Why this is test-only:** No production file changed. `config/settings.py`'s `DEFAULT_THROTTLE_CLASSES`/`DEFAULT_THROTTLE_RATES`, every view's `throttle_scope`, and `ScopedRateThrottle` itself are untouched — the fix only changes which base class test files inherit from.
+
+**Regression test:** `apps/authentication/tests/test_throttle_isolation.py` (new) — two methods that each independently drain the same `auth_forgot_password` scope from a cold start and assert the identical boundary (5 allowed, 6th throttled). Neither depends on which runs first; before this fix, whichever ran second would have inherited the first's exhausted counter and failed at an earlier call.
+
+**Verification:**
+- `manage.py test apps.authentication --noinput`: run 1 — 70 passed, OK. Run 2 — 70 passed, OK. Run 3 (after adding the regression test) — 72 passed, OK.
+- `pytest apps/authentication`: 70 passed (unaffected — was already green; confirms no regression on the runner that already worked).
+- `git diff --check`: clean. Production code diff: zero lines — only `apps/authentication/tests/*` touched (9 files switched base class + 2 new files).
+
+**Files changed:** `apps/authentication/tests/base.py` (new), `apps/authentication/tests/test_throttle_isolation.py` (new), `apps/authentication/tests/{test_login,test_logout,test_me,test_memberships,test_platform_auth,test_refresh,test_reset_password,test_forgot_password,test_throttling}.py` (base class swap only).
+
+**Full backend suite** (single serial `pytest` run, no `--reuse-db`): **1091 passed, 1 failed**, 6028s (1h40m). The one failure — `apps.users.tests.test_membership_management_views.CompanyMembershipViewSetTestCase.test_platform_admin_can_still_call_endpoints`, `AssertionError: 401 != 200` (`InvalidToken`) — is in a completely unrelated app/file (JWT token validation, not throttling/cache) and re-ran clean in isolation (19/19 passed, 77s). Classified **ENVIRONMENTAL**: consistent with the previously-documented pattern of isolated, non-reproducible failures surfacing only under very long sustained full-suite runs (a shorter prior run showed none, a 40-minute run previously showed ~21 unrelated `setUpClass` errors that also vanished on isolated re-run). Not a regression from this task — no code this task touches is imported by that test file.
 
 **P2–P4 — Phase 3–5 (backlog only, not started, per `CLAUDE.md`'s explicit deferral)**
 

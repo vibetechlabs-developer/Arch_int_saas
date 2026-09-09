@@ -3,18 +3,18 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core import mail
-from django.test import TestCase
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.audit.models import AuditLog
 from apps.authentication.models import PasswordResetToken
+from apps.authentication.tests.base import ThrottleIsolatedTestCase
 
 User = get_user_model()
 
 
-class ForgotPasswordTestCase(TestCase):
+class ForgotPasswordTestCase(ThrottleIsolatedTestCase):
     """
     Test suite for POST /auth/forgot-password endpoint.
     Verifies user enumeration prevention, token generation, hashing, and email dispatch.

@@ -1,12 +1,13 @@
 from django.contrib.auth import get_user_model
-from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
+
+from apps.authentication.tests.base import ThrottleIsolatedTestCase
 
 User = get_user_model()
 
 
-class AuthEndpointThrottlingTestCase(TestCase):
+class AuthEndpointThrottlingTestCase(ThrottleIsolatedTestCase):
     """
     DRF ScopedRateThrottle protects the five pre-auth endpoints most
     exposed to brute-force/enumeration abuse. DEFAULT_THROTTLE_RATES
@@ -17,9 +18,9 @@ class AuthEndpointThrottlingTestCase(TestCase):
     (already wired through custom_exception_handler's existing Throttled
     mapping — no response-shape change needed for this to work).
 
-    conftest.py's autouse _clear_throttle_cache fixture resets the
-    cache-backed throttle state before/after every test, so these counts
-    are exact and don't leak between test methods.
+    ThrottleIsolatedTestCase resets the cache-backed throttle state
+    before/after every test, so these counts are exact and don't leak
+    between test methods or test files, regardless of test runner.
     """
 
     def setUp(self):

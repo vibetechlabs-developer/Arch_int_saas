@@ -1,18 +1,18 @@
 from datetime import timedelta
 from django.contrib.auth import get_user_model
-from django.test import TestCase
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.audit.models import AuditLog
 from apps.authentication.models import PasswordResetToken
+from apps.authentication.tests.base import ThrottleIsolatedTestCase
 from apps.authentication.tokens import CompanyUserRefreshToken
 
 User = get_user_model()
 
 
-class ResetPasswordTestCase(TestCase):
+class ResetPasswordTestCase(ThrottleIsolatedTestCase):
     """
     Test suite for POST /auth/reset-password endpoint.
     Verifies token validation, password complexity, atomic password update,

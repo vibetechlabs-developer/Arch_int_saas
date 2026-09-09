@@ -1,15 +1,15 @@
 from datetime import timedelta
 from django.contrib.auth import get_user_model
-from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from apps.authentication.tests.base import ThrottleIsolatedTestCase
 from apps.authentication.tokens import CompanyUserRefreshToken
 
 User = get_user_model()
 
 
-class MeEndpointTestCase(TestCase):
+class MeEndpointTestCase(ThrottleIsolatedTestCase):
     """
     Test suite for GET /auth/me endpoint.
     """
