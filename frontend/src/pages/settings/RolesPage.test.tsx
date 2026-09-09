@@ -2,7 +2,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test-utils';
 import RolesPage from '@/pages/settings/RolesPage';
-import { getRoles, createRole, deleteRole, assignRolePermissions, type Role } from '@/lib/api/roles';
+import { getRoles, createRole, deleteRole, getRolePermissions, assignRolePermissions, type Role } from '@/lib/api/roles';
 import { getPermissions } from '@/lib/api/permissions';
 import { ApiError } from '@/lib/api/client';
 
@@ -20,6 +20,7 @@ jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 const mockedGetRoles = getRoles as jest.Mock;
 const mockedCreateRole = createRole as jest.Mock;
 const mockedDeleteRole = deleteRole as jest.Mock;
+const mockedGetRolePermissions = getRolePermissions as jest.Mock;
 const mockedAssignPermissions = assignRolePermissions as jest.Mock;
 const mockedGetPermissions = getPermissions as jest.Mock;
 
@@ -48,18 +49,27 @@ beforeEach(() => {
     { id: 'p1', code: 'invoice.view', module: 'invoice', action: 'view', description: 'View invoices.', createdAt: '' },
     { id: 'p2', code: 'invoice.create', module: 'invoice', action: 'create', description: 'Create invoices.', createdAt: '' },
   ]);
+  // A newly created role genuinely has zero grants yet — this mirrors
+  // the real backend response for a role no one has assigned permissions
+  // to. ManagePermissionsDialog.test.tsx covers pre-checking an existing
+  // role's real (non-empty) grants in isolation.
+  mockedGetRolePermissions.mockResolvedValue({ roleId: 'r2', permissionCodes: [] });
 });
 
 // KNOWN ENVIRONMENT LIMITATION (see MembersPage.test.tsx's identical note
 // for full detail): a bare Radix DropdownMenu hangs indefinitely on
 // userEvent.click of its trigger in this Jest/jsdom setup, confirmed via
 // isolated minimal reproduction independent of any app code. This page's
-// row-level "Role actions" DropdownMenu (Edit/Delete) is therefore not
-// exercised here — those two flows are untested pending a jsdom/Radix
-// testing-infra fix or real browser QA. Every flow that doesn't require
-// opening that menu IS covered, including the full create-role →
-// assign-permissions chain (Dialog + Checkbox, no Select/DropdownMenu
-// involved, so it's unaffected).
+// row-level "Role actions" DropdownMenu (Manage permissions/Edit/Delete)
+// is therefore not exercised here — those three flows are untested via
+// RolesPage pending a jsdom/Radix testing-infra fix or real browser QA.
+// ManagePermissionsDialog.test.tsx covers the Manage Permissions flow's
+// actual behavior in isolation instead (opened via props, not a
+// DropdownMenu click — see that file for pre-check/isolation/persistence
+// coverage). Every flow here that doesn't require opening that menu IS
+// covered, including the full create-role → manage-permissions chain
+// (Dialog + Checkbox, no Select/DropdownMenu involved, so it's
+// unaffected).
 describe('RolesPage', () => {
   it('renders the role list', async () => {
     mockList([sampleRole]);
@@ -76,16 +86,7 @@ describe('RolesPage', () => {
     expect((await screen.findAllByText('No roles yet')).length).toBeGreaterThan(0);
   });
 
-  it('documents the permission-editing blocker so it is never silently missing', async () => {
-    mockList([sampleRole]);
-    renderWithProviders(<RolesPage />);
-
-    expect(
-      await screen.findByText(/can't currently read a role's existing permission grants/i),
-    ).toBeInTheDocument();
-  });
-
-  it('creates a role, then chains into the initial permission-assignment step', async () => {
+  it('creates a role, then chains into the manage-permissions step', async () => {
     mockList([]);
     mockedCreateRole.mockResolvedValue({ ...sampleRole, id: 'r2', name: 'Site Supervisor' });
     renderWithProviders(<RolesPage />);
@@ -96,7 +97,10 @@ describe('RolesPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /create role/i }));
 
     await waitFor(() => expect(mockedCreateRole).toHaveBeenCalledWith({ name: 'Site Supervisor', description: '', isActive: true }));
-    expect(await screen.findByText('Assign permissions')).toBeInTheDocument();
+    expect(await screen.findByText('Manage permissions')).toBeInTheDocument();
+    // A brand-new role's real grants are genuinely empty — fetched from
+    // the server, not assumed blank.
+    await waitFor(() => expect(mockedGetRolePermissions).toHaveBeenCalledWith('r2'));
   });
 
   it('assigns selected permission codes to a newly created role', async () => {
@@ -110,12 +114,12 @@ describe('RolesPage', () => {
     await userEvent.type(screen.getByLabelText('Role name'), 'Site Supervisor');
     await userEvent.click(screen.getByRole('button', { name: /create role/i }));
 
-    await screen.findByText('Assign permissions');
+    await screen.findByText('Manage permissions');
     // Clicks the rendered description text inside the <Label for="perm-...">
     // wrapping the checkbox — the code itself ("invoice.view") is only used
     // as the id/htmlFor pairing, never rendered as visible text.
     await userEvent.click(await screen.findByText('View invoices.'));
-    await userEvent.click(screen.getByRole('button', { name: /^assign/i }));
+    await userEvent.click(screen.getByRole('button', { name: /save changes/i }));
 
     await waitFor(() => expect(mockedAssignPermissions).toHaveBeenCalledWith('r2', ['invoice.view']));
   });

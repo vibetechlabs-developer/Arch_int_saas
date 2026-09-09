@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { type ColumnDef, type SortingState } from '@tanstack/react-table';
-import { Info, MoreHorizontal, Pencil, ShieldCheck, Trash2 } from 'lucide-react';
+import { Info, KeyRound, MoreHorizontal, Pencil, ShieldCheck, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable } from '@/components/common/DataTable';
 import { ErrorState } from '@/components/common/ErrorState';
@@ -10,7 +10,6 @@ import { RestrictedState } from '@/components/common/RestrictedState';
 import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,7 +21,7 @@ import { deleteRole, getRoles, type Role, type RoleOrdering } from '@/lib/api/ro
 import { roleKeys } from '@/lib/queryKeys';
 import { formatDate } from '@/lib/format';
 import { RoleFormSheet } from '@/components/settings/RoleFormSheet';
-import { AssignInitialPermissionsDialog } from '@/components/settings/AssignInitialPermissionsDialog';
+import { ManagePermissionsDialog } from '@/components/settings/ManagePermissionsDialog';
 
 function sortingToOrdering(sorting: SortingState): RoleOrdering {
   if (sorting.length === 0) return '-created_at';
@@ -37,7 +36,7 @@ export default function RolesPage() {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'name', desc: false }]);
   const [formOpen, setFormOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<Role | undefined>(undefined);
-  const [assignPermissionsFor, setAssignPermissionsFor] = useState<Role | null>(null);
+  const [managePermissionsFor, setManagePermissionsFor] = useState<Role | null>(null);
   const [deletingRole, setDeletingRole] = useState<Role | null>(null);
 
   const ordering = sortingToOrdering(sorting);
@@ -106,6 +105,10 @@ export default function RolesPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setManagePermissionsFor(row.original)}>
+                <KeyRound className="size-4" />
+                Manage permissions
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => {
                   setEditingRole(row.original);
@@ -145,14 +148,6 @@ export default function RolesPage() {
         }
       />
 
-      <Alert variant="info">
-        <AlertDescription>
-          Editing permissions for an existing role isn't available yet — the platform can't currently read a role's
-          existing permission grants, so a blind update could accidentally revoke access. Permissions can only be
-          assigned right after creating a new role. See the permission catalog for reference.
-        </AlertDescription>
-      </Alert>
-
       <DataTable
         columns={columns}
         data={data?.items ?? []}
@@ -183,13 +178,13 @@ export default function RolesPage() {
         open={formOpen}
         onOpenChange={setFormOpen}
         role={editingRole}
-        onCreated={(role) => setAssignPermissionsFor(role)}
+        onCreated={(role) => setManagePermissionsFor(role)}
       />
 
-      <AssignInitialPermissionsDialog
-        open={!!assignPermissionsFor}
-        onOpenChange={(open) => !open && setAssignPermissionsFor(null)}
-        role={assignPermissionsFor}
+      <ManagePermissionsDialog
+        open={!!managePermissionsFor}
+        onOpenChange={(open) => !open && setManagePermissionsFor(null)}
+        role={managePermissionsFor}
       />
 
       <ConfirmationDialog

@@ -44,6 +44,10 @@ export const roleKeys = {
   lists: () => [...roleKeys.all, 'list'] as const,
   list: (params: Record<string, unknown>) => [...roleKeys.lists(), params] as const,
   detail: (id: string) => [...roleKeys.all, 'detail', id] as const,
+  // GET /roles/{id}/permissions (BE-072) — a distinct resource from the
+  // role's own metadata above, so its cache entry can be invalidated
+  // independently after a permissions-only mutation.
+  permissions: (id: string) => [...roleKeys.all, 'permissions', id] as const,
 };
 
 // GET /permissions is a single global, unfiltered catalog — one cache

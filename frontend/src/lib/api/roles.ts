@@ -61,15 +61,24 @@ export async function deleteRole(id: string): Promise<void> {
   await apiClient.delete(`/roles/${id}`);
 }
 
-// PUT /roles/{id}/permissions is a full-replacement write with NO
-// corresponding read endpoint anywhere in the backend — there is no way to
-// fetch a role's *current* permission grants (RoleSerializer never includes
-// them, and there is no GET variant of this action). This function is
-// therefore only ever called from the "assign permissions to a
-// just-created role" flow, where "no permissions yet" is accurate rather
-// than assumed — never from an "edit an existing role's permissions" flow,
-// which would risk silently wiping real grants a blank checkbox UI can't
-// actually see.
+// PUT /roles/{id}/permissions is a full-replacement write — the caller
+// must submit the complete desired set, not a delta. Always pair a write
+// with a getRolePermissions() read first so the submitted set is built
+// from the role's real persisted grants, never a blank/guessed baseline.
 export async function assignRolePermissions(roleId: string, permissionCodes: string[]): Promise<Role> {
   return unwrap<Role>(apiClient.put(`/roles/${roleId}/permissions`, { permissionCodes }));
+}
+
+// GET /roles/{id}/permissions (BE-072) — this role's currently persisted
+// grants, sourced from RolePermission on the backend, never reconstructed
+// from role-name assumptions or default/seed data. Required before
+// opening any "edit this role's permissions" UI, so existing grants can
+// be pre-checked accurately instead of guessed.
+export interface RolePermissions {
+  roleId: string;
+  permissionCodes: string[];
+}
+
+export async function getRolePermissions(roleId: string): Promise<RolePermissions> {
+  return unwrap<RolePermissions>(apiClient.get(`/roles/${roleId}/permissions`));
 }
