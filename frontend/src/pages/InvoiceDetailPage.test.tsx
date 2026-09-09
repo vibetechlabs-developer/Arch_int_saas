@@ -23,8 +23,17 @@ jest.mock('@/lib/api/payments', () => ({
   ...jest.requireActual('@/lib/api/payments'),
   getPayments: jest.fn(),
   createPayment: jest.fn(),
+  voidPayment: jest.fn(),
 }));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
+jest.mock('@/lib/api/auth', () => ({
+  ...jest.requireActual('@/lib/api/auth'),
+  fetchMyMemberships: jest.fn(),
+}));
+jest.mock('@/lib/api/company', () => ({
+  ...jest.requireActual('@/lib/api/company'),
+  getCompany: jest.fn(),
+}));
 
 const mockedGetInvoice = getInvoice as jest.Mock;
 const mockedSend = sendInvoice as jest.Mock;
@@ -33,6 +42,9 @@ const mockedUpdate = updateInvoice as jest.Mock;
 const mockedGetQuotation = getQuotation as jest.Mock;
 const mockedGetPayments = getPayments as jest.Mock;
 const mockedCreatePayment = createPayment as jest.Mock;
+const mockedVoidPayment = jest.requireMock('@/lib/api/payments').voidPayment as jest.Mock;
+const mockedFetchMyMemberships = jest.requireMock('@/lib/api/auth').fetchMyMemberships as jest.Mock;
+const mockedGetCompany = jest.requireMock('@/lib/api/company').getCompany as jest.Mock;
 
 function makePayment(overrides: Partial<Payment> = {}): Payment {
   return {
@@ -70,6 +82,8 @@ function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
     dueDate: '2026-12-31',
     paymentTerms: '',
     status: 'draft',
+    paidAmount: '0.00',
+    outstandingAmount: '2400.00',
     notes: '',
     items: [{ id: 'i1', description: 'Modular switchboard', quantity: '2.00', unit: 'nos', rate: '1200.00', amount: '2400.00' }],
     createdAt: '2026-01-01T00:00:00Z',
@@ -119,8 +133,46 @@ function renderPage(id = 'inv1') {
 }
 
 describe('InvoiceDetailPage', () => {
-  beforeEach(() => mockedGetPayments.mockResolvedValue([]));
+  beforeEach(() => {
+    mockedGetPayments.mockResolvedValue([]);
+    mockedFetchMyMemberships.mockResolvedValue([
+      { companyId: 'c1', companyName: 'Studio One', status: 'active', roleName: 'Owner' },
+    ]);
+    mockedGetCompany.mockResolvedValue({
+      id: 'c1',
+      name: 'Studio One',
+      status: 'active',
+      currency: 'INR',
+      gstNumber: null,
+      settings: {},
+      createdAt: '',
+      updatedAt: '',
+    });
+  });
   afterEach(() => jest.clearAllMocks());
+
+  it("uses the company's real currency code to format every money figure, not a hardcoded one", async () => {
+    mockedGetCompany.mockResolvedValue({
+      id: 'c1',
+      name: 'Studio One',
+      status: 'active',
+      currency: 'USD',
+      gstNumber: null,
+      settings: {},
+      createdAt: '',
+      updatedAt: '',
+    });
+    mockedGetInvoice.mockResolvedValue(
+      makeInvoice({ total: '2400.00', paidAmount: '800.00', outstandingAmount: '1600.00' }),
+    );
+    renderPage();
+
+    await screen.findByText('Payment Summary');
+    expect(await screen.findByText('$800.00')).toBeInTheDocument();
+    expect(screen.getAllByText('$2,400.00').length).toBeGreaterThan(0);
+    expect(screen.getByText('$1,600.00')).toBeInTheDocument();
+    expect(screen.queryByText(/₹/)).not.toBeInTheDocument();
+  });
 
   it('renders billing lines and the financial summary using exact backend decimal strings', async () => {
     // DataTable-style dual desktop/mobile rendering means real values
@@ -142,13 +194,93 @@ describe('InvoiceDetailPage', () => {
     expect(screen.getByText('No notes provided.')).toBeInTheDocument();
   });
 
-  it('never renders a Paid or Outstanding figure, since the backend exposes no payment aggregate', async () => {
-    mockedGetInvoice.mockResolvedValue(makeInvoice());
+  function paymentSummaryScope() {
+    return within(screen.getByText('Payment Summary').closest('[class*="rounded"]') as HTMLElement);
+  }
+
+  it('renders a Payment Summary using the backend-authoritative paidAmount/outstandingAmount, not a recomputation', async () => {
+    mockedGetInvoice.mockResolvedValue(
+      makeInvoice({ status: 'partially_paid', total: '2400.00', paidAmount: '800.00', outstandingAmount: '1600.00' }),
+    );
+    // Deliberately mismatched against paidAmount -- proves the summary
+    // renders the backend field, never sum(payments): the payment row
+    // itself is 250.00, but Amount Paid must show 800.00.
+    mockedGetPayments.mockResolvedValue([makePayment({ amount: '250.00' })]);
     renderPage();
 
-    await screen.findAllByText('Modular switchboard');
-    expect(screen.queryByText('Paid')).not.toBeInTheDocument();
-    expect(screen.queryByText('Outstanding')).not.toBeInTheDocument();
+    await screen.findByText('Payment Summary');
+    expect(await paymentSummaryScope().findByText('₹800.00')).toBeInTheDocument();
+    const summary = paymentSummaryScope();
+    expect(summary.getByText('Invoice Total')).toBeInTheDocument();
+    expect(summary.getByText('Amount Paid')).toBeInTheDocument();
+    expect(summary.getByText('Balance Due')).toBeInTheDocument();
+    expect(summary.getByText('₹1,600.00')).toBeInTheDocument();
+    expect(summary.queryByText('₹250.00')).not.toBeInTheDocument();
+  });
+
+  it('shows a zero paidAmount and outstanding equal to total when no payments exist', async () => {
+    mockedGetInvoice.mockResolvedValue(makeInvoice({ total: '2400.00', paidAmount: '0.00', outstandingAmount: '2400.00' }));
+    renderPage();
+
+    await screen.findByText('Payment Summary');
+    expect(await paymentSummaryScope().findByText('₹0.00')).toBeInTheDocument();
+    expect(paymentSummaryScope().getAllByText('₹2,400.00').length).toBeGreaterThan(0);
+  });
+
+  it('shows a fully-paid invoice with zero Balance Due', async () => {
+    mockedGetInvoice.mockResolvedValue(
+      makeInvoice({ status: 'paid', total: '2400.00', paidAmount: '2400.00', outstandingAmount: '0.00' }),
+    );
+    renderPage();
+
+    await screen.findByText('Payment Summary');
+    expect(await paymentSummaryScope().findByText('₹0.00')).toBeInTheDocument();
+    expect(paymentSummaryScope().getAllByText('₹2,400.00').length).toBeGreaterThan(0);
+  });
+
+  it('shows the real overpaid amount with Balance Due floored at zero, never negative', async () => {
+    mockedGetInvoice.mockResolvedValue(
+      makeInvoice({ status: 'paid', total: '2400.00', paidAmount: '3000.00', outstandingAmount: '0.00' }),
+    );
+    renderPage();
+
+    await screen.findByText('Payment Summary');
+    expect(await paymentSummaryScope().findByText('₹3,000.00')).toBeInTheDocument();
+    expect(paymentSummaryScope().getByText('₹0.00')).toBeInTheDocument();
+    expect(screen.queryByText(/-₹/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Credit Balance')).not.toBeInTheDocument();
+  });
+
+  it('void payment refreshes the authoritative Invoice detail, rendering the backend-refetched aggregate', async () => {
+    mockedGetInvoice
+      .mockResolvedValueOnce(makeInvoice({ status: 'paid', total: '2400.00', paidAmount: '2400.00', outstandingAmount: '0.00' }))
+      .mockResolvedValueOnce(makeInvoice({ status: 'sent', total: '2400.00', paidAmount: '0.00', outstandingAmount: '2400.00' }));
+    mockedGetPayments.mockResolvedValue([makePayment({ amount: '2400.00' })]);
+    mockedVoidPayment.mockResolvedValue(undefined);
+    renderPage();
+
+    await screen.findByText('Payment Summary');
+    expect(await paymentSummaryScope().findByText('₹0.00')).toBeInTheDocument();
+
+    const [voidButton] = await screen.findAllByRole('button', { name: /void payment of 2400\.00/i });
+    await userEvent.click(voidButton);
+    await userEvent.click(screen.getByRole('button', { name: 'Void payment' }));
+
+    await waitFor(() => expect(mockedGetInvoice).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('Sent')).toBeInTheDocument();
+    expect((await paymentSummaryScope().findAllByText('₹2,400.00')).length).toBeGreaterThan(0);
+    expect(paymentSummaryScope().getByText('₹0.00')).toBeInTheDocument();
+  });
+
+  it('shows loading skeletons for the Payment Summary rather than a flash of ₹0 while the invoice is loading', async () => {
+    let resolveInvoice: (v: ReturnType<typeof makeInvoice>) => void = () => {};
+    mockedGetInvoice.mockReturnValue(new Promise((resolve) => (resolveInvoice = resolve)));
+    renderPage();
+
+    expect(screen.queryByText('Payment Summary')).not.toBeInTheDocument();
+
+    resolveInvoice(makeInvoice());
+    expect(await screen.findByText('Payment Summary')).toBeInTheDocument();
   });
 
   it('shows Edit and Send for a draft invoice, but not Cancel-only states', async () => {

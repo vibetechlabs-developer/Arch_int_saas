@@ -35,6 +35,8 @@ function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
     dueDate: null,
     paymentTerms: '',
     status: 'sent',
+    paidAmount: '0.00',
+    outstandingAmount: '500.00',
     notes: '',
     items: [],
     createdAt: '2026-01-01T00:00:00Z',

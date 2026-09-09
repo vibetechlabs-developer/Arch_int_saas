@@ -71,6 +71,8 @@ const invoice: Invoice = {
   dueDate: null,
   paymentTerms: '',
   status: 'draft',
+  paidAmount: '0.00',
+  outstandingAmount: '0.00',
   notes: '',
   items: [],
   createdAt: '',
