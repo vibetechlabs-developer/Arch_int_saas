@@ -30,6 +30,30 @@ export async function fetchCurrentUser(): Promise<User> {
   return unwrap<User>(apiClient.get('/auth/me'));
 }
 
+// Mirrors backend/apps/authentication/serializers.py::MyMembershipSerializer
+// — deliberately minimal (no roleId, no permission codes): just enough to
+// label and select a workspace. Only active memberships are returned.
+export interface MyMembership {
+  companyId: string;
+  companyName: string;
+  status: string;
+  roleName: string | null;
+}
+
+export async function fetchMyMemberships(): Promise<MyMembership[]> {
+  return unwrap<MyMembership[]>(apiClient.get('/auth/memberships'));
+}
+
+// POST /auth/forgot-password requires only an email and works whether or
+// not the caller is currently authenticated — there is no separate
+// logged-in "change my password" endpoint, so the Security settings page
+// reuses this same flow, pre-targeted at the current user's own email.
+// Always returns the same generic message regardless of outcome
+// (anti-enumeration), throttled at 5/min.
+export async function requestPasswordReset(email: string): Promise<void> {
+  await apiClient.post('/auth/forgot-password', { email });
+}
+
 export async function logout(): Promise<void> {
   const refreshToken = tokenStore.getRefreshToken();
   tokenStore.clear();
