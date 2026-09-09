@@ -1340,6 +1340,45 @@ Depends On
 | BE-068 | Split `GET /reports/dashboard`'s payload into operational vs. financial fields, gating only the latter with `report.financial_access` — deferred from BE-054 §6 (dashboard currently gated with `report.view` only, so any role with dashboard access sees the financial KPIs too). |
 | BE-069 | Add a stable, non-user-editable identifier to `Role` (e.g. a `system_key` field, never exposed via `/roles`) so default-role reconciliation migrations (`0006`–`0008`) stop matching by exact display `name` — a real forward risk once customer-created roles exist, flagged during BE-054's migration safety review. |
 | BE-070 | Fix `apps.authentication` throttle-cache test-isolation leak reproducible under `manage.py test` (13 failures + 3 errors) — see writeup below. | **Review** |
+| BE-071 | Add User / secure company user onboarding — `POST /company-memberships/add-user`, self-suspend/self-remove safety guards — see writeup below. | **Review** |
+
+#### BE-071 — Add User / Secure Company User Onboarding — 2026-09-09
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** Critical (P0) — the previous "Invite Member" flow could only link an existing global User account; there was no way for an admin to bring a genuinely new person into the product at all.
+
+**Owner:** Backend Team
+
+**Problem:** `CompanyMembershipService.invite_member` (BE-052) is explicitly scoped to existing users only — its own docstring says so, and `CompanyMembershipRepository.get_user_by_email` raises 404 for an unknown email. There was no endpoint anywhere that could create a new `User` account as part of granting company access.
+
+**Model selected:** Admin-creates-user + email activation (not temporary passwords) — reuses the existing `PasswordResetToken`/`POST /auth/reset-password` machinery end to end rather than inventing a second credential mechanism. A brand-new `User` is created via `UserManager.create_user(..., password=None)`, which Django's own `set_unusable_password()` marks as unable to authenticate until a token-backed password is set — identical mechanically to a password reset, so no new token model or consuming endpoint was needed.
+
+**New endpoint:** `POST /company-memberships/add-user` (`CompanyMembershipViewSet.add_user`, a custom `@action` alongside the existing `assign-role`/`suspend`/`reactivate` actions — matches this viewset's own established routing convention). Request: `{email, name, roleId}` (`name` is `User`'s only name field — no first/last split exists on the model). Response: `{membership, userCreated, activationRequired}`. Permission code: `user.manage` (same code `invite_member`/`assign_role`/`suspend`/`reactivate` already use — no new permission code was introduced).
+
+**Identity resolution (`CompanyMembershipService.add_user`):**
+- Unknown email → new `User` created, `user_created=true`, activation email sent.
+- Existing email with no membership (or only a **revoked** one) in this company → the existing `User` is reused as-is (never duplicated); a revoked membership is **reactivated in place** (role updated, status → active) rather than blocked — a deliberate improvement over `invite_member`'s existing behavior of blocking on any non-deleted row regardless of status (documented, not silently changed there).
+- Existing **active/invited** membership → 409, identical to `invite_member`'s own conflict.
+- Existing user with a still-unusable password (e.g. a prior setup never completed) → treated as `activationRequired=true` and a fresh email is (re)sent, even though `user_created=false`.
+
+**Membership status:** created/reactivated as **ACTIVE**, not INVITED — confirmed by reading `PermissionService.get_permission_codes_for_membership` that nothing in this codebase ever automatically transitions `invited → active` (only the explicit `POST .../reactivate` action does), so an Add-User membership left at `invited` would be a silent permission dead-end even after the person finishes activation and logs in. Membership status answers "should this person have access now" (yes); the User's own `has_usable_password()` is the separate, correct gate on whether they can log in yet.
+
+**Transaction safety:** the whole flow (user lookup/creation, role validation, membership create/reactivate, audit log) runs inside `transaction.atomic()`; a `RuntimeError` forced mid-flow in tests (mocking `CompanyMembershipRepository.create`) confirms the newly-created `User` row does **not** persist — no orphan accounts on failure. `IntegrityError` from the DB's own unique constraint (two concurrent Add User calls for the same brand-new email) is translated to the same 409 `ConflictError` shape every other conflict in this service already uses, never a raw 500. True concurrent-request racing wasn't exercised (not practical in a synchronous `TestCase`) — only the constraint-translation path is unit-tested.
+
+**Privilege escalation:** identical guard to `invite_member`/`assign_role` — a non-platform-admin actor can never Add a User into a role granting permission codes they don't hold themselves.
+
+**Self-action safety (Phase 28, allowed as part of this task):** confirmed **no protection existed anywhere** against an admin suspending or removing their own membership. Added directly in `CompanyMembershipService._set_status` (suspend only — reactivating yourself is never dangerous) and `remove_member`: `actor_user.id == membership.user_id` now raises 403. **Last-owner protection was explicitly NOT attempted** — `Role` has no `system_key`/protected-role identity (BE-069, still open), so any "who is the current owner" check would have to match the free-text display name, exactly the fragile pattern BE-069 already flags as technical debt. Per the task's own instruction ("STOP and report the blocker instead of implementing fragile name matching"), this is reported, not built.
+
+**Audit logging:** reuses the existing `entity_type="company_membership"`/`AuditAction.CREATE` convention `invite_member` already uses (no new audit action was invented). `apps/audit/validators.py`'s allowlist gained one new field, `user_created` (boolean only — never a password/token/activation-link value), so the audit trail records whether the action created a new account or linked an existing one.
+
+**Email:** `AccountActivationEmailService` (new, `apps/authentication/services.py`, alongside the existing `PasswordResetEmailService`) sends to the real configured backend — this environment defaults to `django.core.mail.backends.console.EmailBackend` (dev-console only; confirmed via `config/settings.py`), so no external delivery is claimed anywhere in the response or UI copy.
+
+**Frontend gap closed as part of this task:** `/reset-password` had **no page at all** in the frontend despite the backend supporting `POST /auth/reset-password` since Sprint 1 — confirmed by a full read of `App.tsx`'s route table. New `SetPasswordPage.tsx` consumes the token (works identically for both a forgot-password email and this task's new activation email, since the backend endpoint treats them identically) — without it, a newly added user would have had no way to ever complete login.
+
+**Tests:** `apps/users/tests/test_add_user.py` (26 tests) — new-user creation, existing-user linking (no duplication, name preserved), unusable-password re-send, duplicate active/invited 409, revoked-membership reactivation, cross-tenant/inactive/missing role rejection, privilege escalation, multi-company membership for the same email, atomic rollback on failure, audit content (flag present, no secrets), and a full real end-to-end authentication lifecycle test (activation token extracted from the captured test email → `POST /auth/reset-password` → `POST /auth/login` → `GET /auth/memberships` confirms the new company). Plus `SelfActionSafetyTestCase` (3 tests) for the suspend/remove self-guards.
+
+**Validation:** `apps/users/tests/test_add_user.py`: **26 passed** (isolated run). Full `apps.users`/`apps.authentication`/`apps.audit` regression run in progress at time of writing — see the phase's final report for the completed count.
 
 #### BE-070 — Authentication Throttle Test-Isolation Fix — 2026-09-09
 

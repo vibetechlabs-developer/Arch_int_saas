@@ -230,6 +230,24 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 - No `Role.system_key`/protected-role flag (pre-existing `BE-069` debt) — Roles page never invents edit/delete restrictions from role names.
 - Role delete does not revoke access from members still holding it (soft-delete doesn't null the FK) — documented in code, not solved client-side.
 
+## Phase 13 — Add User Management
+
+| Task | Description | Status |
+|---|---|---|
+| F35 | Add User workflow (replaces Invite Member as the Members page's primary CTA) — new `AddUserSheet`, `/company-memberships/add-user` API wiring | Review |
+| F36 | Set Password page (`/reset-password`) — previously missing entirely; consumes the same token as both forgot-password recovery and Add User account activation | Review |
+
+**Implementation notes (F35/F36):**
+- "Invite Member" could only link an existing global User account (404 on an unknown email) — genuinely insufficient for a company admin who wants to bring a brand-new person into the product. `AddUserSheet` replaces it entirely (component and its unused test surface deleted, not left as dead/duplicate code) as the Members page's one primary CTA, per explicit product direction that Add User is a strict superset of Invite Member's capability.
+- New `POST /company-memberships/add-user` (backend contract audited directly, see `BACKEND_TASKS.md` BE-071): request `{email, name, roleId}`, response `{membership, userCreated, activationRequired}`. The backend decides whether a new account was created or an existing one linked — the frontend never needs to know or ask, matching Phase 20's explicit "don't reveal internal account state" guidance. Toast copy is conditional on the real `activationRequired` flag ("User added. An account setup email was sent." vs. "User added successfully.") — never a claim the frontend can't back with a real response field.
+- **Real, previously-missing gap closed**: no `/reset-password` route existed anywhere in the frontend despite the backend supporting token-based password reset since Sprint 1 (confirmed by a full read of the old route table) — without it, a newly added user had no way to ever complete account setup and log in. New `SetPasswordPage` serves both that gap and, incidentally, the pre-existing (also previously unbuilt) forgot-password recovery flow, since the backend endpoint treats both token sources identically.
+- Duplicate-membership 409 and per-field 400s are mapped onto the form the same way `CompanyMembershipInviteSerializer` errors already were, matching established convention (`RoleFormSheet`/old `InviteMemberSheet` pattern).
+- Command Palette's "Add Member" entry updated to "Add User" (`?addUser=true`, was `?invite=true`).
+- Frontend tests: 272 total, 266 passed, **6 skipped — unchanged baseline** (14 new tests added: `MembersPage.test.tsx` extended, new `SetPasswordPage.test.tsx`). Role-Select-driven submission of the Add User form itself remains untested here for the same documented Radix+jsdom environment limitation as Phase 12 — field validation (name/email/role all required, shown before any API call) is covered without needing to open the Select. TypeScript: PASS. Build: PASS.
+- Visual QA: **PENDING** — no browser tooling available in this environment.
+
+**Remaining gap:** self/last-owner safety is now backend-enforced (see BE-071) — the frontend's existing client-side disabling of Suspend/Remove on one's own row (Phase 12) is now a UX courtesy on top of real server enforcement, not the only protection.
+
 ## Not Yet Started
 
-Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Workspace/company switching (see Admin & Settings gaps above).
+Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Workspace/company switching (see Admin & Settings gaps above). Last-owner/protected-role safety (blocked on `Role.system_key`, BE-069).
