@@ -23,9 +23,11 @@ from apps.users.serializers import (
     RoleCreateSerializer,
     RoleListQuerySerializer,
     RolePermissionAssignSerializer,
+    RolePermissionsSerializer,
     RoleSerializer,
     RoleUpdateSerializer,
 )
+from apps.users.repositories import PermissionRepository
 from apps.users.services import CompanyMembershipService, PermissionService, RoleService
 
 
@@ -117,7 +119,14 @@ class RoleViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
     # BE-054: role.view covers read actions; role.manage covers every
     # mutation, including the permission-assignment action below — RBAC
     # configuring itself requires the same code as configuring roles
-    # generally, per the enforcement matrix.
+    # generally, per the enforcement matrix. retrieve_permissions (BE-072,
+    # GET /roles/{id}/permissions) is a read action, so it takes role.view
+    # like retrieve/list — distinct from permissions_action (PUT, same
+    # URL) which stays role.manage. Both action names are reachable
+    # because urls.py dispatches this one URL's GET/PUT to two different
+    # methods (the same manual-mapping pattern role_detail already uses
+    # for retrieve/partial_update/update/destroy), so permission_code_map
+    # can key them independently even though they share a path.
     permission_code_map = {
         "list": "role.view",
         "create": "role.manage",
@@ -125,6 +134,7 @@ class RoleViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         "partial_update": "role.manage",
         "update": "role.manage",
         "destroy": "role.manage",
+        "retrieve_permissions": "role.view",
         "permissions_action": "role.manage",
     }
 
@@ -248,6 +258,34 @@ class RoleViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
             data={"message": "Role deleted successfully."},
             request_id=request_id,
         )
+
+    @extend_schema(
+        summary="Get Role Permissions",
+        description=(
+            "Read this role's currently persisted permission-code grants (BE-072) — sourced from "
+            "RolePermission, never reconstructed from seed/default data. Required so an editor can "
+            "safely pre-check existing grants before a full-replacement PUT to this same URL."
+        ),
+        responses={status.HTTP_200_OK: RolePermissionsSerializer},
+        tags=["Role"],
+    )
+    @action(detail=True, methods=["get"], url_path="permissions")
+    def retrieve_permissions(self, request: Request, pk: str = None) -> Response:
+        """
+        `GET /roles/{id}/permissions` — companion read endpoint to
+        permissions_action's PUT on the same URL (urls.py dispatches GET
+        and PUT to these two different action methods). Tenant-scoped via
+        the identical get_role_by_id + check_object_permissions pattern
+        every other action in this viewset already uses.
+        """
+        role = RoleService.get_role_by_id(pk)
+        self.check_object_permissions(request, role)
+
+        codes = sorted(PermissionRepository.codes_for_role(role.id))
+        response_data = RolePermissionsSerializer({"role_id": role.id, "permissionCodes": codes}).data
+        request_id = getattr(request, "request_id", None)
+
+        return ApiResponse.success(data=response_data, request_id=request_id)
 
     @extend_schema(
         summary="Assign Role Permissions",

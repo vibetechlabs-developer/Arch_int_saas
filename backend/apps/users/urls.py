@@ -18,7 +18,7 @@ role_detail = RoleViewSet.as_view(
     }
 )
 
-role_permissions = RoleViewSet.as_view({"put": "permissions_action"})
+role_permissions = RoleViewSet.as_view({"get": "retrieve_permissions", "put": "permissions_action"})
 
 membership_list = CompanyMembershipViewSet.as_view(
     {

@@ -185,6 +185,18 @@ class RolePermissionAssignSerializer(serializers.Serializer):
     )
 
 
+class RolePermissionsSerializer(serializers.Serializer):
+    """
+    Output serializer for GET /roles/{id}/permissions (BE-072) — the
+    role's currently *persisted* grants, read from RolePermission via
+    PermissionRepository.codes_for_role, never reconstructed from
+    DEFAULT_ROLE_PERMISSIONS or any other seed/default data.
+    """
+
+    roleId = serializers.UUIDField(source="role_id", read_only=True)
+    permissionCodes = serializers.ListField(child=serializers.CharField(), read_only=True)
+
+
 class RoleSerializer(serializers.ModelSerializer):
     """
     Serializer for Role model with camelCase JSON fields.
