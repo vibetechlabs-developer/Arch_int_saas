@@ -8,6 +8,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { Shell } from '@/components/shell/Shell';
 import { queryClient } from '@/lib/queryClient';
 import LoginPage from '@/pages/LoginPage';
+import SetPasswordPage from '@/pages/SetPasswordPage';
 import DashboardPage from '@/pages/DashboardPage';
 import ReportsPage from '@/pages/ReportsPage';
 import ClientsListPage from '@/pages/clients/ClientsListPage';
@@ -45,6 +46,7 @@ const App: React.FC = () => {
             <BrowserRouter>
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/reset-password" element={<SetPasswordPage />} />
                 <Route
                   path="/*"
                   element={

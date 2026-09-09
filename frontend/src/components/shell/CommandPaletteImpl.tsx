@@ -77,9 +77,9 @@ export function CommandPaletteImpl({ open, onOpenChange }: CommandPaletteImplPro
             <Package className="size-4" />
             New Product
           </CommandItem>
-          <CommandItem onSelect={() => go('/settings/members?invite=true')}>
+          <CommandItem onSelect={() => go('/settings/members?addUser=true')}>
             <UserPlus className="size-4" />
-            Add Member
+            Add User
           </CommandItem>
         </CommandGroup>
         <CommandEmpty>Nothing found yet — more modules become searchable as they ship.</CommandEmpty>

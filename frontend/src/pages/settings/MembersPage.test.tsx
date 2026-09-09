@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test-utils';
 import MembersPage from '@/pages/settings/MembersPage';
@@ -58,7 +58,7 @@ beforeEach(() => {
 // left hanging or wrapped in it.skip() — every flow below that doesn't
 // require opening a Select or DropdownMenu IS covered. Untested here,
 // pending either a jsdom/Radix testing-infra fix or real browser QA:
-// submitting the invite form (role Select), and every DropdownMenu-gated
+// submitting the Add User form (role Select), and every DropdownMenu-gated
 // row action (change role, suspend, reactivate, remove, and Roles page's
 // edit/delete). A plausible root cause worth investigating separately:
 // package.json pins `jest@^29.7.0` against `jest-environment-jsdom@^30.5.1`
@@ -91,13 +91,40 @@ describe('MembersPage', () => {
     expect(screen.getByText('You do not have access to view members.')).toBeInTheDocument();
   });
 
-  it('opens the invite sheet automatically when navigated with ?invite=true', async () => {
+  it('opens the Add User sheet automatically when navigated with ?addUser=true', async () => {
     mockList([]);
-    renderWithProviders(<MembersPage />, { route: '/settings/members?invite=true' });
+    renderWithProviders(<MembersPage />, { route: '/settings/members?addUser=true' });
 
     expect(
-      await screen.findByText('Invites an existing user into your company by email. They must already have an account.'),
+      await screen.findByText('Add a person to this company and assign their access role.'),
     ).toBeInTheDocument();
+  });
+
+  it('opens the Add User sheet from the primary "Add user" CTA', async () => {
+    mockList([]);
+    renderWithProviders(<MembersPage />);
+
+    await screen.findAllByText('No team members yet');
+    await userEvent.click(screen.getAllByRole('button', { name: /add user/i })[0]);
+
+    expect(await screen.findByText('Add a person to this company and assign their access role.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Full name')).toBeInTheDocument();
+    expect(screen.getByLabelText('Email')).toBeInTheDocument();
+  });
+
+  it('rejects a blank name/email before ever calling the API', async () => {
+    mockList([]);
+    renderWithProviders(<MembersPage />, { route: '/settings/members?addUser=true' });
+
+    await screen.findByText('Add a person to this company and assign their access role.');
+    const dialog = within(screen.getByRole('dialog'));
+    await userEvent.click(dialog.getByRole('button', { name: 'Add user' }));
+
+    expect(await screen.findByText('Name is required')).toBeInTheDocument();
+    expect(screen.getByText('Email is required')).toBeInTheDocument();
+    // "Select a role" also appears as the Select's own placeholder text,
+    // so this asserts the error exists at all rather than singular-match.
+    expect(screen.getAllByText('Select a role').length).toBeGreaterThan(0);
   });
 
   it('opens the member detail sheet on row click', async () => {

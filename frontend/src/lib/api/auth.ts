@@ -54,6 +54,14 @@ export async function requestPasswordReset(email: string): Promise<void> {
   await apiClient.post('/auth/forgot-password', { email });
 }
 
+// POST /auth/reset-password — consumes a single-use token (from either
+// the forgot-password email or an Add User account-setup email; the
+// backend treats both identically) and sets a new password. No prior
+// authentication required.
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  await apiClient.post('/auth/reset-password', { token, newPassword });
+}
+
 export async function logout(): Promise<void> {
   const refreshToken = tokenStore.getRefreshToken();
   tokenStore.clear();

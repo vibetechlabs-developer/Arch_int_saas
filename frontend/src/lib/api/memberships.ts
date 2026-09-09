@@ -80,6 +80,29 @@ export async function inviteMember(input: InviteMemberInput): Promise<CompanyMem
   return unwrap<CompanyMembership>(apiClient.post('/company-memberships', input));
 }
 
+// POST /company-memberships/add-user — the genuine new-user onboarding
+// flow. Unlike inviteMember, this creates a brand-new User account when
+// the email has no existing one (never a duplicate when it does), and
+// sends an account-setup email reusing the same token flow as
+// forgot/reset-password. `name` is required here (not on invite) since a
+// new account needs one; ignored server-side when linking an existing
+// user, who keeps their own name.
+export interface AddUserInput {
+  email: string;
+  name: string;
+  roleId: string;
+}
+
+export interface AddUserResult {
+  membership: CompanyMembership;
+  userCreated: boolean;
+  activationRequired: boolean;
+}
+
+export async function addUser(input: AddUserInput): Promise<AddUserResult> {
+  return unwrap<AddUserResult>(apiClient.post('/company-memberships/add-user', input));
+}
+
 // Soft-deletes the CompanyMembership row only — never the global User
 // account. The same person keeps their login and any OTHER company's
 // membership; they simply lose access to this one company.

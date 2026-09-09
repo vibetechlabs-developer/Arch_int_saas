@@ -31,7 +31,7 @@ import {
 import { membershipKeys } from '@/lib/queryKeys';
 import { formatDate } from '@/lib/format';
 import { useAuth } from '@/context/AuthContext';
-import { InviteMemberSheet } from '@/components/settings/InviteMemberSheet';
+import { AddUserSheet } from '@/components/settings/AddUserSheet';
 import { ChangeMemberRoleDialog } from '@/components/settings/ChangeMemberRoleDialog';
 import { MemberDetailSheet } from '@/components/settings/MemberDetailSheet';
 
@@ -50,7 +50,7 @@ export default function MembersPage() {
   const [page, setPage] = useState(0);
   const [statusFilter, setStatusFilter] = useState<MembershipStatus | ''>('');
   const [sorting, setSorting] = useState<SortingState>([{ id: 'createdAt', desc: true }]);
-  const [inviteOpen, setInviteOpen] = useState(false);
+  const [addUserOpen, setAddUserOpen] = useState(false);
   const [roleDialogMember, setRoleDialogMember] = useState<CompanyMembership | null>(null);
   const [detailMember, setDetailMember] = useState<CompanyMembership | null>(null);
   const [suspendTarget, setSuspendTarget] = useState<CompanyMembership | null>(null);
@@ -58,10 +58,10 @@ export default function MembersPage() {
   const [removeTarget, setRemoveTarget] = useState<CompanyMembership | null>(null);
 
   useEffect(() => {
-    if (searchParams.get('invite') === 'true') {
-      setInviteOpen(true);
+    if (searchParams.get('addUser') === 'true') {
+      setAddUserOpen(true);
       const next = new URLSearchParams(searchParams);
-      next.delete('invite');
+      next.delete('addUser');
       setSearchParams(next, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,11 +204,11 @@ export default function MembersPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Members"
-        description="Invite teammates and manage who has access to this company."
+        description="Add people to this company and manage their access."
         actions={
-          <Button variant="primary" onClick={() => setInviteOpen(true)}>
+          <Button variant="primary" onClick={() => setAddUserOpen(true)}>
             <UserPlus />
-            Invite member
+            Add user
           </Button>
         }
       />
@@ -250,13 +250,13 @@ export default function MembersPage() {
                 icon: Users,
                 title: 'No team members yet',
                 description: 'Add your first member to start collaborating.',
-                action: { label: 'Invite member', onClick: () => setInviteOpen(true) },
+                action: { label: 'Add user', onClick: () => setAddUserOpen(true) },
               }
         }
         onRowClick={(member) => setDetailMember(member)}
       />
 
-      <InviteMemberSheet open={inviteOpen} onOpenChange={setInviteOpen} />
+      <AddUserSheet open={addUserOpen} onOpenChange={setAddUserOpen} />
       <ChangeMemberRoleDialog
         open={!!roleDialogMember}
         onOpenChange={(open) => !open && setRoleDialogMember(null)}
