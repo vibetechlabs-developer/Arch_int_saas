@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Money } from '@/components/common/Money';
 import { EmptyState } from '@/components/common/EmptyState';
 import { ErrorState } from '@/components/common/ErrorState';
-import { RestrictedState } from '@/components/reports/RestrictedState';
+import { RestrictedState } from '@/components/common/RestrictedState';
 import { ApiError } from '@/lib/api/client';
 import { getExpenseReport, type ExpenseReportEntry, type ReportFilters } from '@/lib/api/reports';
 import { reportKeys } from '@/lib/queryKeys';
