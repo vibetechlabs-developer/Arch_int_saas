@@ -1,5 +1,6 @@
 import { apiClient, unwrap } from './client';
 import { tokenStore } from './tokenStore';
+import { activeCompanyStore } from '@/lib/activeCompany';
 
 // Matches apps/authentication UserSerializer exactly — no embedded
 // company/role (see the two flagged gaps in the Milestone 1 plan).
@@ -65,6 +66,7 @@ export async function resetPassword(token: string, newPassword: string): Promise
 export async function logout(): Promise<void> {
   const refreshToken = tokenStore.getRefreshToken();
   tokenStore.clear();
+  activeCompanyStore.set(null);
   if (refreshToken) {
     try {
       await apiClient.post('/auth/logout', { refreshToken });

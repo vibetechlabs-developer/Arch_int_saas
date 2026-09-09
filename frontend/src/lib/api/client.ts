@@ -1,5 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { tokenStore } from './tokenStore';
+import { activeCompanyStore } from '@/lib/activeCompany';
 
 /**
  * Matches 00_Development_Standards/API_Response_Format.md exactly: every
@@ -62,6 +63,15 @@ apiClient.interceptors.request.use((config) => {
   const token = tokenStore.getAccessToken();
   if (token) {
     config.headers.set('Authorization', `Bearer ${token}`);
+  }
+  // TenantJWTAuthentication resolves tenant scope per-request from a
+  // companyId query param (or request body) — never from the JWT itself —
+  // and rejects any call with a bare 403 once a user has more than one
+  // active membership and none is supplied. Attaching it here, once, means
+  // no individual API module has to know about workspace switching.
+  const companyId = activeCompanyStore.get();
+  if (companyId && config.params?.companyId === undefined) {
+    config.params = { ...config.params, companyId };
   }
   return config;
 });

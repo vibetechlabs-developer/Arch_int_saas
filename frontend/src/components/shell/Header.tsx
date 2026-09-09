@@ -1,4 +1,4 @@
-import { Bell, LogOut, Menu, Moon, Search, Settings, Sun, User as UserIcon } from 'lucide-react';
+import { Bell, Building2, Check, LogOut, Menu, Moon, Search, Settings, Sun, User as UserIcon } from 'lucide-react';
 import { Link, useLocation, useMatch, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ import { QuickCreateMenu } from './QuickCreateMenu';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useCurrentCompanyId } from '@/hooks/useCurrentCompanyId';
+import { activeCompanyStore } from '@/lib/activeCompany';
 import { NAV_GROUPS } from './navConfig';
 import { ALL_SETTINGS_NAV_ITEMS } from '@/pages/settings/settingsNavConfig';
 import { expenseKeys, invoiceKeys, productKeys, projectKeys, quotationKeys } from '@/lib/queryKeys';
@@ -39,7 +40,7 @@ const ALL_NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
 export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobileNav }: HeaderProps) {
   const { user, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
-  const { companyName, hasMultipleCompanies } = useCurrentCompanyId();
+  const { companyId, companyName, memberships, hasMultipleCompanies } = useCurrentCompanyId();
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -108,6 +109,23 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
   const handleLogout = async () => {
     await logout();
     navigate('/login', { replace: true });
+  };
+
+  // Tenant scope is resolved server-side per-request from the companyId
+  // the axios interceptor now attaches (apps.authentication.authentication
+  // .TenantJWTAuthentication) — switching here just changes which id that
+  // is. queryClient.clear() (not a targeted invalidation) is deliberate:
+  // most list/detail query keys in this app were never designed to carry
+  // companyId (there was only ever one tenant per session until now), so a
+  // full reset is the only way to guarantee Company A's cached clients/
+  // projects/roles/etc. can't flash under Company B before its own fetches
+  // land. The dashboard is a safe landing spot for any route that isn't
+  // meaningful across tenants (a project/invoice/client id from Company A).
+  const handleSwitchCompany = (targetCompanyId: string) => {
+    if (targetCompanyId === companyId) return;
+    activeCompanyStore.set(targetCompanyId);
+    queryClient.clear();
+    navigate('/dashboard', { replace: true });
   };
 
   return (
@@ -183,12 +201,30 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
               <span className="text-body font-medium text-text-primary">{user?.name}</span>
               <span className="text-small text-text-tertiary">{user?.email}</span>
               {companyName && (
-                <span className="mt-1 text-caption text-text-tertiary">
-                  {companyName}
-                  {hasMultipleCompanies && ' · +more workspaces'}
-                </span>
+                <span className="mt-1 text-caption text-text-tertiary">{companyName}</span>
               )}
             </DropdownMenuLabel>
+            {hasMultipleCompanies && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="normal-case text-caption text-text-tertiary">
+                  Switch workspace
+                </DropdownMenuLabel>
+                {memberships.map((membership) => (
+                  <DropdownMenuItem
+                    key={membership.companyId}
+                    onSelect={() => handleSwitchCompany(membership.companyId)}
+                  >
+                    {membership.companyId === companyId ? (
+                      <Check className="size-4" />
+                    ) : (
+                      <Building2 className="size-4 text-text-tertiary" />
+                    )}
+                    {membership.companyName}
+                  </DropdownMenuItem>
+                ))}
+              </>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
               <Link to="/settings/profile">
