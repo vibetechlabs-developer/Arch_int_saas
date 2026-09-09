@@ -191,7 +191,7 @@ export default function RolesPage() {
         open={!!deletingRole}
         onOpenChange={(open) => !open && setDeletingRole(null)}
         title="Delete this role?"
-        description={`This role will be permanently removed. Members currently holding "${deletingRole?.name}" should be reassigned a new role first.`}
+        description={`This role will be removed. Any members currently holding "${deletingRole?.name}" will immediately lose the permissions it grants and become unassigned — reassign them to a different role first if they should keep access.`}
         confirmLabel="Delete role"
         destructive
         loading={deleteMutation.isPending}
@@ -200,7 +200,7 @@ export default function RolesPage() {
 
       <p className="flex items-center gap-1.5 text-caption text-text-tertiary">
         <Info className="size-3.5" />
-        Deleting a role does not automatically reassign the members who currently hold it.
+        Deleting a role unassigns every member who currently holds it — it does not reassign them to another role.
       </p>
     </div>
   );

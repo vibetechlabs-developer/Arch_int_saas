@@ -1,4 +1,4 @@
-import { Building2, KeyRound, ShieldCheck, User, Users, FolderTree, type LucideIcon } from 'lucide-react';
+import { Building2, KeyRound, ShieldCheck, User, Users, FolderTree, ListChecks, type LucideIcon } from 'lucide-react';
 
 export interface SettingsNavItem {
   label: string;
@@ -21,6 +21,7 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       { label: 'Company', path: '/settings/company', icon: Building2, description: 'Profile, currency, tax details' },
       { label: 'Members', path: '/settings/members', icon: Users, description: 'Invite and manage your team' },
       { label: 'Roles & Permissions', path: '/settings/roles', icon: ShieldCheck, description: 'Define what each role can do' },
+      { label: 'Permission catalog', path: '/settings/permissions', icon: ListChecks, description: 'Every permission code available to assign' },
       { label: 'Product Categories', path: '/settings/product-categories', icon: FolderTree, description: 'Organize the product catalog' },
     ],
   },

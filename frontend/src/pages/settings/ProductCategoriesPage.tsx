@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, FolderTree, Plus, Trash2, Pencil } from 'luc
 import { PageHeader } from '@/components/common/PageHeader';
 import { EmptyState } from '@/components/common/EmptyState';
 import { ErrorState } from '@/components/common/ErrorState';
+import { RestrictedState } from '@/components/common/RestrictedState';
 import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -46,6 +47,9 @@ export default function ProductCategoriesPage() {
   });
 
   if (isError) {
+    if (error instanceof ApiError && error.status === 403) {
+      return <RestrictedState message={error.message} />;
+    }
     return <ErrorState error={error} onRetry={() => refetch()} />;
   }
 

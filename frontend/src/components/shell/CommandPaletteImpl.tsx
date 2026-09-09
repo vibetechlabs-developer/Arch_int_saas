@@ -1,5 +1,18 @@
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, FolderKanban, LayoutDashboard, Package, Settings, ShieldCheck, UserPlus, UserRound, Users } from 'lucide-react';
+import {
+  BarChart3,
+  FolderKanban,
+  FolderTree,
+  KeyRound,
+  LayoutDashboard,
+  Package,
+  Settings,
+  ShieldCheck,
+  User,
+  UserPlus,
+  UserRound,
+  Users,
+} from 'lucide-react';
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 
 export interface CommandPaletteImplProps {
@@ -62,6 +75,18 @@ export function CommandPaletteImpl({ open, onOpenChange }: CommandPaletteImplPro
           <CommandItem onSelect={() => go('/settings/company')}>
             <Settings className="size-4" />
             Company Settings
+          </CommandItem>
+          <CommandItem onSelect={() => go('/settings/product-categories')}>
+            <FolderTree className="size-4" />
+            Product Categories
+          </CommandItem>
+          <CommandItem onSelect={() => go('/settings/profile')}>
+            <User className="size-4" />
+            Profile
+          </CommandItem>
+          <CommandItem onSelect={() => go('/settings/security')}>
+            <KeyRound className="size-4" />
+            Security
           </CommandItem>
         </CommandGroup>
         <CommandGroup heading="Create">
