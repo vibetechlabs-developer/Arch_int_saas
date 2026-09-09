@@ -181,7 +181,10 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
     # reasoning as every prior sprint's audit helper. Never includes the
     # invited email as free text beyond what's already resolvable via
     # user_id, keeping this row self-describing without duplicating PII.
-    "company_membership": {"user_id", "role_id", "status"},
+    # "user_created" (Add User only) records whether this action created a
+    # brand-new User account vs. linked an existing one — a boolean, never
+    # any password/token/activation-link value.
+    "company_membership": {"user_id", "role_id", "status", "user_created"},
     # BE-049/BE-051: only the resulting permission-code set is recorded,
     # never full Permission objects (a code is not sensitive).
     "role_permission": {"permission_codes"},

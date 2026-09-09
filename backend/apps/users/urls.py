@@ -27,6 +27,8 @@ membership_list = CompanyMembershipViewSet.as_view(
     }
 )
 
+membership_add_user = CompanyMembershipViewSet.as_view({"post": "add_user"})
+
 membership_detail = CompanyMembershipViewSet.as_view(
     {
         "get": "retrieve",
@@ -52,6 +54,7 @@ urlpatterns = [
     ),
     re_path(r"^permissions/?$", PermissionListView.as_view(), name="permission-list"),
     re_path(r"^company-memberships/?$", membership_list, name="company-membership-list"),
+    re_path(r"^company-memberships/add-user/?$", membership_add_user, name="company-membership-add-user"),
     re_path(
         r"^company-memberships/(?P<pk>[0-9a-fA-F-]{36})/?$",
         membership_detail,

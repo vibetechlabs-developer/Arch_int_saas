@@ -13,6 +13,8 @@ from apps.common.views import ObjectPermission404Mixin
 from apps.users.models import CompanyMembership, Role
 from apps.users.permissions import CompanyMembershipPermission, RolePermission
 from apps.users.serializers import (
+    AddUserResponseSerializer,
+    AddUserSerializer,
     CompanyMembershipAssignRoleSerializer,
     CompanyMembershipInviteSerializer,
     CompanyMembershipListQuerySerializer,
@@ -360,6 +362,12 @@ class CompanyMembershipViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet
         "assign_role": "user.manage",
         "suspend": "user.manage",
         "reactivate": "user.manage",
+        # Same code as invite/assign-role/suspend/reactivate — "user.manage"
+        # already reads as "invite, remove, suspend, and assign roles to
+        # company members" (permission_catalog.py), which covers adding a
+        # genuinely new person exactly as well as inviting an existing one.
+        # No new permission code was introduced for this.
+        "add_user": "user.manage",
     }
 
     def list(self, request: Request) -> Response:
@@ -398,6 +406,47 @@ class CompanyMembershipViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet
         )
 
         response_data = CompanyMembershipSerializer(membership).data
+        request_id = getattr(request, "request_id", None)
+        return ApiResponse.created(data=response_data, request_id=request_id)
+
+    @extend_schema(
+        summary="Add User",
+        description=(
+            "Add a person to this company by email, creating a new User account if none exists "
+            "for that email yet, or linking their existing account (never duplicated). Assigns "
+            "the given role and creates an active CompanyMembership."
+        ),
+        request=AddUserSerializer,
+        responses={status.HTTP_201_CREATED: AddUserResponseSerializer},
+        tags=["Company Membership"],
+    )
+    @action(detail=False, methods=["post"], url_path="add-user")
+    def add_user(self, request: Request) -> Response:
+        """
+        `POST /company-memberships/add-user` — the genuine new-user
+        onboarding flow, distinct from `create` (invite_member), which
+        only ever links an existing account and 404s otherwise.
+        """
+        serializer = AddUserSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        membership, user_created, activation_required = CompanyMembershipService.add_user(
+            company_id=request.company_id,
+            email=serializer.validated_data["email"],
+            name=serializer.validated_data["name"],
+            role_id=serializer.validated_data.get("role_id"),
+            actor_user=request.user,
+            actor_membership=None if is_platform_admin(request) else get_active_membership_for_request(request),
+            request=request,
+        )
+
+        response_data = AddUserResponseSerializer(
+            {
+                "membership": membership,
+                "user_created": user_created,
+                "activation_required": activation_required,
+            }
+        ).data
         request_id = getattr(request, "request_id", None)
         return ApiResponse.created(data=response_data, request_id=request_id)
 

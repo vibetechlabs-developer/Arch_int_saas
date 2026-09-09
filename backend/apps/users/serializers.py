@@ -106,6 +106,33 @@ class CompanyMembershipInviteSerializer(serializers.Serializer):
     roleId = serializers.UUIDField(source="role_id", required=True)
 
 
+class AddUserSerializer(serializers.Serializer):
+    """
+    Input serializer for CompanyMembershipService.add_user — unlike
+    CompanyMembershipInviteSerializer, this genuinely creates a new User
+    when the email has no existing account, so it also collects `name`
+    (User's only name field — no firstName/lastName split exists on the
+    model).
+    """
+
+    email = serializers.EmailField(required=True)
+    name = serializers.CharField(required=True, max_length=255)
+    roleId = serializers.UUIDField(source="role_id", required=True)
+
+
+class AddUserResponseSerializer(serializers.Serializer):
+    """
+    Wraps CompanyMembershipSerializer with the two flags the frontend
+    needs to render an accurate outcome message — whether a brand-new
+    User record was created vs. an existing one was linked, and whether
+    an account-setup email was sent.
+    """
+
+    membership = CompanyMembershipSerializer()
+    userCreated = serializers.BooleanField(source="user_created")
+    activationRequired = serializers.BooleanField(source="activation_required")
+
+
 class CompanyMembershipAssignRoleSerializer(serializers.Serializer):
     """
     Input serializer for assigning/changing/clearing a membership's role.

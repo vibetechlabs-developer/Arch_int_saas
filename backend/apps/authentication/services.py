@@ -337,7 +337,59 @@ class PasswordResetEmailService:
             # account state to the client (the caller's response is
             # unaffected either way) — but they must not be silently
             # invisible server-side either.
+            logger.exception("Failed to send password reset email to user_id=%s", user.id)
+
+
+class AccountActivationEmailService:
+    """
+    Reuses PasswordResetToken end to end (same repository, same consuming
+    endpoint, POST /auth/reset-password) for the "set your first password"
+    step of CompanyMembershipService.add_user — activating an account is,
+    mechanically, identical to a password reset (validate a single-use
+    token, call set_password), so no new token model or endpoint exists
+    for it. Only the email copy differs, and only by whether this is a
+    brand-new account or an existing one gaining access to a new company.
+    """
+
+    @staticmethod
+    def send_activation_email(user, raw_token: str, is_new_account: bool) -> None:
+        from django.conf import settings
+        from django.core.mail import send_mail
+
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173").rstrip("/")
+        setup_link = f"{frontend_url}/reset-password?token={raw_token}"
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@intprojects.com")
+
+        subject = "Welcome to INT Projects SaaS — set your password" if is_new_account else "You've been added to a new company on INT Projects SaaS"
+        intro = (
+            "An account has been created for you on INT Projects SaaS."
+            if is_new_account
+            else "You've been added to a new company on INT Projects SaaS."
+        )
+        message = (
+            f"Hello {user.name},\n\n"
+            f"{intro}\n\n"
+            f"Please click the link below to set your password and get started:\n"
+            f"{setup_link}\n\n"
+            f"This link is single-use and will expire in 1 hour.\n\n"
+            f"Regards,\nINT Projects Team"
+        )
+
+        try:
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=from_email,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+        except Exception:
+            # Same policy as PasswordResetEmailService: never let a
+            # delivery failure crash the request the membership was
+            # already created inside of — but log it loudly, since unlike
+            # forgot-password there's no way for the recipient to
+            # self-serve a retry.
             logger.exception(
-                "Failed to send password reset email",
+                "Failed to send account activation email",
                 extra={"user_id": str(user.id)},
             )

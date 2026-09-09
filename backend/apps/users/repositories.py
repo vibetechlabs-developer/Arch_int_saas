@@ -176,6 +176,27 @@ class CompanyMembershipRepository:
             raise drf_exceptions.NotFound("No user exists with this email address.")
 
     @staticmethod
+    def get_user_by_email_or_none(email: str) -> Optional[User]:
+        """
+        Non-raising counterpart to get_user_by_email, for callers (Add User)
+        that need to distinguish "create a new account" from "link the
+        existing one" rather than treating a miss as an error.
+        """
+        return User.objects.filter(email__iexact=email.strip()).first()
+
+    @staticmethod
+    def get_membership_including_revoked(
+        company_id: str | uuid.UUID, user_id: str | uuid.UUID
+    ) -> Optional[CompanyMembership]:
+        """
+        Unlike active_membership_exists (a bool used by the invite flow),
+        this returns the row itself — Add User needs to tell a revoked
+        membership (safe to reactivate) apart from an active/invited one
+        (a genuine 409), not just know that *some* row exists.
+        """
+        return CompanyMembershipRepository.all().filter(company_id=company_id, user_id=user_id).first()
+
+    @staticmethod
     def get_role_by_id(role_id: str | uuid.UUID) -> Role:
         try:
             return Role.objects.get(id=role_id)

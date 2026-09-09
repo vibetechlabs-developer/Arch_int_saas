@@ -9,7 +9,7 @@ from apps.audit.models import AuditAction
 from apps.audit.services import AuditLogService
 from apps.common.exceptions import ConflictError
 from apps.users import selectors, validators
-from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role
+from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role, User
 from apps.users.permission_catalog import ALL_PERMISSION_CODES, DEFAULT_ROLE_PERMISSIONS
 from apps.users.repositories import (
     CompanyMembershipRepository,
@@ -569,6 +569,143 @@ class CompanyMembershipService:
             return membership
 
     @classmethod
+    def add_user(
+        cls,
+        company_id: str | uuid.UUID,
+        email: str,
+        name: str,
+        role_id: Optional[str | uuid.UUID],
+        actor_user: Any = None,
+        actor_membership: Optional[CompanyMembership] = None,
+        request: Any = None,
+    ) -> tuple[CompanyMembership, bool, bool]:
+        """
+        Add a person to a company who may or may not already have a global
+        User account — the genuine "create a brand-new user" onboarding
+        flow that invite_member() explicitly does not attempt (its own
+        docstring scopes it to existing users only). Kept as a separate
+        method rather than folded into invite_member so that flow's
+        existing, already-tested contract (404 on an unknown email) is
+        untouched for any other caller.
+
+        Email is the canonical identity (User.email is globally unique):
+        - No existing User for this email -> a new one is created with
+          set_unusable_password() (Django's own mechanism for "this
+          account cannot authenticate with any password yet") and an
+          account-setup email is sent reusing the exact PasswordResetToken
+          machinery /auth/reset-password already consumes — no new token
+          model, no new consuming endpoint, no home-grown crypto.
+        - An existing User with no other membership/only a revoked one
+          here -> reused as-is, never duplicated. If they have no usable
+          password yet (e.g. never completed a prior setup), the same
+          setup email is (re)sent.
+        - An ACTIVE or INVITED membership already exists for this company
+          -> 409, identical to invite_member's own conflict.
+        - Only a REVOKED membership exists -> reactivated in place (role
+          updated, status -> active) rather than blocked, since forcing
+          the caller to discover and use a separate "reactivate" action
+          first would be a confusing dead end for what Add User is for.
+
+        The new/reactivated membership is created ACTIVE, not INVITED:
+        CompanyMembershipStatus has no automatic invited->active
+        transition anywhere in this codebase today (only the explicit
+        POST .../reactivate action sets ACTIVE), so leaving a brand-new
+        Add User membership at INVITED would leave the person with zero
+        permission codes (PermissionService.get_permission_codes_for_
+        membership fails closed unless status == ACTIVE) even after they
+        finish account setup and log in — a silent, confusing dead end.
+        Membership status here answers "should this person currently have
+        access", which is true the moment an admin adds them; the User's
+        own has_usable_password() is the separate, correct gate on
+        whether they can actually log in yet.
+        """
+        with transaction.atomic():
+            company = RoleRepository.get_company_by_id(company_id)
+            cleaned_email = validators.clean_email(email)
+            cleaned_name = (name or "").strip()
+            if not cleaned_name:
+                raise drf_exceptions.ValidationError({"name": ["Name cannot be blank or empty."]})
+
+            if not role_id:
+                raise drf_exceptions.ValidationError(
+                    {"roleId": ["A role must be explicitly selected when adding a user."]}
+                )
+            role = CompanyMembershipRepository.get_role_by_id(role_id)
+            validators.validate_role_belongs_to_company(role, company.id)
+            validators.validate_role_is_active(role)
+
+            if actor_membership is not None:
+                actor_codes = PermissionService.get_permission_codes_for_membership(actor_membership)
+                role_codes = PermissionRepository.codes_for_role(role.id)
+                escalating_codes = sorted(role_codes - actor_codes)
+                if escalating_codes:
+                    raise drf_exceptions.PermissionDenied(
+                        "Cannot add a user into a role granting permissions you do not "
+                        f"hold yourself: {', '.join(escalating_codes)}"
+                    )
+
+            existing_user = CompanyMembershipRepository.get_user_by_email_or_none(cleaned_email)
+            user_created = False
+            if existing_user is None:
+                try:
+                    user = User.objects.create_user(email=cleaned_email, name=cleaned_name, password=None)
+                except IntegrityError as exc:
+                    # Concurrent Add User for the same email (two admins,
+                    # or one company + platform-admin flow, racing) — the
+                    # unique constraint on User.email is the actual source
+                    # of truth; translate the low-level DB error into the
+                    # same conflict shape every other caller of this
+                    # method already expects, never a raw 500.
+                    raise ConflictError(
+                        "A user with this email was just created by another request. Please try again."
+                    ) from exc
+                user_created = True
+            else:
+                user = existing_user
+
+            existing_membership = CompanyMembershipRepository.get_membership_including_revoked(company.id, user.id)
+            if existing_membership is not None and existing_membership.status != CompanyMembershipStatus.REVOKED:
+                raise ConflictError("This user already has a membership in this company.")
+
+            try:
+                with transaction.atomic():
+                    if existing_membership is not None:
+                        membership = CompanyMembershipRepository.save(
+                            existing_membership, {"role": role, "status": CompanyMembershipStatus.ACTIVE}
+                        )
+                    else:
+                        membership = CompanyMembershipRepository.create(
+                            company=company, user=user, role=role, status=CompanyMembershipStatus.ACTIVE
+                        )
+            except IntegrityError as exc:
+                raise ConflictError("This user already has a membership in this company.") from exc
+
+            activation_required = user_created or not user.has_usable_password()
+            if activation_required:
+                from apps.authentication.repositories import PasswordResetTokenRepository
+                from apps.authentication.services import AccountActivationEmailService
+
+                _, raw_token = PasswordResetTokenRepository.create_for_user(user)
+                AccountActivationEmailService.send_activation_email(user, raw_token, is_new_account=user_created)
+
+            AuditLogService.record(
+                action=AuditAction.CREATE,
+                entity_type="company_membership",
+                entity_id=membership.id,
+                company_id=company.id,
+                actor_user=actor_user,
+                after_state={
+                    "user_id": str(user.id),
+                    "role_id": str(role.id),
+                    "status": membership.status,
+                    "user_created": user_created,
+                },
+                request=request,
+            )
+
+            return membership, user_created, activation_required
+
+    @classmethod
     def _membership_snapshot(cls, membership: CompanyMembership) -> Dict[str, Any]:
         return {
             "user_id": str(membership.user_id),
@@ -646,6 +783,20 @@ class CompanyMembershipService:
     ) -> CompanyMembership:
         with transaction.atomic():
             membership = cls.get_membership_by_id(membership_id, company_id=company_id)
+
+            # No backend protection existed anywhere against an admin
+            # suspending their own membership until this check — a real,
+            # confirmed gap (see BACKEND_TASKS.md). Reactivating yourself
+            # is never dangerous (you'd already be revoked, i.e. unable to
+            # reach this endpoint's permission check at all in practice),
+            # so this only actually fires for suspend.
+            if (
+                new_status == CompanyMembershipStatus.REVOKED
+                and actor_user is not None
+                and str(actor_user.id) == str(membership.user_id)
+            ):
+                raise drf_exceptions.PermissionDenied("You cannot suspend your own membership.")
+
             before_state = cls._membership_snapshot(membership)
 
             membership = CompanyMembershipRepository.save(membership, {"status": new_status})
@@ -697,6 +848,13 @@ class CompanyMembershipService:
     ) -> None:
         with transaction.atomic():
             membership = cls.get_membership_by_id(membership_id, company_id=company_id)
+
+            # Same gap as suspend (see _set_status) — nothing previously
+            # stopped an admin from removing themselves from their own
+            # company.
+            if actor_user is not None and str(actor_user.id) == str(membership.user_id):
+                raise drf_exceptions.PermissionDenied("You cannot remove your own membership.")
+
             membership_id_val = membership.id
             company_id_val = membership.company_id
             before_state = cls._membership_snapshot(membership)
