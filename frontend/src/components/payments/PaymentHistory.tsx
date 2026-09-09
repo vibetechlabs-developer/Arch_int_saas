@@ -19,14 +19,15 @@ import { RecordPaymentSheet } from './RecordPaymentSheet';
 export interface PaymentHistoryProps {
   invoice: Invoice;
   canRecordPayment: boolean;
+  currency?: string;
 }
 
-// No authoritative paidAmount/outstanding figure exists on Invoice or
-// anywhere else in the API (confirmed in the payments backend audit), so
-// this deliberately shows only real payment rows and the invoice's own
-// (already-authoritative) status badge elsewhere on the page — never a
-// computed Paid/Outstanding total.
-export function PaymentHistory({ invoice, canRecordPayment }: PaymentHistoryProps) {
+// The Paid/Outstanding totals now live in the separate PaymentSummary
+// card (BE-074, backend-authoritative InvoiceSerializer.paidAmount/
+// outstandingAmount) — this component stays scoped to what it's always
+// been: the real, individually-voidable payment rows themselves, never a
+// computed total of its own.
+export function PaymentHistory({ invoice, canRecordPayment, currency }: PaymentHistoryProps) {
   const queryClient = useQueryClient();
   const [recordOpen, setRecordOpen] = useState(false);
   const [voidingPayment, setVoidingPayment] = useState<Payment | null>(null);
@@ -101,7 +102,7 @@ export function PaymentHistory({ invoice, canRecordPayment }: PaymentHistoryProp
                       <td className="px-3 py-2.5 text-text-secondary">{payment.method || '—'}</td>
                       <td className="px-3 py-2.5 text-text-secondary">{payment.referenceNumber || '—'}</td>
                       <td className="px-3 py-2.5 text-right font-medium">
-                        <Money value={payment.amount} />
+                        <Money value={payment.amount} currency={currency} />
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex justify-end">
@@ -138,7 +139,7 @@ export function PaymentHistory({ invoice, canRecordPayment }: PaymentHistoryProp
                   </div>
                   <div className="flex items-center justify-between text-small text-text-secondary">
                     <span>{payment.method || 'No method recorded'}</span>
-                    <Money value={payment.amount} className="font-medium" />
+                    <Money value={payment.amount} currency={currency} className="font-medium" />
                   </div>
                   {payment.referenceNumber && <span className="text-caption text-text-tertiary">Ref: {payment.referenceNumber}</span>}
                 </div>

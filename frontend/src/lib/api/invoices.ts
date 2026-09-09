@@ -20,9 +20,11 @@ export interface InvoiceItem {
   amount: string;
 }
 
-// Mirrors InvoiceSerializer. There is deliberately no `issueDate` field
-// (only `createdAt`/`dueDate` exist) and no `paidAmount`/`balance` field —
-// no payment aggregate is exposed anywhere on Invoice.
+// Mirrors InvoiceSerializer. There is deliberately no `issueDate` field —
+// only `createdAt`/`dueDate` exist. `paidAmount`/`outstandingAmount`
+// (BE-074) are backend-authoritative decimal strings, read-only (never
+// accepted by InvoiceUpdateInput below) — the frontend must never derive
+// either from PaymentHistory or from `total` itself.
 export interface Invoice {
   id: string;
   companyId: string;
@@ -39,6 +41,8 @@ export interface Invoice {
   dueDate: string | null;
   paymentTerms: string;
   status: InvoiceStatus;
+  paidAmount: string;
+  outstandingAmount: string;
   notes: string;
   items: InvoiceItem[];
   createdAt: string;

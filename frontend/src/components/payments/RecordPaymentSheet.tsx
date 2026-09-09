@@ -38,12 +38,13 @@ export interface RecordPaymentSheetProps {
   invoice: Invoice;
 }
 
-// The backend does not cap amount against any outstanding balance (no
-// per-invoice paid/outstanding aggregate is even exposed to compare
-// against) — overpayment is genuinely allowed server-side, so this form
-// never blocks or silently caps an entered amount. `method` is a free
-// text field with no backend enum, so it's a plain Input, not a Select
-// of invented options.
+// The backend intentionally allows overpayment (BE-074: no upper bound in
+// PaymentService.create_payment, unchanged by exposing paidAmount/
+// outstandingAmount elsewhere) — this form never blocks or caps an
+// entered amount against the invoice's outstanding balance, even though
+// that figure is now visible on the page. `method` is a free text field
+// with no backend enum, so it's a plain Input, not a Select of invented
+// options.
 export function RecordPaymentSheet({ open, onOpenChange, invoice }: RecordPaymentSheetProps) {
   const queryClient = useQueryClient();
 

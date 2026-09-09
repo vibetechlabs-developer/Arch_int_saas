@@ -20,6 +20,8 @@ import { formatDate, formatDateTime } from '@/lib/format';
 import { pageTransition, pageTransitionReduced } from '@/lib/motion';
 import { EditInvoiceSheet } from '@/components/invoices/EditInvoiceSheet';
 import { PaymentHistory } from '@/components/payments/PaymentHistory';
+import { PaymentSummary } from '@/components/payments/PaymentSummary';
+import { useCompanyCurrency } from '@/hooks/useCompanyCurrency';
 
 type WorkflowAction = 'send' | 'cancel';
 
@@ -35,6 +37,8 @@ export default function InvoiceDetailPage() {
     queryFn: () => getInvoice(invoiceId!),
     enabled: !!invoiceId,
   });
+
+  const { currency, isLoading: currencyLoading } = useCompanyCurrency();
 
   // Invoice only carries `quotationId`, not the human-readable quote
   // number/version — a single conditional fetch of the one linked
@@ -187,10 +191,10 @@ export default function InvoiceDetailPage() {
                             <td className="px-3 py-2.5 text-text-secondary">{item.unit || '—'}</td>
                             <td className="px-3 py-2.5 text-right tabular-nums text-text-secondary">{item.quantity}</td>
                             <td className="px-3 py-2.5 text-right">
-                              <Money value={item.rate} />
+                              <Money value={item.rate} currency={currency} />
                             </td>
                             <td className="px-4 py-2.5 text-right font-medium">
-                              <Money value={item.amount} />
+                              <Money value={item.amount} currency={currency} />
                             </td>
                           </tr>
                         ))}
@@ -209,11 +213,11 @@ export default function InvoiceDetailPage() {
                           <span>
                             {item.quantity} {item.unit || ''}
                           </span>
-                          <Money value={item.rate} />
+                          <Money value={item.rate} currency={currency} />
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-caption text-text-tertiary">Amount</span>
-                          <Money value={item.amount} className="font-medium" />
+                          <Money value={item.amount} currency={currency} className="font-medium" />
                         </div>
                       </div>
                     ))}
@@ -226,12 +230,21 @@ export default function InvoiceDetailPage() {
                 discount={invoice.discount}
                 tax={invoice.tax}
                 total={invoice.total}
+                currency={currency}
                 className="border-t border-border-subtle pt-4"
               />
             </CardContent>
           </Card>
 
-          <PaymentHistory invoice={invoice} canRecordPayment={canRecordPayment} />
+          <PaymentSummary
+            total={invoice.total}
+            paidAmount={invoice.paidAmount}
+            outstandingAmount={invoice.outstandingAmount}
+            currency={currency}
+            loading={currencyLoading}
+          />
+
+          <PaymentHistory invoice={invoice} canRecordPayment={canRecordPayment} currency={currency} />
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card>
