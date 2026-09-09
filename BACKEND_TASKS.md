@@ -1343,6 +1343,31 @@ Depends On
 | BE-071 | Add User / secure company user onboarding — `POST /company-memberships/add-user`, self-suspend/self-remove safety guards — see writeup below. | **Review** |
 | BE-072 | Role permission read-back — `GET /roles/{id}/permissions` — see writeup below. | **Review** |
 | BE-073 | Role delete safety — deleting an assigned role now unassigns affected memberships instead of leaving them with retained access — see writeup below. | **Review** |
+| BE-074 | Invoice payment aggregates — `paidAmount`/`outstandingAmount` on InvoiceSerializer, N+1-safe — see writeup below. | **Review** |
+
+#### BE-074 — Invoice Payment Aggregates — 2026-09-09
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** High — without this, the frontend had no way to show Amount Paid/Balance Due without computing financial totals itself, which the project's own rules forbid.
+
+**Owner:** Backend Team
+
+**Problem:** `InvoiceSerializer` exposed `total` but no `paidAmount`/`outstandingAmount` — `PaymentRepository.sum_active_amount_for_invoice` already existed internally (used only by `InvoiceService.recompute_status_from_payments` to derive `status`), but was never surfaced in any API response.
+
+**Semantics, confirmed against existing code before implementing (not assumed):** `paidAmount` = sum of active (non-voided) payments, exactly what `sum_active_amount_for_invoice` already computed. `outstandingAmount` = `max(total - paidAmount, 0)` — overpayment is genuinely allowed (`PaymentService.create_payment`/`payments/validators.py` have no upper bound) and `recompute_status_from_payments` already treats `paid_total >= total` as simply `paid`, nothing more — a negative "balance due" would misrepresent the company as owing the client money, a state this product doesn't model, so the remaining-balance figure alone is floored at zero while `paidAmount` still reports the real, possibly-larger figure unchanged. Overpayment policy itself is untouched.
+
+**Backend API:** No new endpoint — `paidAmount`/`outstandingAmount` (decimal strings) added directly to the existing `InvoiceSerializer`, so every action that returns an Invoice (list, detail, create, update, send, cancel) carries them identically, via `get_paidAmount`/`get_outstandingAmount` `SerializerMethodField`s backed by new `InvoiceService.get_paid_amount`/`compute_outstanding_amount`.
+
+**Read-only enforcement:** Both are `SerializerMethodField`s (no setter) and neither appears in `InvoiceUpdateSerializer` — a client-supplied `paidAmount`/`outstandingAmount` in a PATCH body is simply never read, verified directly (`test_fields_are_read_only_on_patch`/`test_fields_are_read_only_on_draft_patch`).
+
+**N+1 strategy:** `apps.invoices.repositories.with_paid_amount` annotates every Invoice queryset with `paid_amount` via a correlated `Subquery` (not a `Sum` JOIN+GROUP BY, which would risk fan-out if ever combined with another multi-valued-relation annotation) — one query total regardless of list size, applied to both `InvoiceRepository.get_by_id`/`all_for_project` and `selectors.list_invoices_for_project`. `InvoiceService.get_paid_amount` reads that annotation with zero extra queries when present, falling back to the original `sum_active_amount_for_invoice` single-row query only for an invoice instance mutated and returned in-memory without a re-fetch (create/update/send/cancel's own response — always exactly one row, never a list). Proven, not just argued: `test_list_does_not_incur_n_plus_1_payment_queries` holds invoice count fixed across two captures and shows adding payments to every invoice in the list adds zero additional queries.
+
+**Tenant isolation:** Unchanged — the annotation is correlated per-invoice via `OuterRef("pk")`, scoped by whatever tenant filtering the outer queryset already applies; no new cross-tenant surface introduced.
+
+**Tests:** New `apps/invoices/tests/test_payment_aggregates.py` (24 tests) — zero/one/multiple/partial/full/overpaid payments, voided/soft-deleted payment exclusion, create/void updates the aggregate, cross-invoice and cross-tenant isolation, decimal precision, read-only enforcement (sent and draft invoices), detail and list both carry the fields, draft/cancelled invoice behavior (a cancelled invoice retains its real historical `paidAmount` and can no longer accept new payments — existing rule, unchanged), status still comes from the real persisted/derived value, the N+1 regression guard, and direct unit coverage of the annotated-vs-fallback computation path.
+
+**Validation:** New tests: 24/24 passed. Full `apps.invoices`+`apps.payments`+`apps.audit`+`apps.reports` regression: **134 passed, 0 failed**. Live HTTP lifecycle against a genuinely running `manage.py runserver`: created an invoice (total 300.00) → confirmed paidAmount=0/outstanding=300 → recorded payment A (120.00) → confirmed paidAmount=120/outstanding=180 → recorded payment B (80.00) → confirmed paidAmount=200/outstanding=100 → voided payment A → confirmed paidAmount reversed to 80/outstanding=220 → recorded an overpayment (500.00, total already exceeded) → confirmed paidAmount=700 (the real figure) with outstanding correctly floored at 0 and status `paid` → confirmed an unrelated invoice in the same project was unaffected throughout. All seeded data deleted afterward; server stopped and confirmed down.
 
 #### BE-073 — Role Delete Safety — 2026-09-09
 

@@ -285,6 +285,22 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 - Live HTTP verification: seeded one user with active memberships in two companies, confirmed no-`companyId` returns the exact 403 the interceptor now avoids, confirmed `?companyId=A`/`?companyId=B` each return correctly tenant-isolated data for the same user, confirmed the role-delete fix end-to-end. All seeded data deleted afterward.
 - Visual QA: **PENDING** — no browser tooling available in this environment; the switcher's click-driven interaction (Radix `DropdownMenu`) could not be exercised in Jest either, per the established environment limitation — its underlying logic (store, hook, interceptor) is covered instead, consistent with the `ManagePermissionsDialog` precedent.
 
+## Phase 16 — Invoice Payment Summary
+
+| Task | Description | Status |
+|---|---|---|
+| F40 | Invoice Payment Summary — Invoice Total/Amount Paid/Balance Due card on Invoice Detail, sourced entirely from `InvoiceSerializer.paidAmount`/`outstandingAmount` (BE-074), real company currency | Review |
+
+**Implementation notes (F40):**
+- New `PaymentSummary` component (`components/payments/PaymentSummary.tsx`) placed between the Billing Lines card and Payment History, using the existing `Card`/`Money` primitives — not a visually unrelated component. Every figure is a backend decimal string rendered as-is; nothing is summed from `PaymentHistory` or computed as `total - paid` on this side — `outstandingAmount` is already floored at zero server-side, so an overpaid invoice shows its real (possibly larger) `paidAmount` with Balance Due at exactly 0, never negative, and no invented "Credit Balance" concept.
+- `PaymentHistory`'s own docstring previously documented the gap this closes ("No authoritative paidAmount/outstanding figure exists on Invoice") — updated; the component's own scope is unchanged (real payment rows, still no total of its own).
+- **Real company currency, not hardcoded INR**: `formatCurrency`/`Money`/`FinancialSummary` gained an optional `currency` parameter (default `INR`, so every other existing call site across the app is unaffected). New `useCompanyCurrency()` hook resolves the real `Company.currency` via the existing `useCurrentCompanyId` → `GET /companies/{id}` chain. Wired through the whole Invoice Detail page (billing line items, FinancialSummary, PaymentSummary, PaymentHistory), not just the new card, so one page never mixes a real currency in one section with a hardcoded one in another.
+- Record Payment and Void Payment already invalidated `invoiceKeys.detail(invoice.id)` on success (built in an earlier phase) — confirmed, not changed, and neither ever locally increments/decrements a figure; both rely entirely on the server's refetched response.
+- Searched the whole frontend for forbidden financial math patterns (`reduce`, `total -`, `paidAmount =`, `Number(invoice...)`, `parseFloat(invoice...)`) scoped to Invoice/Payment flows — none found beyond legitimate prop pass-through of backend-computed values.
+- New tests: `PaymentSummaryProps`-shaped coverage folded into `InvoiceDetailPage.test.tsx` (zero/partial/full/overpaid rendering, proof the summary never recomputes from `PaymentHistory`, Void Payment refetches and re-renders the authoritative aggregate, loading state shows no premature figures, currency resolves from the real company). Frontend tests: 293 total, 287 passed, **6 skipped — unchanged baseline** (13 new tests). TypeScript: PASS. Build: PASS.
+- Live HTTP verification (see `BACKEND_TASKS.md` BE-074): full record/void/overpayment lifecycle against a real running backend, all aggregate values matched what the UI would render exactly as returned; no client-side math involved anywhere in the check.
+- Visual QA: **PENDING** — no browser tooling available in this environment.
+
 ## Not Yet Started
 
 Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Last-owner/protected-role safety (blocked on `Role.system_key`, BE-069).
