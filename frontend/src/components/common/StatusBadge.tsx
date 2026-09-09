@@ -32,6 +32,10 @@ const STATUS_SEMANTICS: Record<string, Semantic> = {
   // Product catalog
   active: 'success',
   inactive: 'neutral',
+  // Company membership (CompanyMembershipStatus — active is shared with
+  // Product catalog above, same semantic color applies)
+  invited: 'info',
+  revoked: 'danger',
 };
 
 export function humanizeStatus(status: string): string {

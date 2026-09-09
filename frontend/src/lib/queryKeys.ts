@@ -21,6 +21,35 @@ export const projectKeys = {
 export const membershipKeys = {
   all: ['companyMemberships'] as const,
   search: (query: string) => [...membershipKeys.all, 'search', query] as const,
+  lists: () => [...membershipKeys.all, 'list'] as const,
+  list: (params: Record<string, unknown>) => [...membershipKeys.lists(), params] as const,
+  detail: (id: string) => [...membershipKeys.all, 'detail', id] as const,
+};
+
+// GET /auth/memberships — a distinct resource from /company-memberships
+// above (the caller's own cross-company workspace list vs. one company's
+// full member roster), so it gets its own key rather than sharing
+// membershipKeys.
+export const myMembershipsKeys = {
+  all: ['myMemberships'] as const,
+};
+
+export const companyKeys = {
+  all: ['company'] as const,
+  detail: (id: string) => [...companyKeys.all, 'detail', id] as const,
+};
+
+export const roleKeys = {
+  all: ['roles'] as const,
+  lists: () => [...roleKeys.all, 'list'] as const,
+  list: (params: Record<string, unknown>) => [...roleKeys.lists(), params] as const,
+  detail: (id: string) => [...roleKeys.all, 'detail', id] as const,
+};
+
+// GET /permissions is a single global, unfiltered catalog — one cache
+// entry, no list/detail split needed.
+export const permissionKeys = {
+  all: ['permissions'] as const,
 };
 
 export const productKeys = {
