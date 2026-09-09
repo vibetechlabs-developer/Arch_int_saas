@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, FolderKanban, LayoutDashboard, Package, UserRound, Users } from 'lucide-react';
+import { BarChart3, FolderKanban, LayoutDashboard, Package, Settings, ShieldCheck, UserPlus, UserRound, Users } from 'lucide-react';
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 
 export interface CommandPaletteImplProps {
@@ -47,6 +47,22 @@ export function CommandPaletteImpl({ open, onOpenChange }: CommandPaletteImplPro
             <BarChart3 className="size-4" />
             Reports
           </CommandItem>
+          <CommandItem onSelect={() => go('/settings')}>
+            <Settings className="size-4" />
+            Settings
+          </CommandItem>
+          <CommandItem onSelect={() => go('/settings/members')}>
+            <Users className="size-4" />
+            Manage Members
+          </CommandItem>
+          <CommandItem onSelect={() => go('/settings/roles')}>
+            <ShieldCheck className="size-4" />
+            Manage Roles
+          </CommandItem>
+          <CommandItem onSelect={() => go('/settings/company')}>
+            <Settings className="size-4" />
+            Company Settings
+          </CommandItem>
         </CommandGroup>
         <CommandGroup heading="Create">
           <CommandItem onSelect={() => go('/clients?new=true')}>
@@ -60,6 +76,10 @@ export function CommandPaletteImpl({ open, onOpenChange }: CommandPaletteImplPro
           <CommandItem onSelect={() => go('/products?new=true')}>
             <Package className="size-4" />
             New Product
+          </CommandItem>
+          <CommandItem onSelect={() => go('/settings/members?invite=true')}>
+            <UserPlus className="size-4" />
+            Add Member
           </CommandItem>
         </CommandGroup>
         <CommandEmpty>Nothing found yet — more modules become searchable as they ship.</CommandEmpty>

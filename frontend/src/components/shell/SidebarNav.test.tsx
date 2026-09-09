@@ -22,6 +22,7 @@ describe('SidebarNav', () => {
     expect(screen.getByRole('link', { name: 'Projects' })).toHaveAttribute('href', '/projects');
     expect(screen.getByRole('link', { name: 'Products' })).toHaveAttribute('href', '/products');
     expect(screen.getByRole('link', { name: 'Reports' })).toHaveAttribute('href', '/reports');
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings');
   });
 
   it('never exposes Activity — the module remains blocked', () => {
@@ -45,10 +46,17 @@ describe('SidebarNav', () => {
     expect(screen.getByRole('link', { name: 'Clients' })).not.toHaveAttribute('aria-current');
   });
 
-  it('marks Products active while viewing Product Categories, a different URL prefix for the same module', () => {
+  it('marks Settings active while viewing Product Categories, since that page now lives under the Settings IA', () => {
     renderNav('/settings/product-categories');
 
-    expect(screen.getByRole('link', { name: 'Products' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Products' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('marks Settings active for any /settings/* subroute', () => {
+    renderNav('/settings/members');
+
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('marks Reports active for the Reports route', () => {

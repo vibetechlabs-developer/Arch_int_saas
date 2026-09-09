@@ -1,5 +1,5 @@
-import { Bell, LogOut, Menu, Moon, Search, Sun, User as UserIcon } from 'lucide-react';
-import { useLocation, useMatch, useNavigate } from 'react-router-dom';
+import { Bell, LogOut, Menu, Moon, Search, Settings, Sun, User as UserIcon } from 'lucide-react';
+import { Link, useLocation, useMatch, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,7 +14,9 @@ import { Avatar, AvatarFallback, initialsOf } from '@/components/ui/avatar';
 import { QuickCreateMenu } from './QuickCreateMenu';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useCurrentCompanyId } from '@/hooks/useCurrentCompanyId';
 import { NAV_GROUPS } from './navConfig';
+import { ALL_SETTINGS_NAV_ITEMS } from '@/pages/settings/settingsNavConfig';
 import { expenseKeys, invoiceKeys, productKeys, projectKeys, quotationKeys } from '@/lib/queryKeys';
 import type { Project } from '@/lib/api/projects';
 import type { Product } from '@/lib/api/products';
@@ -37,6 +39,7 @@ const ALL_NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
 export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobileNav }: HeaderProps) {
   const { user, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
+  const { companyName, hasMultipleCompanies } = useCurrentCompanyId();
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -47,7 +50,7 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
   // no other way to know the current :projectId.
   const projectMatch = useMatch('/projects/:projectId/*');
   const productMatch = useMatch('/products/:productId');
-  const categoriesMatch = useMatch('/settings/product-categories');
+  const settingsMatch = useMatch('/settings/*');
   const quotationMatch = useMatch('/quotations/:quotationId');
   const invoiceMatch = useMatch('/invoices/:invoiceId');
   const expenseMatch = useMatch('/expenses/:expenseId');
@@ -84,8 +87,10 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
   } else if (productMatch?.params.productId) {
     const cached = queryClient.getQueryData<Product>(productKeys.detail(productMatch.params.productId));
     breadcrumb = cached?.name ? ['Products', cached.name] : ['Products'];
-  } else if (categoriesMatch) {
-    breadcrumb = ['Product Categories'];
+  } else if (settingsMatch) {
+    const subpath = `/${settingsMatch.params['*'] ?? ''}`.replace(/\/$/, '');
+    const item = ALL_SETTINGS_NAV_ITEMS.find((entry) => entry.path === `/settings${subpath}`);
+    breadcrumb = item ? ['Settings', item.label] : ['Settings'];
   } else {
     // Exact match first, then the longest nav path that's a parent of the
     // current route (e.g. /clients/:id under the "Clients" nav item) — a
@@ -177,7 +182,26 @@ export function Header({ onOpenCommandPalette, onOpenNotifications, onOpenMobile
             <DropdownMenuLabel className="flex flex-col gap-0.5 normal-case">
               <span className="text-body font-medium text-text-primary">{user?.name}</span>
               <span className="text-small text-text-tertiary">{user?.email}</span>
+              {companyName && (
+                <span className="mt-1 text-caption text-text-tertiary">
+                  {companyName}
+                  {hasMultipleCompanies && ' · +more workspaces'}
+                </span>
+              )}
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link to="/settings/profile">
+                <UserIcon className="size-4" />
+                Profile
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/settings">
+                <Settings className="size-4" />
+                Settings
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem destructive onSelect={handleLogout}>
               <LogOut className="size-4" />

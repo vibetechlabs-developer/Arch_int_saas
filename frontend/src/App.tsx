@@ -27,6 +27,14 @@ import ProjectDocumentsTab from '@/pages/projects/ProjectDocumentsTab';
 import ProductsListPage from '@/pages/products/ProductsListPage';
 import ProductDetailPage from '@/pages/products/ProductDetailPage';
 import ProductCategoriesPage from '@/pages/settings/ProductCategoriesPage';
+import SettingsLayout from '@/pages/settings/SettingsLayout';
+import SettingsLandingPage from '@/pages/settings/SettingsLandingPage';
+import CompanySettingsPage from '@/pages/settings/CompanySettingsPage';
+import MembersPage from '@/pages/settings/MembersPage';
+import RolesPage from '@/pages/settings/RolesPage';
+import PermissionsPage from '@/pages/settings/PermissionsPage';
+import ProfilePage from '@/pages/settings/ProfilePage';
+import SecurityPage from '@/pages/settings/SecurityPage';
 
 const App: React.FC = () => {
   return (
@@ -64,7 +72,16 @@ const App: React.FC = () => {
                           <Route path="/expenses/:expenseId" element={<ExpenseDetailPage />} />
                           <Route path="/products" element={<ProductsListPage />} />
                           <Route path="/products/:productId" element={<ProductDetailPage />} />
-                          <Route path="/settings/product-categories" element={<ProductCategoriesPage />} />
+                          <Route path="/settings" element={<SettingsLayout />}>
+                            <Route index element={<SettingsLandingPage />} />
+                            <Route path="company" element={<CompanySettingsPage />} />
+                            <Route path="members" element={<MembersPage />} />
+                            <Route path="roles" element={<RolesPage />} />
+                            <Route path="permissions" element={<PermissionsPage />} />
+                            <Route path="product-categories" element={<ProductCategoriesPage />} />
+                            <Route path="profile" element={<ProfilePage />} />
+                            <Route path="security" element={<SecurityPage />} />
+                          </Route>
                           <Route path="*" element={<Navigate to="/dashboard" replace />} />
                         </Routes>
                       </Shell>
