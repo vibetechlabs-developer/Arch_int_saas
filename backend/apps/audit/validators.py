@@ -7,7 +7,12 @@ from typing import Any, Dict, Optional
 # so a secret leaked here can't be pruned/rotated away like a normal log
 # line. Anything not explicitly listed is silently dropped, never persisted.
 ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
-    "role": {"name", "description", "is_active"},
+    # memberships_unassigned: only present on a delete event (BE-073) —
+    # count of CompanyMembership rows whose role FK was cleared to null as
+    # part of deleting this role (mirrors the FK's own on_delete=SET_NULL
+    # intent, which soft-delete never triggers on its own). A safe integer,
+    # not sensitive.
+    "role": {"name", "description", "is_active", "memberships_unassigned"},
     "company": {"name", "status", "currency", "gst_number", "settings"},
     # Authentication events (login/logout/refresh/password reset) audit the
     # "user" entity. Deliberately excludes password/password_hash/token

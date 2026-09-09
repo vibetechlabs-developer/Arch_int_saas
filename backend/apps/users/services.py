@@ -299,6 +299,7 @@ class RoleService:
             }
 
             RoleRepository.soft_delete(role)
+            unassigned_count = RoleRepository.unassign_from_memberships(role_id_val)
 
             AuditLogService.record(
                 action=AuditAction.DELETE,
@@ -306,7 +307,7 @@ class RoleService:
                 entity_id=role_id_val,
                 company_id=company_id_val,
                 actor_user=actor_user,
-                before_state=before_state,
+                before_state={**before_state, "memberships_unassigned": unassigned_count},
                 request=request,
             )
 

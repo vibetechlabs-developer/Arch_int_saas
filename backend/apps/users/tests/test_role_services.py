@@ -200,3 +200,110 @@ class RoleServiceTestCase(TestCase):
         entry = AuditLog.objects.get(entity_type="role", entity_id=role_id, action="delete")
         self.assertEqual(entry.before_state["name"], "Project Manager")
         self.assertIsNone(entry.after_state)
+
+    def test_soft_delete_role_unassigns_members_holding_it(self):
+        """
+        BE-073: deleting a role that is still assigned to an active
+        membership must not leave that membership silently pointing at a
+        role invisible everywhere else in the API. Soft-delete never
+        triggers Django's on_delete=SET_NULL (that only fires on a real DB
+        DELETE), so RoleService.soft_delete_role must replicate that FK's
+        own declared intent itself.
+        """
+        from apps.users.models import CompanyMembership, CompanyMembershipStatus, User
+
+        user = User.objects.create_user(
+            email="role-delete-safety@example.com", name="Holder", password="Xx!12345678"
+        )
+        membership = CompanyMembership.objects.create(
+            company=self.company1,
+            user=user,
+            role=self.role1,
+            status=CompanyMembershipStatus.ACTIVE,
+        )
+
+        RoleService.soft_delete_role(self.role1.id)
+
+        membership.refresh_from_db()
+        self.assertIsNone(membership.role_id)
+
+    def test_soft_delete_role_revokes_effective_permissions_for_holders(self):
+        """
+        BE-073: the authorization-relevant end state — a member holding a
+        deleted role must end up with zero effective permission codes, not
+        merely a cosmetically-cleared roleId.
+        """
+        from apps.users.models import (
+            CompanyMembership,
+            CompanyMembershipStatus,
+            Permission,
+            RolePermission,
+            User,
+        )
+        from apps.users.services import PermissionService
+
+        permission = Permission.objects.first()
+        RolePermission.objects.create(role=self.role1, permission=permission)
+
+        user = User.objects.create_user(
+            email="role-delete-safety-2@example.com", name="Holder", password="Xx!12345678"
+        )
+        membership = CompanyMembership.objects.create(
+            company=self.company1,
+            user=user,
+            role=self.role1,
+            status=CompanyMembershipStatus.ACTIVE,
+        )
+
+        before = PermissionService.get_permission_codes_for_membership(
+            CompanyMembership.objects.select_related("role").get(id=membership.id)
+        )
+        self.assertIn(permission.code, before)
+
+        RoleService.soft_delete_role(self.role1.id)
+
+        after = PermissionService.get_permission_codes_for_membership(
+            CompanyMembership.objects.select_related("role").get(id=membership.id)
+        )
+        self.assertEqual(after, set())
+
+    def test_soft_delete_role_leaves_other_memberships_untouched(self):
+        """
+        The unassign-on-delete bulk update must be scoped to the deleted
+        role only — a membership on a different, still-active role must
+        keep its role assignment.
+        """
+        from apps.users.models import CompanyMembership, CompanyMembershipStatus, User
+
+        user = User.objects.create_user(
+            email="role-delete-safety-3@example.com", name="Other Holder", password="Xx!12345678"
+        )
+        untouched_membership = CompanyMembership.objects.create(
+            company=self.company1,
+            user=user,
+            role=self.role2,
+            status=CompanyMembershipStatus.ACTIVE,
+        )
+
+        RoleService.soft_delete_role(self.role1.id)
+
+        untouched_membership.refresh_from_db()
+        self.assertEqual(untouched_membership.role_id, self.role2.id)
+
+    def test_soft_delete_role_audit_log_records_unassigned_count(self):
+        from apps.users.models import CompanyMembership, CompanyMembershipStatus, User
+
+        user = User.objects.create_user(
+            email="role-delete-safety-4@example.com", name="Holder", password="Xx!12345678"
+        )
+        CompanyMembership.objects.create(
+            company=self.company1,
+            user=user,
+            role=self.role1,
+            status=CompanyMembershipStatus.ACTIVE,
+        )
+
+        RoleService.soft_delete_role(self.role1.id)
+
+        entry = AuditLog.objects.get(entity_type="role", entity_id=self.role1.id, action="delete")
+        self.assertEqual(entry.before_state["memberships_unassigned"], 1)

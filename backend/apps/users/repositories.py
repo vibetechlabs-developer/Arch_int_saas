@@ -53,6 +53,24 @@ class RoleRepository:
         role.delete()
 
     @staticmethod
+    def unassign_from_memberships(role_id: str | uuid.UUID) -> int:
+        """
+        Clear the role FK (set to null) on every membership currently
+        pointing at role_id. Soft-deleting a Role never triggers Django's
+        on_delete=SET_NULL collector — that only fires on a real DB DELETE
+        — so without this, a membership keeps referencing a role that no
+        longer appears anywhere in the Roles API, and (per
+        PermissionService.get_permission_codes_for_membership, which keys
+        off role.is_active rather than role.deleted_at) keeps its full
+        permission grant indefinitely. Explicitly replicating the FK's own
+        declared SET_NULL intent here closes that gap: a membership left
+        without a role is already the documented, tested, fail-closed
+        "zero permission codes" state used elsewhere in this module.
+        Returns the number of memberships affected, for audit logging.
+        """
+        return CompanyMembership.objects.filter(role_id=role_id).update(role=None)
+
+    @staticmethod
     def get_company_by_id(company_id: str | uuid.UUID) -> Company:
         try:
             return Company.objects.get(id=company_id)
