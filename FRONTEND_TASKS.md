@@ -248,6 +248,26 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 
 **Remaining gap:** self/last-owner safety is now backend-enforced (see BE-071) — the frontend's existing client-side disabling of Suspend/Remove on one's own row (Phase 12) is now a UX courtesy on top of real server enforcement, not the only protection.
 
+## Phase 14 — Role Permission Management (completes Roles & Permissions)
+
+| Task | Description | Status |
+|---|---|---|
+| F37 | Manage Permissions on any role (not just newly-created ones) — pre-checks real persisted grants via new `GET /roles/{id}/permissions` | Review |
+
+**Implementation notes (F37):**
+- Closes the exact gap Phase 12's own report flagged: `AssignInitialPermissionsDialog` (blank-only, new-role-only) is replaced by `ManagePermissionsDialog` — same UI, but now fetches the role's real current grants (`getRolePermissions`, `BACKEND_TASKS.md` BE-072) before rendering, so every checkbox reflects actual server state rather than assuming empty. The "Roles page can't edit an existing role's permissions" `Alert` banner is removed — it's no longer true.
+- "Manage permissions" is now a row action on every role in the Roles table (previously reachable only immediately after Create Role).
+- **No state leakage between roles**: switching which role the dialog is pointed at re-keys the `getRolePermissions` query (`roleKeys.permissions(roleId)`) and a `useEffect` re-syncs local checkbox state from the freshly-fetched grants every time — verified directly (`ManagePermissionsDialog.test.tsx`, Role A → Role B test).
+- **Save submits the complete edited set**, matching the backend's confirmed full-replacement semantics — never just the checkboxes the admin touched this session (verified: an existing grant not touched by the admin is still included in the submitted array).
+- **Reopen reflects persisted server state**, not stale local state — verified by mocking the grants endpoint to return updated data post-save, then closing/reopening the dialog and asserting the newly-fetched (not remembered) state renders.
+- 403 on the grants fetch renders `RestrictedState`; any other failure renders `ErrorState` (never a silently-empty permission list, which would look identical to "this role really has no permissions").
+- Save button uses `mutation.isPending` (disabled + no duplicate submission verified directly).
+- Dirty-state indicator ("You have unsaved changes.") follows the same non-blocking text-hint convention already established on `CompanySettingsPage` — no new blocking-confirm pattern was invented.
+- New `ManagePermissionsDialog.test.tsx` (9 tests) exercises the dialog directly via props (`open`/`role`) rather than through the Roles table's row-actions `DropdownMenu` — the same documented Radix+jsdom environment limitation from Phase 12/13 still applies to that menu's *click-to-open* path, but every actual editing behavior (pre-check, isolation, save semantics, persistence-on-reopen, error states, duplicate-submit prevention) is fully covered this way, not skipped.
+- Frontend tests: 280 total, 274 passed, **6 skipped — unchanged baseline** (14 new tests: 9 in `ManagePermissionsDialog.test.tsx`, `RolesPage.test.tsx` updated). TypeScript: PASS. Build: PASS.
+- Live HTTP verification performed against a genuinely running `manage.py runserver` (not just Django's test client) — full lifecycle (login → list roles → read initial grants → add a grant → confirm persisted → remove a grant → confirm persisted → cross-tenant 404 → unauthenticated 401) all passed; verification data cleaned up afterward.
+- Visual QA: **PENDING** — no browser tooling available in this environment.
+
 ## Not Yet Started
 
 Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Workspace/company switching (see Admin & Settings gaps above). Last-owner/protected-role safety (blocked on `Role.system_key`, BE-069).

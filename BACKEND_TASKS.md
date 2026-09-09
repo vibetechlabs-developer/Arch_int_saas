@@ -1341,6 +1341,35 @@ Depends On
 | BE-069 | Add a stable, non-user-editable identifier to `Role` (e.g. a `system_key` field, never exposed via `/roles`) so default-role reconciliation migrations (`0006`–`0008`) stop matching by exact display `name` — a real forward risk once customer-created roles exist, flagged during BE-054's migration safety review. |
 | BE-070 | Fix `apps.authentication` throttle-cache test-isolation leak reproducible under `manage.py test` (13 failures + 3 errors) — see writeup below. | **Review** |
 | BE-071 | Add User / secure company user onboarding — `POST /company-memberships/add-user`, self-suspend/self-remove safety guards — see writeup below. | **Review** |
+| BE-072 | Role permission read-back — `GET /roles/{id}/permissions` — see writeup below. | **Review** |
+
+#### BE-072 — Role Permission Read-Back — 2026-09-09
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** High — without this, no UI could ever safely show which permissions a role currently holds, blocking a real "Edit Permissions" experience for anything but a just-created (blank) role.
+
+**Owner:** Backend Team
+
+**Problem:** `PUT /roles/{id}/permissions` (BE-049/BE-051) was write-only — `RoleSerializer` never included granted codes, and no `GET` variant of the action existed. A frontend editing an existing, already-configured role's permissions had no way to know what was currently granted, so it could only safely operate on a role with zero grants (immediately post-creation).
+
+**Endpoint:** `GET /roles/{id}/permissions` — added as a second action method (`RoleViewSet.retrieve_permissions`) dispatched to the *same URL* as the existing `PUT .../permissions` (`permissions_action`), via `urls.py`'s existing manual-mapping convention (`role_permissions = RoleViewSet.as_view({"get": "retrieve_permissions", "put": "permissions_action"})`) — identical to how `role_detail` already dispatches 4 different methods from one URL. This let GET and PUT carry **different** permission codes despite sharing a path: `retrieve_permissions` → `role.view` (a read action, same code as `list`/`retrieve`), `permissions_action` (PUT) → unchanged `role.manage`. No second URL pattern was created.
+
+**Response:** `{roleId, permissionCodes: [...]}` (new `RolePermissionsSerializer`), sorted list, inside the standard envelope.
+
+**Source of truth:** `PermissionRepository.codes_for_role` — the exact same, already-existing, soft-delete-aware query `assign_permissions` already used internally to compute `before_codes`/escalation checks. Nothing was reconstructed from `DEFAULT_ROLE_PERMISSIONS` or any other seed data; confirmed by `test_returns_persisted_grants_not_defaults` and `test_soft_deleted_grant_is_not_returned`.
+
+**Tenant isolation / auth:** Identical `get_role_by_id(pk)` + `check_object_permissions` pattern every other action in this viewset uses — cross-tenant role → 404 (not 403, anti-enumeration preserved), same-tenant without `role.view` → 403, platform admin → unrestricted. No role-name-based authorization anywhere.
+
+**Assignment semantics (unchanged, verified not just assumed):** `PUT` is a full-replacement write, confirmed via `test_put_replaces_the_entire_set_not_a_delta` — granting `["invoice.view"]` after `["project.view", "project.edit"]` already existed leaves only `invoice.view`.
+
+**Privilege escalation:** No change to `assign_permissions`' existing guard — re-verified still blocked (`test_privilege_escalation_still_blocked_on_assignment`), and confirmed nothing is actually granted when a rejected request is attempted.
+
+**Role.system_key (BE-069):** Still unresolved, not touched by this task. No role-name comparisons were introduced anywhere in this work.
+
+**Tests:** `apps/users/tests/test_role_permissions_readback.py` (17 tests) — persisted-state read-back, empty set, multi-permission, only-this-role's-grants, soft-deleted-grant exclusion, cross-tenant 404, nonexistent-role 404, unauthenticated 401, missing-`role.view` 403, inactive-role-still-readable, platform-admin cross-company read, write-then-read persistence (add + remove), replace-all semantics, privilege escalation regression, read-produces-no-audit-noise, mutation-still-audited, no-unrelated-tenant-grants-leaked.
+
+**Validation:** `test_role_permissions_readback.py`: **17 passed** (isolated). Full `apps.users`+`apps.authentication`+`apps.audit` regression: **308 passed, 0 failed** (was 291 before this task — the +17 is exactly this new file, confirming zero regressions elsewhere). Real HTTP lifecycle verified against a genuinely running `manage.py runserver` instance (not just the Django test client): login → list roles → GET role A's initial grant → PUT to add a permission → GET confirms persistence → PUT to remove one (replace-all) → GET confirms removal → cross-tenant role access → 404 → unauthenticated mutation → 401. All seeded verification data (test company/user/roles) was deleted afterward; no mutations left behind.
 
 #### BE-071 — Add User / Secure Company User Onboarding — 2026-09-09
 
