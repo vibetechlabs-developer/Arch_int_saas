@@ -226,9 +226,8 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 
 **Remaining Admin/Settings gaps (flagged, not invented around):**
 - No `GET /auth/permissions`-style "my resolved permission codes" endpoint — the frontend cannot hide Settings sections/buttons by permission, only react to a 403 (matches the Reports precedent, not a regression).
-- No workspace/company switcher — a multi-membership user sees only their first active company; switching would require injecting `companyId` into every existing API call's request (query param for GET, body field for non-GET), a cross-cutting change to `apiClient`'s interceptor deliberately deferred rather than rushed given its blast radius across every already-shipped module.
-- No `Role.system_key`/protected-role flag (pre-existing `BE-069` debt) — Roles page never invents edit/delete restrictions from role names.
-- Role delete does not revoke access from members still holding it (soft-delete doesn't null the FK) — documented in code, not solved client-side.
+- No `Role.system_key`/protected-role flag (pre-existing `BE-069` debt) — Roles page never invents edit/delete restrictions from role names; last-owner protection remains unbuilt for the same reason.
+- ~~No workspace/company switcher~~ and ~~role delete does not revoke access~~ — both closed in Phase 15 below.
 
 ## Phase 13 — Add User Management
 
@@ -268,6 +267,24 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 - Live HTTP verification performed against a genuinely running `manage.py runserver` (not just Django's test client) — full lifecycle (login → list roles → read initial grants → add a grant → confirm persisted → remove a grant → confirm persisted → cross-tenant 404 → unauthenticated 401) all passed; verification data cleaned up afterward.
 - Visual QA: **PENDING** — no browser tooling available in this environment.
 
+## Phase 15 — Admin & Settings Completion Audit
+
+| Task | Description | Status |
+|---|---|---|
+| F38 | Real workspace switcher — Header dropdown backed by a reactive `activeCompanyStore`, wired into the axios client's `companyId` param on every request | Review |
+| F39 | Product Categories 403 handling, orphaned Permission catalog page added to Settings nav/command palette, stale role-delete copy corrected | Review |
+
+**Implementation notes (F38/F39):**
+- **Workspace switching was a functional bug, not just a missing feature.** `TenantJWTAuthentication` (backend) resolves tenant scope per-request from a `companyId` query param/body field — it was never baked into the JWT — but `apiClient` never attached one anywhere. Confirmed live: any user with more than one active company membership got a bare 403 (`"Multiple active company memberships found; specify companyId."`) on every single non-exempt call. The Header's "· +more workspaces" text was decorative — it never changed backend tenant context, exactly the anti-pattern this task was told not to build.
+- Fix: new `frontend/src/lib/activeCompany.ts` (plain module-level pub-sub store, not React state, so the axios request interceptor — which runs outside React — can read it synchronously); `apiClient`'s request interceptor now attaches the stored `companyId` to every outgoing request; `useCurrentCompanyId` made reactive via `useSyncExternalStore` and normalizes to the first membership whenever the stored id is missing or no longer valid (a switched account, a revoked membership); Header's user menu gained a real "Switch workspace" list wired to every active membership.
+- **Cache safety on switch**: most existing query keys in this app (clients, projects, products, roles, memberships, ...) were never designed to carry `companyId` — there was only ever one tenant per session until now. Rather than rewrite every module's key factory (out of scope, high blast radius), switching calls `queryClient.clear()` (a deliberate full reset, not a targeted invalidation) and navigates to `/dashboard` so no stale detail page from the old tenant renders. `company.detail(id)`/`role.permissions(id)`-style keys that already embed an id are unaffected either way.
+- **Role delete safety root cause found live** (see `BACKEND_TASKS.md` BE-073): soft-deleting a role left it granting full access to every member still assigned to it. Fixed backend-side; the Roles page's delete-confirmation copy and its `Info` footer note (previously "does not automatically reassign") were corrected to describe the real new behavior — members are unassigned (not reassigned), losing the role's permissions immediately.
+- Orphaned page found and fixed: `/settings/permissions` (Permission catalog) had a live route but no entry anywhere in `SETTINGS_NAV_GROUPS` — reachable only by typing the URL. Added to the Organization group, which also surfaces it on the Settings landing page and its own sub-nav rail automatically. Command palette gained the 3 settings pages it was missing (Product Categories, Profile, Security).
+- Product Categories' 403 path fell through to the generic `ErrorState` (with a misleading "Try again" retry action) instead of `RestrictedState`, inconsistent with every other Settings page — corrected.
+- New tests: `activeCompany.test.ts` (3), `useCurrentCompanyId.test.tsx` (4, covering default-to-first-membership, honoring a valid stored selection, falling back when the stored id is stale/revoked, and single-membership `hasMultipleCompanies=false`). Frontend tests: 287 total, 281 passed, **6 skipped — unchanged baseline**. TypeScript: PASS. Build: PASS.
+- Live HTTP verification: seeded one user with active memberships in two companies, confirmed no-`companyId` returns the exact 403 the interceptor now avoids, confirmed `?companyId=A`/`?companyId=B` each return correctly tenant-isolated data for the same user, confirmed the role-delete fix end-to-end. All seeded data deleted afterward.
+- Visual QA: **PENDING** — no browser tooling available in this environment; the switcher's click-driven interaction (Radix `DropdownMenu`) could not be exercised in Jest either, per the established environment limitation — its underlying logic (store, hook, interceptor) is covered instead, consistent with the `ManagePermissionsDialog` precedent.
+
 ## Not Yet Started
 
-Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Workspace/company switching (see Admin & Settings gaps above). Last-owner/protected-role safety (blocked on `Role.system_key`, BE-069).
+Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Last-owner/protected-role safety (blocked on `Role.system_key`, BE-069).

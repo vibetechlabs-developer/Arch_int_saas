@@ -1342,6 +1342,25 @@ Depends On
 | BE-070 | Fix `apps.authentication` throttle-cache test-isolation leak reproducible under `manage.py test` (13 failures + 3 errors) — see writeup below. | **Review** |
 | BE-071 | Add User / secure company user onboarding — `POST /company-memberships/add-user`, self-suspend/self-remove safety guards — see writeup below. | **Review** |
 | BE-072 | Role permission read-back — `GET /roles/{id}/permissions` — see writeup below. | **Review** |
+| BE-073 | Role delete safety — deleting an assigned role now unassigns affected memberships instead of leaving them with retained access — see writeup below. | **Review** |
+
+#### BE-073 — Role Delete Safety — 2026-09-09
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** High — a real, confirmed authorization-consistency gap, not a hypothetical one.
+
+**Owner:** Backend Team
+
+**Problem, confirmed empirically (not guessed):** soft-deleting a `Role` that one or more active `CompanyMembership` rows still referenced left those members with their full permission grant from that role, indefinitely. Root cause, verified with a direct reproduction against the database: `RoleRepository.soft_delete` only sets `deleted_at` — it never touches `is_active`, and Django's `on_delete=SET_NULL` on `CompanyMembership.role` only fires on a real DB `DELETE`, which a soft-delete `save()` never triggers. `PermissionService.get_permission_codes_for_membership` gates on `role.is_active` (untouched by delete), and `PermissionRepository.codes_for_role` filters `RolePermission` by `role_id` without checking whether the `Role` itself is soft-deleted. Net effect: `GET /roles/{id}` correctly 404s post-delete (the role vanishes from the Roles admin UI), but the membership silently kept full access, and `CompanyMembershipSerializer` kept showing the stale `roleId`/`roleName` of a role that no longer existed anywhere else in the API — reproduced and confirmed via a live `manage.py shell` script before any fix was written (seeded data cleaned up immediately after).
+
+**Fix:** `RoleRepository.unassign_from_memberships(role_id)` (new) bulk-clears the `role` FK to `null` on every membership referencing it, called from `RoleService.soft_delete_role` immediately after the soft-delete. This explicitly replicates the FK's own already-declared `on_delete=SET_NULL` intent, which soft-delete alone never triggers — it does not invent new semantics. A membership left with no role is already the documented, tested, fail-closed "zero permission codes" state used everywhere else in this module (`get_permission_codes_for_membership` returns `set()` when `role_id is None`). No role deletion is blocked; no `system_key`/role-name matching was introduced anywhere.
+
+**Audit trail:** the existing `role`/`delete` audit log entry's `before_state` now also carries `memberships_unassigned` (an integer count) — added to `apps/audit/validators.py`'s per-entity allowlist (a safe, non-sensitive field).
+
+**Tests:** 4 new tests in `apps/users/tests/test_role_services.py` — membership unassigned on delete, effective permissions revoked (with a real granted permission, not just an empty set), unrelated memberships on other roles left untouched, audit log records the affected count.
+
+**Validation:** New tests: 4/4 passed. Full `apps.users`+`apps.authentication`+`apps.company`+`apps.audit` regression: **362 passed, 0 failed**. Live HTTP verification against a genuinely running `manage.py runserver`: created a role, added a member under it, confirmed the membership showed the role, deleted the role, confirmed the membership's `roleId`/`roleName` immediately became `null`, confirmed the role itself 404s. All seeded data deleted afterward.
 
 #### BE-072 — Role Permission Read-Back — 2026-09-09
 
