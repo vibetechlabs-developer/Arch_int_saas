@@ -46,6 +46,13 @@ class InvoiceSerializer(serializers.ModelSerializer):
     dueDate = serializers.DateField(source="due_date", read_only=True, allow_null=True)
     paymentTerms = serializers.CharField(source="payment_terms", read_only=True)
     status = serializers.SerializerMethodField()
+    # BE-074: backend-authoritative payment aggregates -- read-only by
+    # construction (SerializerMethodField has no setter, and neither field
+    # is listed in InvoiceUpdateSerializer, so a client-supplied
+    # paidAmount/outstandingAmount in a PATCH body is simply ignored, never
+    # applied). Never reconstructed on the frontend from PaymentHistory.
+    paidAmount = serializers.SerializerMethodField()
+    outstandingAmount = serializers.SerializerMethodField()
     items = InvoiceItemSerializer(many=True, read_only=True)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
@@ -68,6 +75,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "dueDate",
             "paymentTerms",
             "status",
+            "paidAmount",
+            "outstandingAmount",
             "notes",
             "items",
             "createdAt",
@@ -77,6 +86,12 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
     def get_status(self, obj: Invoice) -> str:
         return InvoiceService.compute_effective_status(obj)
+
+    def get_paidAmount(self, obj: Invoice) -> str:
+        return str(InvoiceService.get_paid_amount(obj))
+
+    def get_outstandingAmount(self, obj: Invoice) -> str:
+        return str(InvoiceService.compute_outstanding_amount(obj))
 
 
 class InvoiceItemInputSerializer(serializers.Serializer):

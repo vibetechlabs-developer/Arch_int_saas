@@ -14,6 +14,7 @@ from apps.common.exceptions import ConflictError
 from apps.invoices import selectors, validators
 from apps.invoices.models import Invoice, InvoiceItem, InvoiceStatus
 from apps.invoices.repositories import InvoiceItemRepository, InvoiceRepository
+from apps.payments.repositories import PaymentRepository
 from apps.projects.models import Project
 from apps.quotations.models import QuotationStatus
 from apps.quotations.services import QuotationService
@@ -159,6 +160,43 @@ class InvoiceService:
         ):
             return InvoiceStatus.OVERDUE
         return invoice.status
+
+    @classmethod
+    def get_paid_amount(cls, invoice: Invoice) -> Decimal:
+        """
+        BE-074: the authoritative, backend-computed sum of this invoice's
+        active (non-voided) payments. `InvoiceRepository.get_by_id`/
+        `all_for_project` and `selectors.list_invoices_for_project` all
+        annotate every Invoice they return with `paid_amount` (one query
+        total, never N+1 -- see `apps.invoices.repositories.
+        with_paid_amount`), so the common case here is reading that
+        already-fetched value with zero extra queries. The one-time,
+        single-row fallback query only fires for an Invoice instance that
+        was mutated and returned in-memory without being re-fetched
+        (create/update/send/cancel's own response) -- correct either way,
+        never a missing or stale figure.
+        """
+        annotated = getattr(invoice, "paid_amount", None)
+        if annotated is not None:
+            return annotated
+        return PaymentRepository.sum_active_amount_for_invoice(invoice.id)
+
+    @classmethod
+    def compute_outstanding_amount(cls, invoice: Invoice) -> Decimal:
+        """
+        BE-074: `max(total - paidAmount, 0)` -- overpayment (explicitly
+        allowed, unchanged by this task: PaymentService.create_payment has
+        no upper bound on amount, and recompute_status_from_payments
+        already treats `paid_total >= total` as simply `paid`, nothing
+        more) never produces a negative "balance due", which would read as
+        the company owing the client money -- not a real state this
+        product models. The real, larger paid figure is still reported by
+        `paidAmount` unchanged; only the derived remaining-balance figure
+        is floored at zero.
+        """
+        paid_amount = cls.get_paid_amount(invoice)
+        remaining = invoice.total - paid_amount
+        return remaining if remaining > 0 else Decimal("0.00")
 
     @classmethod
     def create_invoice(
