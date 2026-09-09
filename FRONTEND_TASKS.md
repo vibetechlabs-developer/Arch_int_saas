@@ -186,6 +186,50 @@ Commit: `a767a6e` (`feat(frontend): implement project BOQ workspace`).
 - Frontend tests: 218 passed, 6 skipped — **zero new skips**. TypeScript: PASS. Build: PASS.
 - Live API smoke test: not run — no local backend session was available in this phase; the contract above was established entirely via direct backend code reading (services/serializers/views/tests), consistent with how the Activity Log phase's blocker was also established without live calls.
 
+## Phase 11b — Tracker Reconciliation (shipped, previously untracked)
+
+Two phases shipped in prior sessions with no `FRONTEND_TASKS.md` entry — reconciled here per the Admin & Settings task's explicit instruction, statuses unchanged from their own commits.
+
+| Task | Description | Status |
+|---|---|---|
+| F25 | Product Image Upload (real multipart `POST /products/images/upload`, `ProductImagePicker`, replace/remove lifecycle) | Review |
+| F26 | Navigation discoverability fixes (sidebar active-state cross-path matching, breadcrumb project-context for Quotation/Invoice/Expense) | Review |
+
+Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
+
+## Phase 12 — Admin & Settings
+
+| Task | Description | Status |
+|---|---|---|
+| F27 | Settings shell (`/settings/*` nested layout, grouped internal nav, landing page) | Review |
+| F28 | Company Settings (`/settings/company` — view/edit name, currency, GSTIN) | Review |
+| F29 | Member management (`/settings/members` — list, invite, view detail, change role, suspend, reactivate, remove) | Review |
+| F30 | Role management (`/settings/roles` — list, create, edit metadata, delete, initial permission assignment on create) | Review |
+| F31 | Permission catalog (`/settings/permissions`, read-only, grouped by module) | Review |
+| F32 | Profile (`/settings/profile`, read-only) | Review |
+| F33 | Security (`/settings/security` — send-password-reset-email action only) | Review |
+| F34 | Navigation integration (Settings sidebar entry, Header user-menu Profile/Settings links + workspace name, breadcrumbs, Command Palette entries) | Review |
+
+**Implementation notes (F27–F34):**
+- Backend contract audited directly from `apps/company`, `apps/users`, `apps/authentication` (models/serializers/views/urls/services) before writing any UI — see the full ADMIN API CONTRACT delivered with this phase's report.
+- **No "get current company" endpoint exists.** `GET /auth/memberships` (never previously called anywhere in the frontend) is the only source of the caller's own `companyId`; a new `useCurrentCompanyId()` hook resolves it from the first active membership, matching the app's existing single-membership assumption (no workspace switcher was built — the current company's name is now shown in the Header user menu, but switching between multiple memberships remains out of scope, flagged below).
+- **`Company` has no address, logo, or timezone field** — only `name`/`status`/`currency`/`gstNumber`/`settings` exist. Company Settings exposes exactly those (minus `status`, which the backend silently no-ops for non-platform-admins rather than erroring — shown read-only instead of as a misleading control).
+- **BLOCKED, not built: editing an existing role's permissions.** `PUT /roles/{id}/permissions` is a full-replacement write with no corresponding read endpoint anywhere in the backend (`RoleSerializer` never includes granted codes, and there is no `GET /roles/{id}/permissions`). A checkbox editor for an already-configured role would have no way to show which codes are currently granted, risking a blind save silently wiping real access. Per the "stop and document" rule, this was not built; the Roles page's Permissions section instead documents the exact gap inline. Permission assignment **is** fully supported for a **newly created** role only, where "nothing granted yet" is accurate rather than assumed (`AssignInitialPermissionsDialog`, chained automatically from Create Role).
+- **No self-action protection exists server-side** for suspend/remove (`CompanyMembershipService` has no actor-vs-target check anywhere) — the Members page disables Suspend and Remove on the current user's own row as a client-side safety courtesy, since the backend will not stop it.
+- **No profile-edit or in-session change-password endpoint exists.** Profile is read-only by design (not a stripped-down form). Security ships exactly one real capability — sending a password-reset email via the existing (previously frontend-unused) `POST /auth/forgot-password`, pre-targeted at the caller's own address — and explicitly states that 2FA/session-management aren't available, rather than showing dead controls.
+- Product Categories (`/settings/product-categories`, shipped in F9) was moved into the new Settings IA: the primary sidebar's Products item no longer special-cases it via `matchPaths` — visiting it now correctly activates the "Settings" sidebar entry, since it's a settings concern, not a Products-workflow one. `RestrictedState` was promoted from `components/reports/` to `components/common/` (Reports' own imports updated) since Settings pages now share it for 403s.
+- `StatusBadge`'s semantic map gained `invited`→info/`revoked`→danger for `CompanyMembershipStatus` (`active` already existed, shared with Product's own `active` status).
+- **KNOWN ENVIRONMENT LIMITATION, confirmed this phase, extending the existing 6-skip Radix+jsdom baseline**: an isolated minimal reproduction (a bare Radix `DropdownMenu` and a bare Radix `Select`, zero app code) confirmed both hang indefinitely on `userEvent.click` of their trigger in this Jest/jsdom setup, with or without `pointerEventsCheck: 0`. Per the same convention established in `ProductFormSheet.test.tsx`, tests requiring one of these to open were not written (not skipped) — see `MembersPage.test.tsx`/`RolesPage.test.tsx`'s own docstrings for the exact list of untested flows (invite-form role selection, and every DropdownMenu-gated row action: change role, suspend, reactivate, remove, edit role, delete role) and a plausible root cause worth a dedicated look: `package.json` pins `jest@^29.7.0` against `jest-environment-jsdom@^30.5.1`, a major-version mismatch.
+- Full lifecycle exercised via automated tests where the above limitation allows (list/empty/403/detail-view/create-role/permission-assignment-on-create/409-conflict flows); the DropdownMenu-gated mutations (change role, suspend, reactivate, remove, edit, delete) were **not** live-smoke-tested against a running backend in this phase either — no local backend session was available, consistent with how F23/F24 was also established via code-reading alone.
+- Frontend tests: 265 total, 259 passed, **6 skipped — unchanged baseline** (26 new tests added, 0 new skips). TypeScript: PASS. Build: PASS.
+- Visual QA: **PENDING** — no browser tooling available in this environment; see the phase's final report.
+
+**Remaining Admin/Settings gaps (flagged, not invented around):**
+- No `GET /auth/permissions`-style "my resolved permission codes" endpoint — the frontend cannot hide Settings sections/buttons by permission, only react to a 403 (matches the Reports precedent, not a regression).
+- No workspace/company switcher — a multi-membership user sees only their first active company; switching would require injecting `companyId` into every existing API call's request (query param for GET, body field for non-GET), a cross-cutting change to `apiClient`'s interceptor deliberately deferred rather than rushed given its blast radius across every already-shipped module.
+- No `Role.system_key`/protected-role flag (pre-existing `BE-069` debt) — Roles page never invents edit/delete restrictions from role names.
+- Role delete does not revoke access from members still holding it (soft-delete doesn't null the FK) — documented in code, not solved client-side.
+
 ## Not Yet Started
 
-Team/Roles management screens, Settings — per `06_UI/Wireframes.md`'s module order, each its own approved increment. Activity Log is blocked (see Phase 10), not merely deferred.
+Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Workspace/company switching (see Admin & Settings gaps above).
