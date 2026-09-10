@@ -18,6 +18,17 @@ django-environ>=0.12.1,<0.13
 # Image Processing
 Pillow>=11.3.0,<12.0
 
+# PDF Generation (BOQ/Quotation/Invoice export)
+# Chosen over WeasyPrint: WeasyPrint is incidentally present in some local
+# dev environments' Python installs but requires native GTK/Pango/Cairo
+# system libraries not declared anywhere in this project and not installed
+# in every environment (confirmed broken on at least one contributor's
+# Windows dev machine, missing libgobject-2.0-0) -- xhtml2pdf is pure
+# Python (reportlab-based), needs no system packages on any platform, and
+# still renders from Django HTML templates + CSS, preserving the intended
+# "template -> PDF engine" architecture.
+xhtml2pdf>=0.2.18,<0.3
+
 # Asynchronous Tasks & Caching
 redis>=5.3.1,<6.0
 celery>=5.5.3,<5.6

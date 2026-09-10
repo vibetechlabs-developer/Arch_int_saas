@@ -1,0 +1,246 @@
+{% load pdf_filters %}
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>{{ document_title }}</title>
+<style>
+    @page {
+        size: a4 portrait;
+        margin: 2.2cm 1.6cm 2cm 1.6cm;
+        @frame footer_frame {
+            -pdf-frame-content: footer_content;
+            bottom: 0.9cm;
+            margin-left: 1.6cm;
+            margin-right: 1.6cm;
+            height: 1cm;
+        }
+    }
+
+    * {
+        font-family: Helvetica, Arial, sans-serif;
+    }
+
+    body {
+        font-size: 9pt;
+        color: #2b2b2b;
+        background-color: #ffffff;
+    }
+
+    /* ---- Document header (company / doc type+number+status) ---- */
+    table.doc-header {
+        width: 100%;
+        margin-bottom: 10pt;
+    }
+    table.doc-header td {
+        vertical-align: top;
+        padding: 0;
+    }
+    .company-name {
+        font-size: 15pt;
+        font-weight: bold;
+        color: #1a1a1a;
+    }
+    .company-meta {
+        font-size: 8pt;
+        color: #6b6b6b;
+        margin-top: 2pt;
+    }
+    .doc-type {
+        font-size: 14pt;
+        font-weight: bold;
+        text-align: right;
+        color: #1a1a1a;
+    }
+    .doc-number {
+        font-size: 9pt;
+        text-align: right;
+        color: #4a4a4a;
+        margin-top: 2pt;
+    }
+    .status-badge {
+        display: inline;
+        font-size: 7.5pt;
+        font-weight: bold;
+        letter-spacing: 0.5pt;
+        text-transform: uppercase;
+        color: #4a4a4a;
+        border: 0.75pt solid #9a9a9a;
+        padding: 2pt 6pt;
+        margin-top: 4pt;
+    }
+
+    hr.rule {
+        border: none;
+        border-top: 0.75pt solid #d5d5d5;
+        margin: 8pt 0 10pt 0;
+    }
+
+    /* ---- Parties (client / project) ---- */
+    table.parties {
+        width: 100%;
+        margin-bottom: 14pt;
+    }
+    table.parties td {
+        vertical-align: top;
+        width: 50%;
+        padding: 0;
+    }
+    .party-label {
+        font-size: 7.5pt;
+        font-weight: bold;
+        letter-spacing: 0.5pt;
+        text-transform: uppercase;
+        color: #9a9a9a;
+        margin-bottom: 2pt;
+    }
+    .party-name {
+        font-size: 10pt;
+        font-weight: bold;
+        color: #1a1a1a;
+    }
+    .party-detail {
+        font-size: 8.5pt;
+        color: #5a5a5a;
+        margin-top: 1pt;
+    }
+
+    /* ---- Line-item tables ---- */
+    table.section-title {
+        width: 100%;
+        margin-top: 10pt;
+        margin-bottom: 4pt;
+    }
+    .section-name {
+        font-size: 9.5pt;
+        font-weight: bold;
+        color: #1a1a1a;
+    }
+    table.items {
+        width: 100%;
+        margin-bottom: 8pt;
+    }
+    table.items thead td {
+        background-color: #f2f1ee;
+        font-size: 7.5pt;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.3pt;
+        color: #6b6b6b;
+        padding: 5pt 6pt;
+        border-bottom: 0.75pt solid #d5d5d5;
+    }
+    table.items tbody td {
+        font-size: 8.5pt;
+        color: #2b2b2b;
+        padding: 5pt 6pt;
+        border-bottom: 0.5pt solid #ececec;
+    }
+    .col-sr { width: 5%; text-align: center; }
+    .col-desc { width: 39%; text-align: left; }
+    .col-qty { width: 10%; text-align: right; }
+    .col-unit { width: 10%; text-align: center; }
+    .col-rate { width: 16%; text-align: right; }
+    .col-amount { width: 20%; text-align: right; }
+    .num { text-align: right; }
+    .muted { color: #9a9a9a; }
+
+    /* ---- Financial summary ---- */
+    table.summary {
+        width: 55%;
+        margin-left: 45%;
+        margin-top: 6pt;
+    }
+    table.summary td {
+        padding: 3pt 6pt;
+        font-size: 8.5pt;
+    }
+    table.summary td.label {
+        color: #6b6b6b;
+        text-align: left;
+    }
+    table.summary td.value {
+        text-align: right;
+        color: #2b2b2b;
+    }
+    table.summary tr.grand-total td {
+        border-top: 0.75pt solid #9a9a9a;
+        font-size: 10pt;
+        font-weight: bold;
+        color: #1a1a1a;
+        padding-top: 5pt;
+    }
+    table.summary tr.paid td {
+        color: #3a7d44;
+    }
+    table.summary tr.balance-due td {
+        font-weight: bold;
+        color: #1a1a1a;
+    }
+
+    .notes-block {
+        margin-top: 14pt;
+        font-size: 8.5pt;
+        color: #4a4a4a;
+    }
+    .notes-label {
+        font-size: 7.5pt;
+        font-weight: bold;
+        letter-spacing: 0.5pt;
+        text-transform: uppercase;
+        color: #9a9a9a;
+        margin-bottom: 2pt;
+    }
+
+    #footer_content {
+        font-size: 7.5pt;
+        color: #9a9a9a;
+        text-align: center;
+        border-top: 0.5pt solid #e5e5e5;
+        padding-top: 4pt;
+    }
+</style>
+</head>
+<body>
+
+<div id="footer_content">
+    {{ company.name }} &nbsp;&middot;&nbsp; Generated {{ generated_at }} &nbsp;&middot;&nbsp; Page <pdf:pagenumber /> of <pdf:pagecount />
+</div>
+
+<table class="doc-header">
+    <tr>
+        <td style="width: 55%;">
+            <div class="company-name">{{ company.name }}</div>
+            {% if company.gst_number %}<div class="company-meta">GSTIN: {{ company.gst_number }}</div>{% endif %}
+        </td>
+        <td style="width: 45%;">
+            <div class="doc-type">{{ document_type }}</div>
+            <div class="doc-number">{{ document_number }}</div>
+            {% if status_label %}<div style="text-align: right; margin-top: 4pt;"><span class="status-badge">{{ status_label }}</span></div>{% endif %}
+        </td>
+    </tr>
+</table>
+<hr class="rule" />
+
+{% if currency %}<div style="text-align: right; font-size: 7.5pt; color: #9a9a9a; margin-bottom: 6pt;">Amounts in {{ currency }}</div>{% endif %}
+
+<table class="parties">
+    <tr>
+        <td>
+            <div class="party-label">Bill To</div>
+            <div class="party-name">{{ client.name }}</div>
+            {% if client.email %}<div class="party-detail">{{ client.email }}</div>{% endif %}
+            {% if client.mobile %}<div class="party-detail">{{ client.mobile }}</div>{% endif %}
+            {% if client.gstin %}<div class="party-detail">GSTIN: {{ client.gstin }}</div>{% endif %}
+        </td>
+        <td>
+            <div class="party-label">Project</div>
+            <div class="party-name">{{ project.name }}</div>
+        </td>
+    </tr>
+</table>
+
+{% block content %}{% endblock %}
+
+</body>
+</html>

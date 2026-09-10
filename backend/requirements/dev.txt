@@ -5,3 +5,10 @@
 pytest>=8.3.0
 pytest-django>=4.9.0
 factory-boy>=3.3.0
+
+# PDF text extraction for BOQ/Quotation/Invoice export tests only -- lets
+# tests assert on a generated PDF's actual rendered text (via PdfReader.
+# extract_text()) instead of grepping the compressed/binary PDF bytes
+# directly, which only ever coincidentally matches uncompressed metadata.
+# Never imported by application code, only by tests.
+pypdf>=6.0.0,<7.0

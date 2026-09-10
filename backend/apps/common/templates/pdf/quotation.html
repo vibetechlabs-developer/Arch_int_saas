@@ -1,0 +1,60 @@
+{% extends "pdf/base.html" %}
+{% load pdf_filters %}
+{% block content %}
+
+<table class="items">
+    <thead>
+        <tr>
+            <td class="col-sr">Sr.</td>
+            <td class="col-desc">Description</td>
+            <td class="col-qty">Qty</td>
+            <td class="col-unit">Unit</td>
+            <td class="col-rate">Rate</td>
+            <td class="col-amount">Amount</td>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in items %}
+        <tr>
+            <td class="col-sr">{{ forloop.counter }}</td>
+            <td class="col-desc">{{ item.description }}</td>
+            <td class="col-qty num">{{ item.quantity }}</td>
+            <td class="col-unit">{{ item.unit|default:"—" }}</td>
+            <td class="col-rate num">{{ item.rate|money }}</td>
+            <td class="col-amount num">{{ item.amount|money }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="muted">This quotation has no line items.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<table class="summary">
+    <tr><td class="label">Subtotal</td><td class="value">{{ quotation.subtotal|money:currency }}</td></tr>
+    <tr><td class="label">Discount</td><td class="value">{{ quotation.discount|money:currency }}</td></tr>
+    <tr><td class="label">Tax</td><td class="value">{{ quotation.tax|money:currency }}</td></tr>
+    <tr class="grand-total"><td class="label">Grand Total</td><td class="value">{{ quotation.total|money:currency }}</td></tr>
+</table>
+
+{% if quotation.valid_until %}
+<div class="notes-block">
+    <div class="notes-label">Valid Until</div>
+    <div>{{ quotation.valid_until|date:"d M Y" }}</div>
+</div>
+{% endif %}
+
+{% if quotation.terms %}
+<div class="notes-block">
+    <div class="notes-label">Terms</div>
+    <div>{{ quotation.terms|linebreaksbr }}</div>
+</div>
+{% endif %}
+
+{% if quotation.notes %}
+<div class="notes-block">
+    <div class="notes-label">Notes</div>
+    <div>{{ quotation.notes|linebreaksbr }}</div>
+</div>
+{% endif %}
+
+{% endblock %}

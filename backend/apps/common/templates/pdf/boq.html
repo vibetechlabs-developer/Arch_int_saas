@@ -1,0 +1,54 @@
+{% extends "pdf/base.html" %}
+{% load pdf_filters %}
+{% block content %}
+
+{% for section in sections %}
+<table class="section-title">
+    <tr><td class="section-name">{{ section.name }}</td></tr>
+</table>
+<table class="items">
+    <thead>
+        <tr>
+            <td class="col-sr">Sr.</td>
+            <td class="col-desc">Item</td>
+            <td class="col-qty">Qty</td>
+            <td class="col-unit">Unit</td>
+            <td class="col-rate">Rate</td>
+            <td class="col-amount">Amount</td>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in section.items %}
+        <tr>
+            <td class="col-sr">{{ forloop.counter }}</td>
+            <td class="col-desc">
+                {% if item.product_name and item.product_name != item.description %}
+                    <strong>{{ item.product_name }}</strong><br />{{ item.description }}
+                {% else %}
+                    {{ item.description }}
+                {% endif %}
+                {% if item.is_optional %}<br /><span class="muted">(optional — excluded from total)</span>{% endif %}
+                {% if item.is_alternative %}<br /><span class="muted">(alternative — excluded from total)</span>{% endif %}
+            </td>
+            <td class="col-qty num">{{ item.quantity }}</td>
+            <td class="col-unit">{{ item.unit|default:"—" }}</td>
+            <td class="col-rate num">{{ item.rate|money }}</td>
+            <td class="col-amount num">{{ item.amount|money }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="muted">No items in this section.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% empty %}
+<p class="muted">This BOQ has no sections yet.</p>
+{% endfor %}
+
+<table class="summary">
+    <tr><td class="label">Subtotal</td><td class="value">{{ summary.subtotal|money:currency }}</td></tr>
+    <tr><td class="label">Discount</td><td class="value">{{ summary.discount|money:currency }}</td></tr>
+    <tr><td class="label">Tax</td><td class="value">{{ summary.tax|money:currency }}</td></tr>
+    <tr class="grand-total"><td class="label">Total</td><td class="value">{{ summary.total|money:currency }}</td></tr>
+</table>
+
+{% endblock %}

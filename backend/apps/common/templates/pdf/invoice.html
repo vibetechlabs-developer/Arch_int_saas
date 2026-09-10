@@ -1,0 +1,62 @@
+{% extends "pdf/base.html" %}
+{% load pdf_filters %}
+{% block content %}
+
+<table class="items">
+    <thead>
+        <tr>
+            <td class="col-sr">Sr.</td>
+            <td class="col-desc">Description</td>
+            <td class="col-qty">Qty</td>
+            <td class="col-unit">Unit</td>
+            <td class="col-rate">Rate</td>
+            <td class="col-amount">Amount</td>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in items %}
+        <tr>
+            <td class="col-sr">{{ forloop.counter }}</td>
+            <td class="col-desc">{{ item.description }}</td>
+            <td class="col-qty num">{{ item.quantity }}</td>
+            <td class="col-unit">{{ item.unit|default:"—" }}</td>
+            <td class="col-rate num">{{ item.rate|money }}</td>
+            <td class="col-amount num">{{ item.amount|money }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="muted">This invoice has no line items.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<table class="summary">
+    <tr><td class="label">Subtotal</td><td class="value">{{ invoice.subtotal|money:currency }}</td></tr>
+    <tr><td class="label">Discount</td><td class="value">{{ invoice.discount|money:currency }}</td></tr>
+    <tr><td class="label">Tax</td><td class="value">{{ invoice.tax|money:currency }}</td></tr>
+    <tr class="grand-total"><td class="label">Grand Total</td><td class="value">{{ invoice.total|money:currency }}</td></tr>
+    <tr class="paid"><td class="label">Amount Paid</td><td class="value">{{ invoice.paid_amount|money:currency }}</td></tr>
+    <tr class="balance-due"><td class="label">Balance Due</td><td class="value">{{ invoice.outstanding_amount|money:currency }}</td></tr>
+</table>
+
+{% if invoice.due_date %}
+<div class="notes-block">
+    <div class="notes-label">Due Date</div>
+    <div>{{ invoice.due_date|date:"d M Y" }}</div>
+</div>
+{% endif %}
+
+{% if invoice.payment_terms %}
+<div class="notes-block">
+    <div class="notes-label">Payment Terms</div>
+    <div>{{ invoice.payment_terms|linebreaksbr }}</div>
+</div>
+{% endif %}
+
+{% if invoice.notes %}
+<div class="notes-block">
+    <div class="notes-label">Notes</div>
+    <div>{{ invoice.notes|linebreaksbr }}</div>
+</div>
+{% endif %}
+
+{% endblock %}

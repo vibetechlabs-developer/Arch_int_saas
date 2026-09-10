@@ -22,6 +22,23 @@ from apps.users.permission_catalog import ALL_PERMISSION_CODES
 FULL_ACCESS_ROLE_NAME = "Full Access (Test Fixture)"
 
 
+def extract_pdf_text(pdf_bytes: bytes) -> str:
+    """
+    BE-076: PDF-export tests need to assert on a document's actual
+    rendered text -- xhtml2pdf/ReportLab compresses the content stream
+    (FlateDecode), so naively decoding the raw response bytes only ever
+    coincidentally matches uncompressed metadata (e.g. the /Title
+    dictionary entry), never the real table/body text. pypdf is a
+    test-only dependency (requirements/dev.txt) -- never imported by
+    application code.
+    """
+    import pypdf
+    from io import BytesIO
+
+    reader = pypdf.PdfReader(BytesIO(pdf_bytes))
+    return "\n".join(page.extract_text() for page in reader.pages)
+
+
 def make_full_access_role(company) -> Role:
     """
     Get-or-create a per-company Role holding every catalog permission
