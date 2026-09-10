@@ -4,6 +4,7 @@ from apps.invoices.views import (
     InvoiceCancelView,
     InvoiceDetailView,
     InvoiceListCreateView,
+    InvoicePdfView,
     InvoiceSendView,
 )
 
@@ -22,6 +23,11 @@ urlpatterns = [
         r"^invoices/(?P<invoice_id>[0-9a-fA-F-]{36})/send/?$",
         InvoiceSendView.as_view(),
         name="invoice-send",
+    ),
+    re_path(
+        r"^invoices/(?P<invoice_id>[0-9a-fA-F-]{36})/pdf/?$",
+        InvoicePdfView.as_view(),
+        name="invoice-pdf",
     ),
     re_path(
         r"^invoices/(?P<invoice_id>[0-9a-fA-F-]{36})/cancel/?$",

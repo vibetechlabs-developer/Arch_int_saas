@@ -1,3 +1,5 @@
+from django.http import HttpResponse
+from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -5,6 +7,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.pdf_service import pdf_http_response, render_pdf
 from apps.common.responses import ApiResponse
 from apps.common.views import ObjectPermission404Mixin
 from apps.invoices.serializers import (
@@ -13,6 +16,7 @@ from apps.invoices.serializers import (
     InvoiceSerializer,
     InvoiceUpdateSerializer,
 )
+from apps.invoices.models import InvoiceStatus
 from apps.invoices.services import InvoiceService
 from apps.projects.permissions import ProjectPermission
 from apps.projects.services import ProjectService
@@ -151,6 +155,78 @@ class InvoiceDetailView(ObjectPermission404Mixin, APIView):
         return ApiResponse.success(
             data=response_data, request_id=getattr(request, "request_id", None)
         )
+
+
+class InvoicePdfView(ObjectPermission404Mixin, APIView):
+    """
+    `GET /invoices/{invoiceId}/pdf` (BE-076) — server-rendered PDF export.
+    Same `ProjectPermission`/`invoice.view` authorization as
+    `InvoiceDetailView`. Fetches via `InvoiceService.get_invoice_by_id`
+    (the same annotated-paid-amount path the JSON API uses, BE-074) so
+    `paidAmount`/`outstandingAmount` are the identical backend-authoritative
+    figures the Invoice Detail page shows -- never recomputed here.
+    `?mode=preview` -> inline; otherwise attachment.
+    """
+
+    permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "invoice.view"
+
+    @extend_schema(
+        summary="Export Invoice PDF",
+        description="Render this invoice as a PDF. ?mode=preview for inline viewing, otherwise a download.",
+        responses={status.HTTP_200_OK: {"type": "string", "format": "binary"}},
+        tags=["Invoices"],
+    )
+    def get(self, request: Request, invoice_id: str = None) -> HttpResponse:
+        invoice = InvoiceService.get_invoice_by_id(invoice_id)
+        self.check_object_permissions(request, invoice)
+
+        # select_related('company','client','project') already applied by
+        # InvoiceRepository.get_by_id; items still need their own fetch --
+        # a single query regardless of item count (Phase 37: no N+1).
+        items = invoice.items.order_by("created_at")
+
+        company = invoice.company
+        client = invoice.client
+        project = invoice.project
+        effective_status = InvoiceService.compute_effective_status(invoice)
+        status_choices = dict(InvoiceStatus.choices)
+        context = {
+            "document_title": f"Invoice {invoice.invoice_number}",
+            "document_type": "INVOICE",
+            "document_number": invoice.invoice_number,
+            "status_label": status_choices.get(effective_status, effective_status),
+            "company": company,
+            "client": client,
+            "project": project,
+            "currency": company.currency,
+            "generated_at": timezone.localtime().strftime("%d %b %Y, %H:%M"),
+            "items": [
+                {
+                    "description": item.description,
+                    "quantity": item.quantity,
+                    "unit": item.get_unit_display() if item.unit else "",
+                    "rate": item.rate,
+                    "amount": item.amount,
+                }
+                for item in items
+            ],
+            "invoice": {
+                "subtotal": invoice.subtotal,
+                "discount": invoice.discount,
+                "tax": invoice.tax,
+                "total": invoice.total,
+                "paid_amount": InvoiceService.get_paid_amount(invoice),
+                "outstanding_amount": InvoiceService.compute_outstanding_amount(invoice),
+                "due_date": invoice.due_date,
+                "payment_terms": invoice.payment_terms,
+                "notes": invoice.notes,
+            },
+        }
+
+        pdf_bytes = render_pdf("pdf/invoice.html", context)
+        inline = request.query_params.get("mode") == "preview"
+        return pdf_http_response(pdf_bytes, filename=f"Invoice-{invoice.invoice_number}", inline=inline)
 
 
 class InvoiceSendView(ObjectPermission404Mixin, APIView):
