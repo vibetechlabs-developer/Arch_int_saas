@@ -314,6 +314,22 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 - TypeScript: PASS. Build: PASS (chunk breakdown above). No new tests were needed for `PageLoadingFallback` itself (a static two-line spinner, the same treatment `ProtectedRoute`'s untested equivalent already gets).
 - Visual QA: **PENDING** — no browser tooling available in this environment; the Suspense fallback's brief flash on a slow connection was not observed in a real browser.
 
+## Phase 18 — BOQ/Quotation/Invoice PDF Export
+
+| Task | Description | Status |
+|---|---|---|
+| F42 | Preview/Download PDF actions on BOQ workspace, Quotation Detail, and Invoice Detail (BE-076) | Review |
+
+**Implementation notes (F42):**
+- New shared `lib/pdf.ts` (`previewPdf`/`downloadPdf`) and `components/common/PdfActions.tsx` (Preview/Download button pair) — one implementation reused by all three pages, not three copies. Always an authenticated `apiClient` request (`responseType: 'blob'`) — never a public URL, never the access token in a query string. Preview opens an object URL in a new tab (`window.open`); download drives a temporary anchor using the server's own `Content-Disposition` filename; both revoke their object URL afterward (preview after a delay, to avoid racing the new tab's own load of the blob).
+- **Real backend bug found and fixed while building this**: `apiClient`'s shared response error interceptor read `error.response.data.error.code` directly — for any request made with `responseType: 'blob'` (which every PDF call is), axios delivers even a JSON error body as a `Blob`, so this would have thrown reading `.error` off a `Blob` instead of surfacing the real backend message. Fixed by detecting a JSON-typed `Blob` error body and parsing it back to the real envelope before the existing logic runs — every other (non-blob) request's behavior is completely unchanged.
+- Wired onto all three pages exactly where the task specified: `ProjectBOQTab`'s "Bill of Quantities" card header (top-right, doesn't disturb Add Section/edit item flows), `QuotationDetailPage`'s action row (always visible, not gated behind "latest version" the way Revise/Send/Approve are — so an older version's own actions always export that exact version, `quotationId` in the URL never "latest"), `InvoiceDetailPage`'s action row (doesn't touch `PaymentHistory` or perform any financial math).
+- Error messages match the task's exact copy: 403 → "You don't have permission to download this document.", 404 → "Document not found.", 5xx → "PDF could not be generated. Please try again.", plus a distinct popup-blocked message if the browser prevents the preview tab from opening.
+- New tests: `lib/pdf.test.ts` (7 — blob request shape, new-tab opening, popup-blocked, error propagation, anchor-based download with cleanup, default-filename fallback), `components/common/PdfActions.test.tsx` (7 — click-to-call-through, disabled-while-pending, all four error-message branches), plus one integration test per page (BOQ tab, Quotation detail — proving an older version's own id is used, Invoice detail) confirming the exact endpoint URL each button targets. `testSetup.ts` gained a `URL.createObjectURL`/`revokeObjectURL` polyfill (jsdom has neither) — a genuine missing-capability gap, not specific to this feature, fixed once globally.
+- Frontend tests: 310 total, 304 passed, **6 skipped — unchanged baseline** (17 new tests). TypeScript: PASS. Build: PASS (bundle size unaffected — PdfActions is small and already lands inside each lazy-loaded page's own chunk, F41).
+- Live HTTP verification (see `BACKEND_TASKS.md` BE-076): all three PDFs generated against a real running backend, preview vs download disposition and filenames confirmed, cross-tenant/nonexistent/unauthenticated all correctly rejected.
+- Visual PDF QA: rendered PDF pages were actually opened and visually inspected (not just checked for a `%PDF-` signature) — layout, header/footer, tables, financial summary, and status badges all confirmed clean and correctly aligned across all three document types. In-browser Preview/Download *button* interaction itself remains **PENDING** — no browser tooling available in this environment.
+
 ## Not Yet Started
 
 Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Last-owner/protected-role safety (blocked on `Role.system_key`, BE-069).

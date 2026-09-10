@@ -1345,6 +1345,51 @@ Depends On
 | BE-073 | Role delete safety — deleting an assigned role now unassigns affected memberships instead of leaving them with retained access — see writeup below. | **Review** |
 | BE-074 | Invoice payment aggregates — `paidAmount`/`outstandingAmount` on InvoiceSerializer, N+1-safe — see writeup below. | **Review** |
 | BE-075 | CI pipeline (`.github/workflows/ci.yml`) — backend/frontend tests, type check, dependency audit, Docker build validation — see writeup below. | **Review** |
+| BE-076 | BOQ/Quotation/Invoice PDF export — shared server-side rendering infrastructure, three `GET .../pdf` endpoints — see writeup below. | **Review** |
+
+#### BE-076 — BOQ/Quotation/Invoice PDF Export — 2026-09-10
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** High — the first document-generation capability in the product; three real documents (BOQ, Quotation, Invoice) previously had no export path at all.
+
+**Owner:** Backend Team
+
+**Audit before coding:** searched the whole repo for WeasyPrint/xhtml2pdf/ReportLab/pdfkit/`application/pdf`/`FileResponse`/`render_to_string`/`templates/` — found nothing. No prior PDF infrastructure existed anywhere in `apps/boq`, `apps/quotations`, `apps/invoices`, `apps/company`, `apps/projects`, `apps/clients`, or `apps/products`.
+
+**PDF engine — WeasyPrint audited and rejected, not silently swapped:** WeasyPrint was found already present in this machine's local Python environment, but (a) it is not declared anywhere in `requirements/*.txt` — its presence here is incidental, not a project dependency — and (b) it failed to import at all (`OSError: cannot load library 'libgobject-2.0-0'`) because it requires native GTK/Pango/Cairo system libraries not installed on this environment. Since neither "already installed" condition from the task's own decision criteria actually held, and the goal explicitly includes verifying the choice actually works (Phase 32/19), **xhtml2pdf** was chosen instead: pure Python (ReportLab-based), zero native system dependencies on any platform, still renders from Django HTML templates + CSS (preserving the required "template → PDF engine" architecture), and was verified end-to-end in this environment (WeasyPrint could not be). Added to `requirements/base.txt` (needed in production, not just dev).
+
+**Shared architecture (not three independent systems):**
+- `apps/common/pdf_service.py` — `render_pdf(template, context)` (Django `render_to_string` + `xhtml2pdf.pisa.CreatePDF`), `sanitize_filename()`, `pdf_http_response()` (real `application/pdf` bytes, never JSON/base64, `Content-Disposition: inline` for preview / `attachment` for download).
+- `apps/common/templatetags/pdf_filters.py` — a `money` filter (thousands-separated, optional real currency-code prefix — never a hardcoded symbol) shared by all three templates.
+- `apps/common/templates/pdf/base.html` — company header (name + GSTIN if present, no invented address/email/phone/logo fields — `Company` has none), document type/number/status badge, client details (name/email/mobile/GSTIN — `Client.addresses`' shape is undocumented so deliberately not rendered), project name, a repeating footer (`@frame`, `<pdf:pagenumber/>`/`<pdf:pagecount/>`) — all three document templates extend this one file and only fill the item-table/summary content block.
+- `boq.html`/`quotation.html`/`invoice.html` extend `base.html`.
+
+**Endpoints (permission codes verified against the real catalog, not invented):**
+- `GET /projects/{projectId}/boq/pdf` — `boq.view`, same `ProjectPermission` as `BOQDetailView`.
+- `GET /quotations/{quotationId}/pdf` — `quotation.view`, same `ProjectPermission` as `QuotationDetailView`. Exports exactly the version identified by `quotationId` — each version is its own row/id, so viewing an older version can never silently export the latest.
+- `GET /invoices/{invoiceId}/pdf` — `invoice.view`, same `ProjectPermission` as `InvoiceDetailView`. Fetches via the same `InvoiceService.get_invoice_by_id`/`get_paid_amount`/`compute_outstanding_amount` the JSON API uses (BE-074) — `paidAmount`/`outstandingAmount` in the PDF are the identical backend-authoritative figures, never recomputed.
+One endpoint per document, not two: `?mode=preview` renders `inline`; its absence (or any other value) renders `attachment`.
+
+**Financial authority:** every number in every template context is already a real serializer/service value (`BOQSummaryService.compute_summary`, `Quotation.subtotal/discount/tax/total`, `InvoiceService.get_paid_amount`/`compute_outstanding_amount`) — no template performs arithmetic. BOQ's optional/alternative items are still shown in the table (labeled excluded) but never folded into the rendered total, verified directly (`test_optional_items_excluded_from_total_matches_summary_service`).
+
+**Tenant isolation / RBAC:** identical `get_object_by_id` + `check_object_permissions` pattern every other action in these viewsets already uses — cross-tenant → 404, unauthenticated → 401. No new permission codes introduced.
+
+**N+1 safety:** BOQ sections/items use one `Prefetch` (`select_related('product')`) regardless of section/item count; Quotation/Invoice items use `select_related('product')`/a single ordered queryset. Verified functionally via a 5-section/75-item BOQ test that must still return 200.
+
+**HTML/content safety:** `render_to_string` autoescapes every context value by Django's own default (no `|safe` used anywhere in these templates) — verified directly by rendering a client name containing `<script>alert(1)</script>` and confirming the PDF still generates and the literal text (not executable markup) appears in the extracted output.
+
+**Filenames:** `sanitize_filename()` strips everything outside `[A-Za-z0-9._ -]` and collapses whitespace to hyphens, falling back to a safe default rather than ever leaking an unsafe or bare-UUID name — e.g. `BOQ-Kitchen-Remodel.pdf`, `Quotation-QT-000001-v1.pdf`, `Invoice-INV-000001.pdf`.
+
+**PDF generation failure:** unhandled by design at the view layer — `render_pdf` raises `PdfRenderError` (a plain, unregistered exception) on an engine failure, which falls through to the existing global `custom_exception_handler`'s catch-all (500 `INTERNAL_ERROR`, generic client-safe message, real cause logged server-side only) — no new error-handling path was built since the existing one already satisfies this requirement.
+
+**Audit:** deliberately not logged — a PDF export/preview is a read action, matching this codebase's existing convention that reads (unlike creates/updates/deletes) don't generate `AuditLog` rows.
+
+**Production dependency impact:** none beyond the one new pure-Python package. `xhtml2pdf` needs no system/OS packages on Linux or Windows, so `Dockerfile` requires no changes — confirmed by inspecting it (multi-stage `pip install -r requirements/*.txt`, which already installs whatever `base.txt` lists).
+
+**Tests:** `apps/common/tests/test_pdf_service.py` (12: filename sanitization, real PDF byte generation, HTML-escaping, Content-Disposition), `apps/boq/tests/test_pdf_export.py` (14), `apps/quotations/tests/test_pdf_export.py` (10), `apps/invoices/tests/test_pdf_export.py` (12) — 48 new tests total, covering 200/content-type/signature, tenant isolation, unauthenticated 401, real content in the render (verified via `pypdf` text extraction — a test-only dependency, `requirements/dev.txt` — never grepping the compressed PDF bytes directly, which only ever coincidentally matches uncompressed metadata), a 75-item BOQ, correct quotation version selection, invoice payment-aggregate figures (zero/partial/overpaid), filename sanitization, and unsafe-content escaping.
+
+**Validation:** New tests: 48/48 passed. Live HTTP verification against a genuinely running `manage.py runserver`: generated one real BOQ/Quotation/Invoice PDF each (`file` confirms genuine "PDF document, version 1.4"), confirmed preview (`inline`) vs download (`attachment`) disposition and correct filenames, confirmed cross-tenant/nonexistent/unauthenticated all correctly rejected. All seeded data deleted afterward; server stopped and confirmed down.
 
 #### BE-075 — CI Pipeline — 2026-09-10
 
