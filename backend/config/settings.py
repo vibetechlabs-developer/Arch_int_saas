@@ -33,6 +33,7 @@ env = environ.Env(
     DB_HOST=(str, "localhost"),
     DB_PORT=(str, "5432"),
     CORS_ALLOWED_ORIGINS=(list, ["http://localhost:5173", "http://127.0.0.1:5173"]),
+    DJANGO_CSRF_TRUSTED_ORIGINS=(list, []),
     CELERY_BROKER_URL=(str, "redis://localhost:6379/0"),
     CELERY_RESULT_BACKEND=(str, "redis://localhost:6379/0"),
 )
@@ -306,6 +307,27 @@ if DEBUG:
         r"^http://localhost:\d+$",
         r"^http://127\.0\.0\.1:\d+$",
     ]
+
+
+# --- CSRF ---------------------------------------------------------------
+# https://docs.djangoproject.com/en/5.2/ref/settings/#csrf-trusted-origins
+#
+# This API is JWT-bearer-token authenticated end to end (no
+# SessionAuthentication in REST_FRAMEWORK), so CSRF only actually matters
+# for django.contrib.admin's own session+cookie login. Empty by default —
+# Django simply trusts nothing extra beyond same-origin requests, which is
+# already maximally safe and doesn't affect local dev (admin is normally
+# accessed same-origin there). A real deployment behind HTTPS, especially
+# one where the frontend/admin are reached through a different origin than
+# Django sees itself as (a reverse proxy, a split app/api subdomain), sets
+# DJANGO_CSRF_TRUSTED_ORIGINS explicitly — comma-separated full origins
+# including scheme, e.g. "https://app.example.com,https://api.example.com".
+# Never a wildcard; never inferred from CORS_ALLOWED_ORIGINS, since CORS
+# (cross-origin fetch/XHR to the JSON API) and CSRF (trusted origins for
+# admin's session cookie) are different concerns with different risk
+# profiles — conflating them would trust the SPA's own origin for
+# cookie-based admin form submission it was never meant to have.
+CSRF_TRUSTED_ORIGINS = env("DJANGO_CSRF_TRUSTED_ORIGINS")
 
 
 # --- Celery & Redis ---------------------------------------------------------
