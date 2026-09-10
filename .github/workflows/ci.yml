@@ -1,0 +1,126 @@
+name: CI
+
+# Stages/gates per 07_DevOps/CI_CD.md. Currently wired: type check, backend
+# tests (real Postgres, matching production), frontend tests + production
+# build, and an informational dependency audit. NOT yet wired (see
+# BACKEND_TASKS.md / FRONTEND_TASKS.md "Release Stabilization" entry for why):
+# lint (no ruff/eslint config exists in this repo yet — nothing to run),
+# E2E (no Playwright suite exists yet), Docker image build (see the
+# separate docker-build job below — validated but not pushed anywhere),
+# and every deploy stage (needs real staging/production infrastructure and
+# secrets this repo does not have configured).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: int_projects_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
+      DJANGO_DEBUG: "true"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      DB_NAME: int_projects_test
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      # Nothing in the test suite actually dispatches a Celery task, so a
+      # well-formed URL is sufficient -- no redis service container needed
+      # just to satisfy this required setting at Django boot.
+      CELERY_BROKER_URL: redis://localhost:6379/0
+      CELERY_RESULT_BACKEND: redis://localhost:6379/0
+      DJANGO_LOG_LEVEL: WARNING
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements/*.txt
+      - run: pip install -r requirements/dev.txt
+      - run: python manage.py test
+        # apps.authentication's throttle-cache tests are only isolated
+        # correctly under Django's own test runner, not pytest (BE-070) --
+        # matches how this suite is actually run today, not pytest directly.
+
+  backend-dependency-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true # informational until the team sets a severity policy — see tracker note
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit
+      - run: pip-audit -r requirements/prod.txt
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test -- --ci
+      - run: npm run build
+
+  frontend-dependency-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true # informational until the team sets a severity policy — see tracker note
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm audit --audit-level=critical
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend production image (validation only — not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          target: production
+          push: false

@@ -1344,6 +1344,30 @@ Depends On
 | BE-072 | Role permission read-back — `GET /roles/{id}/permissions` — see writeup below. | **Review** |
 | BE-073 | Role delete safety — deleting an assigned role now unassigns affected memberships instead of leaving them with retained access — see writeup below. | **Review** |
 | BE-074 | Invoice payment aggregates — `paidAmount`/`outstandingAmount` on InvoiceSerializer, N+1-safe — see writeup below. | **Review** |
+| BE-075 | CI pipeline (`.github/workflows/ci.yml`) — backend/frontend tests, type check, dependency audit, Docker build validation — see writeup below. | **Review** |
+
+#### BE-075 — CI Pipeline — 2026-09-10
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** Medium — every gate this pipeline runs has, until now, only ever been run by hand once per task; nothing enforced it on every push/PR.
+
+**Owner:** Backend/DevOps
+
+**Scope, matched against `07_DevOps/CI_CD.md`'s documented 9-stage pipeline (not invented fresh):** wired what already reliably works today —
+
+- Type check (frontend `tsc --noEmit`; backend has no mypy configured anywhere in `requirements/`, so no backend type-check stage exists yet).
+- Unit/Integration/API tests: backend `python manage.py test` against a real `postgres:16` service container (matching `DATABASES` config in `config/settings.py`, not sqlite) — deliberately `manage.py test`, not `pytest`, since BE-070 found `apps.authentication`'s throttle-cache isolation only holds under Django's own runner.
+- Frontend tests (`npm test -- --ci`) and production build (`npm run build`) — the same two commands this whole session has run by hand after every change.
+- Dependency vulnerability scan (`pip-audit` against `requirements/prod.txt`, `npm audit --audit-level=critical`) — **informational only** (`continue-on-error: true`). The doc's own gate rule ("critical/high blocks merge") needs an actual severity policy decision from the team before it can safely block merges; wiring an arbitrary threshold here would be inventing policy, not implementing an approved one.
+- Docker build validation (`docker build --target production`, never pushed anywhere) — exercises the existing `Dockerfile` so it can't silently rot, without needing any registry credentials.
+
+**Explicitly NOT wired, and why (flagged, not invented around):**
+- **Lint** — no `ruff`/`flake8` config exists anywhere in `requirements/`, no `eslint.config.*` exists in the frontend beyond what ships inside `node_modules` dependencies. There is nothing to run; choosing rules is a real scoping decision for the team, not something to fabricate here.
+- **E2E** — no Playwright (or other) E2E suite exists in this repo yet.
+- **Deploy stages** (staging/production) — need real infrastructure and secrets (registry, cloud credentials, environment URLs) this repo has none of configured. A deploy stage that can't actually deploy would be a fake pipeline step, exactly the anti-pattern this project's own rules forbid.
+
+**Validation:** YAML parses cleanly (`yaml.safe_load`). Every command the workflow runs was executed locally first: `python manage.py test --noinput` (the exact CI command, sanity-checked scoped to `apps.invoices apps.payments` — 93/93 passed; the full-suite run is the final validation step of this task, see the final report for its result) and `npm test -- --ci` / `npx tsc --noEmit` / `npm run build` (frontend — all confirmed passing). The `docker-build` job's `Dockerfile` was read and matches standard multi-stage syntax, but could not be locally re-validated in this environment — the local Docker daemon isn't running here, so this one job is unverified beyond code review; flagged, not silently assumed to work.
 
 #### BE-074 — Invoice Payment Aggregates — 2026-09-09
 
