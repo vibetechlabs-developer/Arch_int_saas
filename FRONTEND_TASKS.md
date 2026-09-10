@@ -301,6 +301,19 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 - Live HTTP verification (see `BACKEND_TASKS.md` BE-074): full record/void/overpayment lifecycle against a real running backend, all aggregate values matched what the UI would render exactly as returned; no client-side math involved anywhere in the check.
 - Visual QA: **PENDING** — no browser tooling available in this environment.
 
+## Phase 17 — Release Stabilization
+
+| Task | Description | Status |
+|---|---|---|
+| F41 | Route-based code splitting — every page is now its own lazy-loaded chunk instead of one monolithic bundle | Review |
+
+**Implementation notes (F41):**
+- `App.tsx`'s route table previously statically imported all ~24 page components, so every route's code shipped in one entry chunk regardless of which page a visitor actually loaded — the production build had warned about a 1,027 kB single chunk since this session began. Converted every page-level route element to `React.lazy()`, wrapped in a `<Suspense>` boundary (new `PageLoadingFallback`, mirroring `ProtectedRoute`'s existing spinner treatment) at both the top level (`/login`, `/reset-password`) and inside `Shell` (everything else). `Shell`/`ProtectedRoute`/providers stay eager — they're needed on every route regardless, so lazy-loading them would only add a waterfall for no payload benefit.
+- Result, measured directly (not estimated): the main entry chunk dropped from 1,027.41 kB to 485.38 kB (≈53% smaller) — under Vite's 500 kB warning threshold for the first time this session — with the rest split into ~25 per-route chunks (5–20 kB each) fetched only on navigation, plus a few shared vendor chunks (`select`, `label`, `DataTable`, etc.) reused across routes that use them.
+- Zero test impact by construction: no page test file renders through `App.tsx`'s router (every one builds its own minimal `MemoryRouter` directly around the page component under test), so lazy-loading `App.tsx`'s route table doesn't touch how any existing test renders its subject. Confirmed, not just reasoned: full suite unchanged at 293 total/287 passed/6 skipped before and after this change.
+- TypeScript: PASS. Build: PASS (chunk breakdown above). No new tests were needed for `PageLoadingFallback` itself (a static two-line spinner, the same treatment `ProtectedRoute`'s untested equivalent already gets).
+- Visual QA: **PENDING** — no browser tooling available in this environment; the Suspense fallback's brief flash on a slow connection was not observed in a real browser.
+
 ## Not Yet Started
 
 Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Last-owner/protected-role safety (blocked on `Role.system_key`, BE-069).
