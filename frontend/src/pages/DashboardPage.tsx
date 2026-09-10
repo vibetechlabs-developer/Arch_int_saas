@@ -57,31 +57,45 @@ export default function DashboardPage() {
         <p className="text-body text-text-secondary">{today} — here's what needs your attention.</p>
       </div>
 
-      {isLoading || !data ? <KpiSkeleton /> : <KpiStrip kpis={data.kpis} />}
+      {isLoading || !data ? (
+        <KpiSkeleton />
+      ) : (
+        <KpiStrip kpis={data.kpis} canViewFinancials={data.canViewFinancials} />
+      )}
 
+      {/* Pending Payments / Overdue Invoices carry real invoice amounts —
+          only rendered once the response actually includes them
+          (report.financial_access). Omitted, not shown empty: an absent
+          section here means "not visible to you", never "there are
+          none" — a restricted user must never see a false "no pending
+          payments"/"nothing overdue" claim. */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <AttentionPanel
-          title="Pending Payments"
-          icon={Clock}
-          isLoading={isLoading}
-          items={data?.pendingPayments}
-          renderItem={(item) => (
-            <InvoiceRow key={item.id} invoiceNumber={item.invoiceNumber} projectName={item.projectName} total={item.total} sub={item.dueDate ? `Due ${formatDate(item.dueDate)}` : 'No due date'} />
-          )}
-          emptyTitle="No pending payments"
-          emptyDescription="Every sent invoice has been paid."
-        />
-        <AttentionPanel
-          title="Overdue Invoices"
-          icon={AlertCircle}
-          isLoading={isLoading}
-          items={data?.overdueInvoices}
-          renderItem={(item) => (
-            <InvoiceRow key={item.id} invoiceNumber={item.invoiceNumber} projectName={item.projectName} total={item.total} sub={item.dueDate ? `Was due ${formatDate(item.dueDate)}` : 'No due date'} danger />
-          )}
-          emptyTitle="Nothing overdue"
-          emptyDescription="All invoices are within their payment terms."
-        />
+        {(isLoading || data?.canViewFinancials) && (
+          <AttentionPanel
+            title="Pending Payments"
+            icon={Clock}
+            isLoading={isLoading}
+            items={data?.pendingPayments}
+            renderItem={(item) => (
+              <InvoiceRow key={item.id} invoiceNumber={item.invoiceNumber} projectName={item.projectName} total={item.total} sub={item.dueDate ? `Due ${formatDate(item.dueDate)}` : 'No due date'} />
+            )}
+            emptyTitle="No pending payments"
+            emptyDescription="Every sent invoice has been paid."
+          />
+        )}
+        {(isLoading || data?.canViewFinancials) && (
+          <AttentionPanel
+            title="Overdue Invoices"
+            icon={AlertCircle}
+            isLoading={isLoading}
+            items={data?.overdueInvoices}
+            renderItem={(item) => (
+              <InvoiceRow key={item.id} invoiceNumber={item.invoiceNumber} projectName={item.projectName} total={item.total} sub={item.dueDate ? `Was due ${formatDate(item.dueDate)}` : 'No due date'} danger />
+            )}
+            emptyTitle="Nothing overdue"
+            emptyDescription="All invoices are within their payment terms."
+          />
+        )}
         <AttentionPanel
           title="Upcoming Deadlines"
           icon={CalendarClock}
@@ -155,89 +169,96 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              <Receipt className="size-4 text-accent-500" />
-              Recent Expenses
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-1">
-            {isLoading ? (
-              <ListSkeleton />
-            ) : data && data.recentExpenses.length > 0 ? (
-              data.recentExpenses.map((expense) => (
-                <div key={expense.id} className="flex items-center justify-between py-2">
-                  <div className="flex flex-col">
-                    <span className="text-small font-medium text-text-primary">{expense.category}</span>
-                    <span className="text-caption text-text-tertiary">
-                      {expense.projectName} · {formatDate(expense.date)}
+      {/* Recent Expenses / Project Profitability / Recent Activity are all
+          financial or (for Activity) can embed financial figures in an
+          audit snapshot — same omit-don't-fake-empty rule as above. */}
+      {(isLoading || data?.canViewFinancials) && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <Receipt className="size-4 text-accent-500" />
+                Recent Expenses
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-1">
+              {isLoading ? (
+                <ListSkeleton />
+              ) : data && data.recentExpenses && data.recentExpenses.length > 0 ? (
+                data.recentExpenses.map((expense) => (
+                  <div key={expense.id} className="flex items-center justify-between py-2">
+                    <div className="flex flex-col">
+                      <span className="text-small font-medium text-text-primary">{expense.category}</span>
+                      <span className="text-caption text-text-tertiary">
+                        {expense.projectName} · {formatDate(expense.date)}
+                      </span>
+                    </div>
+                    <span className="text-small tabular-nums text-text-primary">{formatCurrency(expense.amount)}</span>
+                  </div>
+                ))
+              ) : (
+                <EmptyState icon={Receipt} title="No expenses yet" description="Logged expenses will show up here." />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <TrendingUp className="size-4 text-accent-500" />
+                Project Profitability
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-1">
+              {isLoading ? (
+                <ListSkeleton />
+              ) : data && data.projectProfitability && data.projectProfitability.length > 0 ? (
+                data.projectProfitability.map((row) => (
+                  <div key={row.projectId} className="flex items-center justify-between py-2">
+                    <span className="text-small font-medium text-text-primary">{row.projectName}</span>
+                    <span
+                      className={
+                        'text-small tabular-nums font-medium ' +
+                        (Number(row.profit) < 0 ? 'text-danger-text' : 'text-success-text')
+                      }
+                    >
+                      {formatCurrency(row.profit)}
                     </span>
                   </div>
-                  <span className="text-small tabular-nums text-text-primary">{formatCurrency(expense.amount)}</span>
-                </div>
-              ))
-            ) : (
-              <EmptyState icon={Receipt} title="No expenses yet" description="Logged expenses will show up here." />
-            )}
-          </CardContent>
-        </Card>
+                ))
+              ) : (
+                <EmptyState icon={TrendingUp} title="No active projects" description="Profitability appears once a project is active." />
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
+      {(isLoading || data?.canViewFinancials) && (
         <Card>
           <CardHeader>
             <CardTitle>
-              <TrendingUp className="size-4 text-accent-500" />
-              Project Profitability
+              <Banknote className="size-4 text-accent-500" />
+              Recent Activity
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-1">
+          <CardContent>
             {isLoading ? (
               <ListSkeleton />
-            ) : data && data.projectProfitability.length > 0 ? (
-              data.projectProfitability.map((row) => (
-                <div key={row.projectId} className="flex items-center justify-between py-2">
-                  <span className="text-small font-medium text-text-primary">{row.projectName}</span>
-                  <span
-                    className={
-                      'text-small tabular-nums font-medium ' +
-                      (Number(row.profit) < 0 ? 'text-danger-text' : 'text-success-text')
-                    }
-                  >
-                    {formatCurrency(row.profit)}
-                  </span>
-                </div>
-              ))
+            ) : data && data.recentActivities && data.recentActivities.length > 0 ? (
+              <Timeline
+                entries={data.recentActivities.map((activity) => ({
+                  id: activity.id,
+                  title: `${activity.actorUserName ?? 'System'} ${humanizeAction(activity.action)}d ${humanizeEntityType(activity.entityType)}`,
+                  meta: formatDateTime(activity.createdAt),
+                }))}
+              />
             ) : (
-              <EmptyState icon={TrendingUp} title="No active projects" description="Profitability appears once a project is active." />
+              <EmptyState icon={Banknote} title="No activity yet" description="Actions across your workspace will show up here." />
             )}
           </CardContent>
         </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            <Banknote className="size-4 text-accent-500" />
-            Recent Activity
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <ListSkeleton />
-          ) : data && data.recentActivities.length > 0 ? (
-            <Timeline
-              entries={data.recentActivities.map((activity) => ({
-                id: activity.id,
-                title: `${activity.actorUserName ?? 'System'} ${humanizeAction(activity.action)}d ${humanizeEntityType(activity.entityType)}`,
-                meta: formatDateTime(activity.createdAt),
-              }))}
-            />
-          ) : (
-            <EmptyState icon={Banknote} title="No activity yet" description="Actions across your workspace will show up here." />
-          )}
-        </CardContent>
-      </Card>
+      )}
     </motion.div>
   );
 }
@@ -253,37 +274,55 @@ function getGreeting(): string {
 // featured story (with received/pending as its own sub-narrative), net
 // profit gets its own emphasis since it's the bottom line, and the
 // remaining counts sit as smaller, clearly secondary tiles underneath.
-function KpiStrip({ kpis }: { kpis: DashboardKPIs }) {
+//
+// BE-068: `canViewFinancials` is the only thing that decides whether the
+// revenue/net-profit/expenses cards render at all -- never a fallback of
+// `Number(kpis.totalBilledRevenue) || 0`, which would silently show a
+// fake ₹0 for a restricted caller (the field is genuinely absent from
+// `kpis`, not zero) and misrepresent "you can't see this" as "this is
+// zero". Operational counts (projects/quotations) always render.
+function KpiStrip({ kpis, canViewFinancials }: { kpis: DashboardKPIs; canViewFinancials: boolean }) {
   const shouldReduceMotion = useReducedMotion();
   const itemVariants = shouldReduceMotion ? fadeInUpReduced : fadeInUp;
 
-  const secondary: { label: string; numericValue: number; format?: (v: number) => string }[] = [
+  const operational: { label: string; numericValue: number }[] = [
     { label: 'Total Projects', numericValue: Number(kpis.totalProjects) || 0 },
     { label: 'Active Projects', numericValue: Number(kpis.activeProjects) || 0 },
     { label: 'Total Quotations', numericValue: Number(kpis.totalQuotations) || 0 },
-    { label: 'Total Expenses', numericValue: Number(kpis.totalExpenses) || 0, format: formatCurrency },
   ];
 
   return (
     <motion.div variants={staggerContainer} initial="hidden" animate="show" className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <motion.div variants={itemVariants} className="lg:col-span-2">
-          <RevenuePanel
-            billed={Number(kpis.totalBilledRevenue) || 0}
-            received={Number(kpis.totalReceived) || 0}
-            pending={Number(kpis.pendingAmount) || 0}
-          />
-        </motion.div>
-        <motion.div variants={itemVariants}>
-          <NetProfitCard value={Number(kpis.netProfitLoss) || 0} />
-        </motion.div>
-      </div>
+      {canViewFinancials && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <motion.div variants={itemVariants} className="lg:col-span-2">
+            <RevenuePanel
+              billed={Number(kpis.totalBilledRevenue) || 0}
+              received={Number(kpis.totalReceived) || 0}
+              pending={Number(kpis.pendingAmount) || 0}
+            />
+          </motion.div>
+          <motion.div variants={itemVariants}>
+            <NetProfitCard value={Number(kpis.netProfitLoss) || 0} />
+          </motion.div>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {secondary.map((card) => (
+        {operational.map((card) => (
           <motion.div key={card.label} variants={itemVariants}>
-            <StatCard label={card.label} numericValue={card.numericValue} format={card.format} compact />
+            <StatCard label={card.label} numericValue={card.numericValue} compact />
           </motion.div>
         ))}
+        {canViewFinancials && (
+          <motion.div variants={itemVariants}>
+            <StatCard
+              label="Total Expenses"
+              numericValue={Number(kpis.totalExpenses) || 0}
+              format={formatCurrency}
+              compact
+            />
+          </motion.div>
+        )}
       </div>
     </motion.div>
   );

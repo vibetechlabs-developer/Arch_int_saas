@@ -30,26 +30,46 @@ class DashboardService:
     recomputing the same revenue/received/expenses/profit-loss formulas a
     second time, and ActivityLogService (BE-047) for the activity feed --
     pure read-only aggregation, no model/persistence of its own.
+
+    BE-068: `include_financial` is resolved by the view from the caller's
+    real `report.financial_access` permission (PermissionService, never a
+    role-name/display check) and gates every genuinely financial section
+    at the source -- when False, the financial KPI fields and the
+    pendingPayments/overdueInvoices/recentExpenses/projectProfitability
+    keys are never added to the returned dict at all (not computed, not
+    nulled, not zeroed), so there is no financial figure anywhere in the
+    payload for the serializer to leak even if it were misconfigured.
+
+    `recentActivities` is gated here too, despite being conceptually
+    operational ("who did what, when") -- confirmed by direct testing,
+    not assumed: AuditLogSerializer's `beforeState`/`afterState` are raw
+    field snapshots of whatever entity was touched, and an invoice/
+    payment audit entry's snapshot genuinely contains `total`/`amount`
+    figures. Redacting only the financial fields from individual audit
+    entries (while keeping the feed itself visible) would need new
+    per-entity-type filtering logic in the audit layer -- a larger,
+    riskier change than this task's scope. Gating the whole section is
+    the smallest fix that actually closes the leak.
     """
 
     @classmethod
-    def compute(cls, company_id: str | uuid.UUID) -> Dict[str, Any]:
-        return {
-            "kpis": cls._compute_kpis(company_id),
+    def compute(cls, company_id: str | uuid.UUID, include_financial: bool = True) -> Dict[str, Any]:
+        data: Dict[str, Any] = {
+            "kpis": cls._compute_kpis(company_id, include_financial),
             "recentProjects": cls._recent_projects(company_id),
             "recentQuotations": cls._recent_quotations(company_id),
-            "pendingPayments": cls._pending_payments(company_id),
-            "overdueInvoices": cls._overdue_invoices(company_id),
-            "recentExpenses": cls._recent_expenses(company_id),
             "upcomingDeadlines": cls._upcoming_deadlines(company_id),
-            "recentActivities": cls._recent_activities(company_id),
-            "projectProfitability": cls._project_profitability(company_id),
         }
+        if include_financial:
+            data["pendingPayments"] = cls._pending_payments(company_id)
+            data["overdueInvoices"] = cls._overdue_invoices(company_id)
+            data["recentExpenses"] = cls._recent_expenses(company_id)
+            data["projectProfitability"] = cls._project_profitability(company_id)
+            data["recentActivities"] = cls._recent_activities(company_id)
+        return data
 
     @classmethod
-    def _compute_kpis(cls, company_id: str | uuid.UUID) -> Dict[str, Any]:
-        finance = FinanceReportService.compute(company_id)
-
+    def _compute_kpis(cls, company_id: str | uuid.UUID, include_financial: bool) -> Dict[str, Any]:
         total_projects = Project.objects.filter(company_id=company_id).count()
         active_projects = (
             Project.objects.filter(company_id=company_id).exclude(status__in=TERMINAL_PROJECT_STATUSES).count()
@@ -58,16 +78,23 @@ class DashboardService:
             Quotation.objects.filter(company_id=company_id).values("quote_number").distinct().count()
         )
 
-        return {
+        kpis: Dict[str, Any] = {
             "totalProjects": total_projects,
             "activeProjects": active_projects,
             "totalQuotations": total_quotations,
-            "totalBilledRevenue": finance["revenue"],
-            "totalReceived": finance["received"],
-            "pendingAmount": finance["receivables"],
-            "totalExpenses": finance["expenses"],
-            "netProfitLoss": finance["profit_loss"],
         }
+        if include_financial:
+            finance = FinanceReportService.compute(company_id)
+            kpis.update(
+                {
+                    "totalBilledRevenue": finance["revenue"],
+                    "totalReceived": finance["received"],
+                    "pendingAmount": finance["receivables"],
+                    "totalExpenses": finance["expenses"],
+                    "netProfitLoss": finance["profit_loss"],
+                }
+            )
+        return kpis
 
     @classmethod
     def _recent_projects(cls, company_id: str | uuid.UUID) -> List[Dict[str, Any]]:

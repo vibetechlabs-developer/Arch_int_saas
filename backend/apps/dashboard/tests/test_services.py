@@ -49,6 +49,31 @@ class DashboardServiceTestCase(TestCase):
             "revenue": Decimal("0.00"), "expenses": Decimal("0.00"), "profit": Decimal("0.00"),
         }])
 
+    def test_include_financial_false_omits_every_financial_field_and_section(self):
+        """
+        BE-068: the dict DashboardService.compute returns must not even
+        contain the financial keys when include_financial=False -- not a
+        None, not a zero, genuinely absent, since the view never computes
+        them for a caller without report.financial_access.
+        """
+        report = DashboardService.compute(self.company.id, include_financial=False)
+
+        self.assertNotIn("totalBilledRevenue", report["kpis"])
+        self.assertNotIn("totalReceived", report["kpis"])
+        self.assertNotIn("pendingAmount", report["kpis"])
+        self.assertNotIn("totalExpenses", report["kpis"])
+        self.assertNotIn("netProfitLoss", report["kpis"])
+        self.assertNotIn("pendingPayments", report)
+        self.assertNotIn("overdueInvoices", report)
+        self.assertNotIn("recentExpenses", report)
+        self.assertNotIn("projectProfitability", report)
+        self.assertNotIn("recentActivities", report)
+
+        # Operational data is unaffected.
+        self.assertEqual(report["kpis"]["totalProjects"], 1)
+        self.assertEqual(report["kpis"]["activeProjects"], 1)
+        self.assertEqual(len(report["recentProjects"]), 1)
+
     def test_active_projects_excludes_terminal_statuses(self):
         Project.objects.create(
             company=self.company, client=self.client_obj, name="Completed Project",
