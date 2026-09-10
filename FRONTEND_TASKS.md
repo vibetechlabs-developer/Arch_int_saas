@@ -330,6 +330,19 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 - Live HTTP verification (see `BACKEND_TASKS.md` BE-076): all three PDFs generated against a real running backend, preview vs download disposition and filenames confirmed, cross-tenant/nonexistent/unauthenticated all correctly rejected.
 - Visual PDF QA: rendered PDF pages were actually opened and visually inspected (not just checked for a `%PDF-` signature) — layout, header/footer, tables, financial summary, and status badges all confirmed clean and correctly aligned across all three document types. In-browser Preview/Download *button* interaction itself remains **PENDING** — no browser tooling available in this environment.
 
+## Phase 19 — Dashboard Financial Access Separation
+
+| Task | Description | Status |
+|---|---|---|
+| F43 | Dashboard financial cards/sections render conditionally on `canViewFinancials` (BE-068) | Review |
+
+**Implementation notes (F43):**
+- Backend `GET /reports/dashboard` (BE-068) now omits financial fields entirely for a `report.view`-only caller and adds a `canViewFinancials` boolean. `DashboardData`/`DashboardKPIs` (`lib/api/dashboard.ts`) updated to make the 5 KPI money fields and the `pendingPayments`/`overdueInvoices`/`recentExpenses`/`projectProfitability`/`recentActivities` sections optional, matching genuine backend absence rather than a nulled/zeroed shape.
+- `DashboardPage.tsx`'s `KpiStrip` now takes `canViewFinancials` and renders the Revenue/Net Profit row and the Total Expenses stat card only when true — previously used `Number(kpis.totalBilledRevenue) || 0`, which would have silently rendered a fake ₹0.00 for a restricted user. Pending Payments, Overdue Invoices, Recent Expenses, Project Profitability, and Recent Activity are each wrapped so the entire card/section is absent (not empty-with-zero) when `canViewFinancials` is false; Upcoming Deadlines stays unconditional (operational data).
+- New tests: `DashboardPage.test.tsx` (new file, 8 — full financial dashboard renders, operational-only response renders without crashing, no financial card/section rendered when restricted, never a fake ₹0.00 in place of an omitted figure, loading state shows no real data early, generic 500 shows backend message, full-dashboard 403 shows backend message, existing recent-projects/quotations rendering unchanged). Frontend tests: 318 total, 312 passed, **6 skipped — unchanged baseline** (8 new tests). TypeScript: PASS. Build: PASS (bundle size unaffected).
+- Live HTTP verification (see `BACKEND_TASKS.md` BE-068): confirmed against a real running backend that a `report.view`-only token's response contains no financial keys and no real financial figures anywhere in the raw body.
+- Visual QA: **PENDING** — no browser tooling available in this environment.
+
 ## Not Yet Started
 
 Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Last-owner/protected-role safety (blocked on `Role.system_key`, BE-069).

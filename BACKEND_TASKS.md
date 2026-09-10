@@ -1337,8 +1337,8 @@ Depends On
 | BE-057 | General API throttling for business endpoints (reads/writes/reports/exports), env-configurable scopes, 429 via the standard error envelope. Auth throttling (existing) is out of scope. |
 | BE-058 | Real file upload pipeline (local storage in dev, S3-compatible in prod) for Documents/Payments receipts/Expense receipts/Product images: upload endpoint, MIME/extension/size validation, tenant-scoped storage paths, safe filenames, delete/archive, audit events. Includes a backward-compatible migration plan for existing `*_url` fields. |
 | BE-059 | Data-integrity enums: `Company.currency` (ISO-4217-validated choices), `Payment.method`, `Expense.category`/`vendor`/`payment_method`, and `Project.priority` (already a `CharField`, deliberately left free-text per an earlier Backend Lead decision since `01_Business/FRS.md §10` names the field but never defines its values — re-confirm that decision before constraining it) — pending confirmation of the exact allowed value sets (flagged, not invented). |
-| BE-068 | Split `GET /reports/dashboard`'s payload into operational vs. financial fields, gating only the latter with `report.financial_access` — deferred from BE-054 §6 (dashboard currently gated with `report.view` only, so any role with dashboard access sees the financial KPIs too). |
 | BE-069 | Add a stable, non-user-editable identifier to `Role` (e.g. a `system_key` field, never exposed via `/roles`) so default-role reconciliation migrations (`0006`–`0008`) stop matching by exact display `name` — a real forward risk once customer-created roles exist, flagged during BE-054's migration safety review. |
+
 | BE-070 | Fix `apps.authentication` throttle-cache test-isolation leak reproducible under `manage.py test` (13 failures + 3 errors) — see writeup below. | **Review** |
 | BE-071 | Add User / secure company user onboarding — `POST /company-memberships/add-user`, self-suspend/self-remove safety guards — see writeup below. | **Review** |
 | BE-072 | Role permission read-back — `GET /roles/{id}/permissions` — see writeup below. | **Review** |
@@ -1346,6 +1346,46 @@ Depends On
 | BE-074 | Invoice payment aggregates — `paidAmount`/`outstandingAmount` on InvoiceSerializer, N+1-safe — see writeup below. | **Review** |
 | BE-075 | CI pipeline (`.github/workflows/ci.yml`) — backend/frontend tests, type check, dependency audit, Docker build validation — see writeup below. | **Review** |
 | BE-076 | BOQ/Quotation/Invoice PDF export — shared server-side rendering infrastructure, three `GET .../pdf` endpoints — see writeup below. | **Review** |
+| BE-068 | Dashboard financial access separation — `GET /reports/dashboard` no longer sends financial data to `report.view`-only roles — see writeup below. | **Review** |
+| BE-077 | CSRF trusted origins made environment-driven via `DJANGO_CSRF_TRUSTED_ORIGINS` — see writeup below. | **Review** |
+
+#### BE-077 — CSRF Trusted Origins Configuration — 2026-09-10
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** P0 — release blocker. `CSRF_TRUSTED_ORIGINS` was never configured at all; any real deployment where `django.contrib.admin` is reached through an origin Django doesn't already trust by default would reject its own session-cookie form submissions.
+
+**Owner:** Backend Team
+
+**Scope note:** this API is JWT-bearer-token authenticated end to end (no `SessionAuthentication` in `REST_FRAMEWORK`), so CSRF only actually matters for `django.contrib.admin`'s own session+cookie login — not the JSON API itself.
+
+**Implementation:** new typed-list env var `DJANGO_CSRF_TRUSTED_ORIGINS` (django-environ `(list, [])` default, comma-separated, same convention as the existing `CORS_ALLOWED_ORIGINS`) feeds `CSRF_TRUSTED_ORIGINS` directly in `config/settings.py`. Deliberately **not** derived from `CORS_ALLOWED_ORIGINS` — CORS (cross-origin fetch/XHR to the JSON API) and CSRF (trusted origins for admin's session cookie) are different concerns with different risk profiles; conflating them would trust the SPA's own origin for cookie-based admin form submission it was never meant to have. Empty by default, so local dev (admin normally accessed same-origin there) is unaffected. Never a wildcard. Documented in `backend/.env.example`.
+
+**Verification:** django-environ list-parsing confirmed directly (empty string → `[]`, single value → one-element list, comma-separated → multi-element list, no wildcard risk). 5 new subprocess-based tests in `apps/common/tests/test_settings_hardening.py::CsrfTrustedOriginsTestCase` (dev boots unaffected; unset defaults to `[]` and never `"*"`; single-origin parses; multi-origin parses; a full production-style `DEBUG=false` + real `SECRET_KEY` + CSRF-configured boot succeeds) — all 5 passed; full file (10 tests) passed.
+
+#### BE-068 — Dashboard Financial Access Separation — 2026-09-10
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** P0 — release blocker. `GET /reports/dashboard` was gated only by `report.view`, but the response contained real financial data — any role with dashboard access (Project Manager, Designer, etc.) could read company revenue, receivables, expenses, profit/loss, and per-invoice/payment amounts regardless of whether they held `report.financial_access`.
+
+**Owner:** Backend Team
+
+**Fix — backend-authoritative filtering, not frontend hiding:** `DashboardService.compute(company_id, include_financial: bool)` now only *computes* (queries) the 5 financial KPIs (`totalBilledRevenue`, `totalReceived`, `pendingAmount`, `totalExpenses`, `netProfitLoss`) and the `pendingPayments`/`overdueInvoices`/`recentExpenses`/`projectProfitability` sections when `include_financial` is true — when false, these keys are never added to the response dict at all. `DashboardView` resolves `include_financial` via `PermissionService.has_permission(membership, "report.financial_access")` (existing permission code, none invented), with the same standing `is_platform_admin(request)` bypass every other permission check in this codebase already grants. The endpoint-level gate stays `report.view` (unchanged — PM/Designer/etc. still need dashboard access for operational data); the new gate only controls the financial *payload*.
+
+**Mechanism — genuine absence, not null/zero:** `DashboardKPISerializer`'s 5 money fields and `DashboardSerializer`'s financial-section fields are declared `required=False` with no `default`; when the source dict lacks the key, DRF's `SkipField` mechanism omits it from the serialized output entirely (not `null`, not `0.00`). A new `canViewFinancials` boolean is always present, for frontend UX (hiding cards) only — never used to gate what the backend actually sends.
+
+**Deliberate scope extension, disclosed:** while implementing, a test asserting no financial figures leak into the raw response caught that `recentActivities` (via `AuditLogSerializer`'s `beforeState`/`afterState`) embeds real invoice/payment amounts for audit entries on those entities — even though the master prompt's own classification treated "activity" as operational. Rather than build per-entity-type audit-log redaction (a larger, riskier change out of this task's scope), `recentActivities` was also gated behind `include_financial`. Documented in code comments, test comments, and `05_Security/RBAC_Enforcement_Matrix.md` §7.4 as a disclosed deviation from the prompt's literal classification, in favor of "when in doubt, treat as financial."
+
+**Explicitly unchanged:** `recentQuotations[].total` remains visible to `report.view` alone, per the master prompt's own explicit classification of quotations as operational/commercial pipeline data, not financial reporting.
+
+**No role-name authorization introduced:** verified with a dedicated regression test creating a `Role` literally named `"Owner"` holding only `report.view` — it still receives `canViewFinancials: false` and no financial fields, proving the check is permission-code-driven, not name-driven.
+
+**Frontend (F43):** `DashboardPage.tsx`'s `KpiStrip` and every financial card/section (Pending Payments, Overdue Invoices, Recent Expenses, Project Profitability, Recent Activity) now render conditionally on `data.canViewFinancials` — entirely absent, never a fake ₹0.00 fallback. `DashboardData`/`DashboardKPIs` types updated to make the financial fields optional, matching genuine backend absence.
+
+**Tests:** `apps/dashboard/tests/test_services.py` (+1: `include_financial=False` omits every financial key/section, confirms operational data unaffected), `apps/dashboard/tests/test_views.py` (+12, `DashboardFinancialAccessTestCase`: 403 without `report.view`, 200 operational-only for `report.view`-only, raw-response-text check confirming no real financial figures ("5000.00"/"2000.00") leak anywhere in the body, full financial response for `report.financial_access`, tenant isolation unchanged, platform-admin full-access bypass, platform-admin missing `companyId` still 400, role-name-authorization regression) — 23/23 passed. Frontend: `frontend/src/pages/DashboardPage.test.tsx` (new, 8 tests: full dashboard renders, operational-only renders without crashing, no financial card/section rendered when restricted, never a fake ₹0.00, loading state shows no real data early, generic 500 and full-dashboard 403 both show backend message, existing recent-projects/quotations behavior unchanged) — 8/8 passed.
+
+**Validation:** Live HTTP verification against a genuinely running `manage.py runserver`: seeded one company with a real invoice (5000.00, sent) + payment (2000.00), a full-access user, and a `report.view`-only user on a role named "Ops Viewer". Full-access token → `canViewFinancials: true` with real `totalBilledRevenue`/`totalReceived`/`pendingAmount`. View-only token → `canViewFinancials: false`, `kpis` contains only `totalProjects`/`activeProjects`/`totalQuotations`, no financial keys anywhere in the response, and a raw-text grep for "5000.00"/"2000.00" in that response found nothing. Unauthenticated → 401. All seeded data cleaned up, server stopped and confirmed down.
 
 #### BE-076 — BOQ/Quotation/Invoice PDF Export — 2026-09-10
 
