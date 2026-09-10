@@ -24,6 +24,7 @@ jest.mock('@/lib/api/quotations', () => ({
   reviseQuotation: jest.fn(),
 }));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
+jest.mock('@/lib/pdf', () => ({ previewPdf: jest.fn(), downloadPdf: jest.fn() }));
 
 const mockedGetQuotation = getQuotation as jest.Mock;
 const mockedGetQuotations = getQuotations as jest.Mock;
@@ -31,6 +32,8 @@ const mockedSend = sendQuotation as jest.Mock;
 const mockedApprove = approveQuotation as jest.Mock;
 const mockedReject = rejectQuotation as jest.Mock;
 const mockedRevise = reviseQuotation as jest.Mock;
+const mockedPreviewPdf = jest.requireMock('@/lib/pdf').previewPdf as jest.Mock;
+const mockedDownloadPdf = jest.requireMock('@/lib/pdf').downloadPdf as jest.Mock;
 
 function makeQuotation(overrides: Partial<Quotation> = {}): Quotation {
   return {
@@ -85,6 +88,26 @@ function renderPage(id = 'q1') {
 
 describe('QuotationDetailPage', () => {
   afterEach(() => jest.clearAllMocks());
+
+  it('shows Preview/Download PDF actions targeting this exact version, not "latest"', async () => {
+    const v1 = makeQuotation({ id: 'q1', version: 1 });
+    const v2 = makeQuotation({ id: 'q2', version: 2 });
+    mockedGetQuotation.mockImplementation((id: string) => Promise.resolve(id === 'q2' ? v2 : v1));
+    mockedGetQuotations.mockResolvedValue([v2, v1]);
+    mockedPreviewPdf.mockResolvedValue(undefined);
+    mockedDownloadPdf.mockResolvedValue(undefined);
+
+    // Viewing the OLDER version (q1) directly -- its own PDF actions must
+    // target q1, never silently substitute the newer q2.
+    renderPage('q1');
+    await screen.findByText('Modular switchboard');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview PDF' }));
+    await waitFor(() => expect(mockedPreviewPdf).toHaveBeenCalledWith('/quotations/q1/pdf'));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+    await waitFor(() => expect(mockedDownloadPdf).toHaveBeenCalledWith('/quotations/q1/pdf'));
+  });
 
   it('renders line items and the financial summary using exact backend decimal strings', async () => {
     mockedGetQuotation.mockResolvedValue(makeQuotation());

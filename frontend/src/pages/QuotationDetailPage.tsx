@@ -9,6 +9,7 @@ import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { Money } from '@/components/common/Money';
 import { FinancialSummary } from '@/components/common/FinancialSummary';
+import { PdfActions } from '@/components/common/PdfActions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -175,32 +176,39 @@ export default function QuotationDetailPage() {
               </div>
             </div>
 
-            {isLatest && (
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" onClick={() => setReviseOpen(true)}>
-                  <Repeat />
-                  Revise
-                </Button>
-                {quotation.status === 'draft' && (
-                  <Button variant="primary" onClick={() => setPendingAction('send')}>
-                    <Send />
-                    Send
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Always the version currently being viewed, never
+                  "latest" — quotationId is this specific version's own
+                  id, so a PDF requested here can never silently
+                  substitute a different revision. */}
+              <PdfActions url={`/quotations/${quotation.id}/pdf`} />
+              {isLatest && (
+                <>
+                  <Button variant="outline" onClick={() => setReviseOpen(true)}>
+                    <Repeat />
+                    Revise
                   </Button>
-                )}
-                {quotation.status === 'sent' && (
-                  <>
-                    <Button variant="outline" onClick={() => setPendingAction('reject')}>
-                      <ThumbsDown />
-                      Reject
+                  {quotation.status === 'draft' && (
+                    <Button variant="primary" onClick={() => setPendingAction('send')}>
+                      <Send />
+                      Send
                     </Button>
-                    <Button variant="primary" onClick={() => setPendingAction('approve')}>
-                      <ThumbsUp />
-                      Approve
-                    </Button>
-                  </>
-                )}
-              </div>
-            )}
+                  )}
+                  {quotation.status === 'sent' && (
+                    <>
+                      <Button variant="outline" onClick={() => setPendingAction('reject')}>
+                        <ThumbsDown />
+                        Reject
+                      </Button>
+                      <Button variant="primary" onClick={() => setPendingAction('approve')}>
+                        <ThumbsUp />
+                        Approve
+                      </Button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
           <Card>

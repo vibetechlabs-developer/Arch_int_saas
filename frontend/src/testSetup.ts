@@ -55,6 +55,15 @@ if (typeof window.ResizeObserver === 'undefined') {
   window.ResizeObserver = ResizeObserverPolyfill;
 }
 
+// jsdom has no Blob object-URL implementation at all (BE-076: PDF preview/
+// download blob handling needs both).
+if (typeof window.URL.createObjectURL === 'undefined') {
+  window.URL.createObjectURL = () => 'blob:mock-object-url';
+}
+if (typeof window.URL.revokeObjectURL === 'undefined') {
+  window.URL.revokeObjectURL = () => {};
+}
+
 // jsdom's layout engine always returns an all-zero rect. Radix's Popper
 // positioning (Popover/Select/DropdownMenu) treats a real, stable, non-zero
 // rect as a signal that measurement has settled — with everything stuck at

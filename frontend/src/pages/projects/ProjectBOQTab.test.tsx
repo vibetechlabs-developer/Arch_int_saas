@@ -26,11 +26,14 @@ jest.mock('@/lib/api/products', () => ({
   getProducts: jest.fn().mockResolvedValue({ items: [], pagination: { page: 1, pageSize: 100, totalItems: 0, totalPages: 0 } }),
 }));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
+jest.mock('@/lib/pdf', () => ({ previewPdf: jest.fn(), downloadPdf: jest.fn() }));
 
 const mockedGetBOQ = getBOQ as jest.Mock;
 const mockedGetSummary = getBOQSummary as jest.Mock;
 const mockedDeleteSection = deleteBOQSection as jest.Mock;
 const mockedDeleteItem = deleteBOQItem as jest.Mock;
+const mockedPreviewPdf = jest.requireMock('@/lib/pdf').previewPdf as jest.Mock;
+const mockedDownloadPdf = jest.requireMock('@/lib/pdf').downloadPdf as jest.Mock;
 
 const project: Project = {
   id: 'p1',
@@ -121,6 +124,21 @@ describe('ProjectBOQTab', () => {
     expect(screen.queryByText('Electrical Works')).not.toBeInTheDocument();
     resolveRequest(boqWithData);
     expect(await screen.findByText('Electrical Works')).toBeInTheDocument();
+  });
+
+  it('shows Preview/Download PDF actions that target this project\'s BOQ export', async () => {
+    mockedGetBOQ.mockResolvedValue(boqWithData);
+    mockedGetSummary.mockResolvedValue(summary);
+    mockedPreviewPdf.mockResolvedValue(undefined);
+    mockedDownloadPdf.mockResolvedValue(undefined);
+    renderTab();
+
+    await screen.findByText('Electrical Works');
+    await userEvent.click(screen.getByRole('button', { name: 'Preview PDF' }));
+    await waitFor(() => expect(mockedPreviewPdf).toHaveBeenCalledWith('/projects/p1/boq/pdf'));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+    await waitFor(() => expect(mockedDownloadPdf).toHaveBeenCalledWith('/projects/p1/boq/pdf'));
   });
 
   it('renders sections and items once loaded (success state)', async () => {

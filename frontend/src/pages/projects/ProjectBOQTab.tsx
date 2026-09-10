@@ -12,6 +12,7 @@ import { ErrorState } from '@/components/common/ErrorState';
 import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
 import { Money } from '@/components/common/Money';
 import { FinancialSummary } from '@/components/common/FinancialSummary';
+import { PdfActions } from '@/components/common/PdfActions';
 import { ApiError } from '@/lib/api/client';
 import { PRODUCT_UNITS } from '@/lib/api/products';
 import {
@@ -105,8 +106,9 @@ export default function ProjectBOQTab() {
   return (
     <div className="flex flex-col gap-6">
       <Card>
-        <CardHeader>
+        <CardHeader className="flex-row items-center justify-between">
           <CardTitle>Bill of Quantities</CardTitle>
+          <PdfActions url={`/projects/${projectId}/boq/pdf`} />
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-small text-text-secondary">

@@ -9,6 +9,7 @@ import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { Money } from '@/components/common/Money';
 import { FinancialSummary } from '@/components/common/FinancialSummary';
+import { PdfActions } from '@/components/common/PdfActions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -124,6 +125,7 @@ export default function InvoiceDetailPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              <PdfActions url={`/invoices/${invoice.id}/pdf`} />
               {canEdit && (
                 <Button variant="outline" onClick={() => setEditOpen(true)}>
                   <Pencil />

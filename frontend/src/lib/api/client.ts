@@ -123,7 +123,21 @@ apiClient.interceptors.response.use(
       }
     }
 
-    const body = error.response?.data;
+    // A request made with `responseType: 'blob'` (PDF preview/download)
+    // still gets its error body delivered as a Blob, even for a JSON error
+    // envelope — axios applies the request's responseType uniformly
+    // regardless of status code. Recover the real envelope so PDF errors
+    // surface the same backend message/code as every other request,
+    // instead of crashing on `body.error` being undefined on a Blob.
+    let body: ApiErrorEnvelope | undefined = error.response?.data as ApiErrorEnvelope | undefined;
+    const maybeBlob = error.response?.data as unknown;
+    if (maybeBlob instanceof Blob && maybeBlob.type.includes('json')) {
+      try {
+        body = JSON.parse(await maybeBlob.text()) as ApiErrorEnvelope;
+      } catch {
+        body = undefined;
+      }
+    }
     if (body && !body.success) {
       return Promise.reject(
         new ApiError(body.error.code, body.error.message, body.error.details ?? [], body.requestId, status),

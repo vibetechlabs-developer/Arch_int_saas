@@ -34,6 +34,7 @@ jest.mock('@/lib/api/company', () => ({
   ...jest.requireActual('@/lib/api/company'),
   getCompany: jest.fn(),
 }));
+jest.mock('@/lib/pdf', () => ({ previewPdf: jest.fn(), downloadPdf: jest.fn() }));
 
 const mockedGetInvoice = getInvoice as jest.Mock;
 const mockedSend = sendInvoice as jest.Mock;
@@ -43,6 +44,8 @@ const mockedGetQuotation = getQuotation as jest.Mock;
 const mockedGetPayments = getPayments as jest.Mock;
 const mockedCreatePayment = createPayment as jest.Mock;
 const mockedVoidPayment = jest.requireMock('@/lib/api/payments').voidPayment as jest.Mock;
+const mockedPreviewPdf = jest.requireMock('@/lib/pdf').previewPdf as jest.Mock;
+const mockedDownloadPdf = jest.requireMock('@/lib/pdf').downloadPdf as jest.Mock;
 const mockedFetchMyMemberships = jest.requireMock('@/lib/api/auth').fetchMyMemberships as jest.Mock;
 const mockedGetCompany = jest.requireMock('@/lib/api/company').getCompany as jest.Mock;
 
@@ -172,6 +175,20 @@ describe('InvoiceDetailPage', () => {
     expect(screen.getAllByText('$2,400.00').length).toBeGreaterThan(0);
     expect(screen.getByText('$1,600.00')).toBeInTheDocument();
     expect(screen.queryByText(/₹/)).not.toBeInTheDocument();
+  });
+
+  it('shows Preview/Download PDF actions targeting this invoice\'s export', async () => {
+    mockedGetInvoice.mockResolvedValue(makeInvoice());
+    mockedPreviewPdf.mockResolvedValue(undefined);
+    mockedDownloadPdf.mockResolvedValue(undefined);
+    renderPage('inv1');
+
+    await screen.findAllByText('Modular switchboard');
+    await userEvent.click(screen.getByRole('button', { name: 'Preview PDF' }));
+    await waitFor(() => expect(mockedPreviewPdf).toHaveBeenCalledWith('/invoices/inv1/pdf'));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+    await waitFor(() => expect(mockedDownloadPdf).toHaveBeenCalledWith('/invoices/inv1/pdf'));
   });
 
   it('renders billing lines and the financial summary using exact backend decimal strings', async () => {
