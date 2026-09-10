@@ -1,4 +1,6 @@
-from django.http import Http404
+from django.db.models import Prefetch
+from django.http import Http404, HttpResponse
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated
@@ -18,6 +20,7 @@ from apps.boq.serializers import (
     BOQSummarySerializer,
 )
 from apps.boq.services import BOQItemService, BOQSectionService, BOQService, BOQSummaryService
+from apps.common.pdf_service import pdf_http_response, render_pdf
 from apps.common.responses import ApiResponse
 from apps.common.views import ObjectPermission404Mixin
 from apps.projects.permissions import ProjectPermission
@@ -87,6 +90,83 @@ class BOQSummaryView(ObjectPermission404Mixin, APIView):
         return ApiResponse.success(
             data=response_data, request_id=getattr(request, "request_id", None)
         )
+
+
+class BOQPdfView(ObjectPermission404Mixin, APIView):
+    """
+    `GET /projects/{projectId}/boq/pdf` (BE-076) — server-rendered PDF
+    export. Same `ProjectPermission`/`boq.view` authorization as
+    `BOQDetailView` — a PDF export is a read action, not a distinct
+    permission concern. `?mode=preview` renders `Content-Disposition:
+    inline` (opens in-browser); any other/absent value renders
+    `attachment` (forces download) — one endpoint, not two, per the
+    project's "prefer one endpoint with query mode" guidance.
+    """
+
+    permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "boq.view"
+
+    @extend_schema(
+        summary="Export BOQ PDF",
+        description="Render this project's BOQ as a PDF. ?mode=preview for inline viewing, otherwise a download.",
+        responses={status.HTTP_200_OK: {"type": "string", "format": "binary"}},
+        tags=["BOQ"],
+    )
+    def get(self, request: Request, project_id: str = None) -> HttpResponse:
+        project = ProjectService.get_project_by_id(project_id)
+        self.check_object_permissions(request, project)
+
+        boq = BOQService.get_or_create_boq_for_project(project, actor_user=request.user, request=request)
+        summary = BOQSummaryService.compute_summary(boq)
+
+        # One query for sections, one for every section's items (with their
+        # product joined) regardless of section/item count -- never one
+        # items query per section (BE-076 Phase 37: no N+1 on a large BOQ).
+        sections = (
+            BOQSection.objects.filter(boq=boq)
+            .prefetch_related(
+                Prefetch("items", queryset=BOQItem.objects.select_related("product").order_by("created_at"))
+            )
+            .order_by("sort_order", "created_at")
+        )
+
+        company = project.company
+        client = project.client
+        context = {
+            "document_title": f"BOQ - {project.name}",
+            "document_type": "BILL OF QUANTITIES",
+            "document_number": "",
+            "status_label": boq.status,
+            "company": company,
+            "client": client,
+            "project": project,
+            "currency": company.currency,
+            "generated_at": timezone.localtime().strftime("%d %b %Y, %H:%M"),
+            "sections": [
+                {
+                    "name": section.name,
+                    "items": [
+                        {
+                            "description": item.description,
+                            "product_name": item.product.name if item.product_id else None,
+                            "quantity": item.quantity,
+                            "unit": item.get_unit_display() if item.unit else "",
+                            "rate": item.rate,
+                            "amount": item.amount,
+                            "is_optional": item.is_optional,
+                            "is_alternative": item.is_alternative,
+                        }
+                        for item in section.items.all()
+                    ],
+                }
+                for section in sections
+            ],
+            "summary": summary,
+        }
+
+        pdf_bytes = render_pdf("pdf/boq.html", context)
+        inline = request.query_params.get("mode") == "preview"
+        return pdf_http_response(pdf_bytes, filename=f"BOQ-{project.name}", inline=inline)
 
 
 class BOQSectionListCreateView(ObjectPermission404Mixin, APIView):
