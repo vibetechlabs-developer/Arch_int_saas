@@ -1,3 +1,5 @@
+from django.http import HttpResponse
+from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -5,10 +7,12 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.pdf_service import pdf_http_response, render_pdf
 from apps.common.responses import ApiResponse
 from apps.common.views import ObjectPermission404Mixin
 from apps.projects.permissions import ProjectPermission
 from apps.projects.services import ProjectService
+from apps.quotations.models import QuotationStatus
 from apps.quotations.serializers import (
     QuotationCreateSerializer,
     QuotationListQuerySerializer,
@@ -128,6 +132,74 @@ class QuotationDetailView(ObjectPermission404Mixin, APIView):
         return ApiResponse.success(
             data=response_data, request_id=getattr(request, "request_id", None)
         )
+
+
+class QuotationPdfView(ObjectPermission404Mixin, APIView):
+    """
+    `GET /quotations/{quotationId}/pdf` (BE-076) — server-rendered PDF
+    export of exactly the version identified by `quotationId` (each
+    version is its own row/id, so this never accidentally exports a
+    different version than the one being viewed). Same `ProjectPermission`
+    /`quotation.view` authorization as `QuotationDetailView`.
+    `?mode=preview` -> inline; otherwise attachment.
+    """
+
+    permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code = "quotation.view"
+
+    @extend_schema(
+        summary="Export Quotation PDF",
+        description="Render this quotation version as a PDF. ?mode=preview for inline viewing, otherwise a download.",
+        responses={status.HTTP_200_OK: {"type": "string", "format": "binary"}},
+        tags=["Quotations"],
+    )
+    def get(self, request: Request, quotation_id: str = None) -> HttpResponse:
+        quotation = QuotationService.get_quotation_by_id(quotation_id)
+        self.check_object_permissions(request, quotation)
+
+        # select_related('product') on the reverse FK avoids one query per
+        # item for its product name (Phase 37: no N+1 on a large quotation).
+        items = quotation.items.select_related("product").order_by("created_at")
+
+        company = quotation.company
+        client = quotation.client
+        project = quotation.project
+        status_choices = dict(QuotationStatus.choices)
+        context = {
+            "document_title": f"Quotation {quotation.quote_number} v{quotation.version}",
+            "document_type": "QUOTATION",
+            "document_number": f"{quotation.quote_number} · v{quotation.version}",
+            "status_label": status_choices.get(quotation.status, quotation.status),
+            "company": company,
+            "client": client,
+            "project": project,
+            "currency": company.currency,
+            "generated_at": timezone.localtime().strftime("%d %b %Y, %H:%M"),
+            "items": [
+                {
+                    "description": item.description,
+                    "quantity": item.quantity,
+                    "unit": item.get_unit_display() if item.unit else "",
+                    "rate": item.rate,
+                    "amount": item.amount,
+                }
+                for item in items
+            ],
+            "quotation": {
+                "subtotal": quotation.subtotal,
+                "discount": quotation.discount,
+                "tax": quotation.tax,
+                "total": quotation.total,
+                "valid_until": quotation.valid_until,
+                "terms": quotation.terms,
+                "notes": quotation.notes,
+            },
+        }
+
+        pdf_bytes = render_pdf("pdf/quotation.html", context)
+        inline = request.query_params.get("mode") == "preview"
+        filename = f"Quotation-{quotation.quote_number}-v{quotation.version}"
+        return pdf_http_response(pdf_bytes, filename=filename, inline=inline)
 
 
 class QuotationReviseView(ObjectPermission404Mixin, APIView):

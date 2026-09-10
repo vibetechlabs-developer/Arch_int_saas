@@ -4,6 +4,7 @@ from apps.quotations.views import (
     QuotationApproveView,
     QuotationDetailView,
     QuotationListCreateView,
+    QuotationPdfView,
     QuotationRejectView,
     QuotationReviseView,
     QuotationSendView,
@@ -24,6 +25,11 @@ urlpatterns = [
         r"^quotations/(?P<quotation_id>[0-9a-fA-F-]{36})/revise/?$",
         QuotationReviseView.as_view(),
         name="quotation-revise",
+    ),
+    re_path(
+        r"^quotations/(?P<quotation_id>[0-9a-fA-F-]{36})/pdf/?$",
+        QuotationPdfView.as_view(),
+        name="quotation-pdf",
     ),
     re_path(
         r"^quotations/(?P<quotation_id>[0-9a-fA-F-]{36})/send/?$",
