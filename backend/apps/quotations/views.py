@@ -7,7 +7,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.common.pdf_service import pdf_http_response, render_pdf
+from apps.common.pdf_service import company_logo_data_uri, pdf_http_response, render_pdf
 from apps.common.responses import ApiResponse
 from apps.common.views import ObjectPermission404Mixin
 from apps.projects.permissions import ProjectPermission
@@ -171,6 +171,7 @@ class QuotationPdfView(ObjectPermission404Mixin, APIView):
             "document_number": f"{quotation.quote_number} · v{quotation.version}",
             "status_label": status_choices.get(quotation.status, quotation.status),
             "company": company,
+            "company_logo_data_uri": company_logo_data_uri(company),
             "client": client,
             "project": project,
             "currency": company.currency,

@@ -36,6 +36,11 @@
         vertical-align: top;
         padding: 0;
     }
+    .company-logo {
+        max-height: 30pt;
+        max-width: 150pt;
+        margin-bottom: 4pt;
+    }
     .company-name {
         font-size: 15pt;
         font-weight: bold;
@@ -210,6 +215,7 @@
 <table class="doc-header">
     <tr>
         <td style="width: 55%;">
+            {% if company_logo_data_uri %}<img class="company-logo" src="{{ company_logo_data_uri }}" alt="{{ company.name }}" />{% endif %}
             <div class="company-name">{{ company.name }}</div>
             {% if company.gst_number %}<div class="company-meta">GSTIN: {{ company.gst_number }}</div>{% endif %}
         </td>

@@ -20,7 +20,7 @@ from apps.boq.serializers import (
     BOQSummarySerializer,
 )
 from apps.boq.services import BOQItemService, BOQSectionService, BOQService, BOQSummaryService
-from apps.common.pdf_service import pdf_http_response, render_pdf
+from apps.common.pdf_service import company_logo_data_uri, pdf_http_response, render_pdf
 from apps.common.responses import ApiResponse
 from apps.common.views import ObjectPermission404Mixin
 from apps.projects.permissions import ProjectPermission
@@ -138,6 +138,7 @@ class BOQPdfView(ObjectPermission404Mixin, APIView):
             "document_number": "",
             "status_label": boq.status,
             "company": company,
+            "company_logo_data_uri": company_logo_data_uri(company),
             "client": client,
             "project": project,
             "currency": company.currency,

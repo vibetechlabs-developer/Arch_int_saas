@@ -1,6 +1,17 @@
-from django.test import SimpleTestCase
+import shutil
+import tempfile
+from types import SimpleNamespace
 
-from apps.common.pdf_service import PdfRenderError, pdf_http_response, render_pdf, sanitize_filename
+from django.test import SimpleTestCase, override_settings
+
+from apps.common import storage as storage_service
+from apps.common.pdf_service import (
+    PdfRenderError,
+    company_logo_data_uri,
+    pdf_http_response,
+    render_pdf,
+    sanitize_filename,
+)
 
 
 class SanitizeFilenameTestCase(SimpleTestCase):
@@ -128,3 +139,53 @@ class PdfHttpResponseTestCase(SimpleTestCase):
     def test_does_not_double_append_pdf_extension(self):
         response = pdf_http_response(b"%PDF-1.4 fake", filename="Invoice-INV-000001.pdf", inline=False)
         self.assertEqual(response["Content-Disposition"], 'attachment; filename="Invoice-INV-000001.pdf"')
+
+
+_TEMP_MEDIA_ROOT = tempfile.mkdtemp(prefix="pdf_logo_tests_")
+
+
+@override_settings(MEDIA_ROOT=_TEMP_MEDIA_ROOT)
+class CompanyLogoDataUriTestCase(SimpleTestCase):
+    """
+    BE-078: `company_logo_data_uri` inlines a company logo's real bytes
+    directly (never fetches `logoUrl` over HTTP -- see its own docstring
+    for the SSRF reasoning), and only when this app actually uploaded the
+    file (`logo_storage_key` non-blank).
+    """
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(_TEMP_MEDIA_ROOT, ignore_errors=True)
+
+    def test_no_logo_storage_key_returns_none(self):
+        company = SimpleNamespace(id="c1", logo_storage_key="")
+        self.assertIsNone(company_logo_data_uri(company))
+
+    def test_missing_logo_storage_key_attribute_returns_none(self):
+        company = SimpleNamespace(id="c1")
+        self.assertIsNone(company_logo_data_uri(company))
+
+    def test_real_uploaded_logo_returns_a_valid_data_uri(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        upload = SimpleUploadedFile("logo.png", b"\x89PNG\r\n\x1a\nfake-but-real-bytes", content_type="image/png")
+        key = storage_service.generate_storage_key("companies", "c1", "png")
+        storage_service.save_upload("companies", key, upload)
+
+        company = SimpleNamespace(id="c1", logo_storage_key=key)
+        data_uri = company_logo_data_uri(company)
+
+        self.assertIsNotNone(data_uri)
+        self.assertTrue(data_uri.startswith("data:image/png;base64,"))
+
+        import base64
+
+        encoded = data_uri.split(",", 1)[1]
+        self.assertEqual(base64.b64decode(encoded), b"\x89PNG\r\n\x1a\nfake-but-real-bytes")
+
+        storage_service.delete_file("companies", key)
+
+    def test_nonexistent_storage_key_degrades_to_none_not_an_exception(self):
+        company = SimpleNamespace(id="c1", logo_storage_key="companies/c1/does-not-exist.png")
+        self.assertIsNone(company_logo_data_uri(company))

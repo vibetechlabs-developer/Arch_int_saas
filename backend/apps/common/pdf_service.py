@@ -8,17 +8,27 @@ or in the templates it renders -- every number in the context must
 already be the real, backend-computed value.
 """
 
+import base64
 import logging
 import re
 import unicodedata
 from io import BytesIO
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from xhtml2pdf import pisa
 
+from apps.common import storage as storage_service
+
 logger = logging.getLogger("apps.common.pdf_service")
+
+_LOGO_MIME_TYPES = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+}
 
 
 class PdfRenderError(Exception):
@@ -52,6 +62,37 @@ def render_pdf(template_name: str, context: Dict[str, Any]) -> bytes:
         )
         raise PdfRenderError(f"PDF generation failed for template '{template_name}'.")
     return buffer.getvalue()
+
+
+def company_logo_data_uri(company: Any) -> Optional[str]:
+    """
+    Returns a base64 `data:` URI for `company`'s logo, or `None` when no
+    logo is set, or when its `logo_url` was entered manually rather than
+    uploaded through `POST /companies/{id}/logo/upload` (`logo_storage_key`
+    blank) -- a manually-entered URL is never fetched by the PDF renderer
+    at all (see `apps.common.storage.read_public_file_bytes`'s docstring
+    for why: this app has no business making an HTTP request to an
+    address it doesn't control on every PDF export). Any read/decode
+    failure degrades to `None` (logo omitted) rather than failing the
+    whole PDF export -- a missing logo is a cosmetic gap, not a reason to
+    return 500 for an otherwise-successful document.
+    """
+    storage_key = getattr(company, "logo_storage_key", "") or ""
+    if not storage_key:
+        return None
+
+    try:
+        content = storage_service.read_public_file_bytes("companies", storage_key)
+    except Exception:
+        logger.warning(
+            "Could not read company logo for PDF rendering (company_id=%s)", getattr(company, "id", None)
+        )
+        return None
+
+    extension = storage_key.rsplit(".", 1)[-1].lower() if "." in storage_key else ""
+    mime_type = _LOGO_MIME_TYPES.get(extension, "application/octet-stream")
+    encoded = base64.b64encode(content).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
 
 def sanitize_filename(name: str, fallback: str = "document") -> str:
