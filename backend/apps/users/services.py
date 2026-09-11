@@ -10,7 +10,12 @@ from apps.audit.services import AuditLogService
 from apps.common.exceptions import ConflictError
 from apps.users import selectors, validators
 from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role, User
-from apps.users.permission_catalog import ALL_PERMISSION_CODES, DEFAULT_ROLE_PERMISSIONS
+from apps.users.permission_catalog import (
+    ALL_PERMISSION_CODES,
+    DEFAULT_ROLE_PERMISSIONS,
+    DEFAULT_ROLE_SYSTEM_KEYS,
+    OWNER_SYSTEM_KEY,
+)
 from apps.users.repositories import (
     CompanyMembershipRepository,
     PermissionRepository,
@@ -287,9 +292,25 @@ class RoleService:
     ) -> None:
         """
         Soft-delete a Role by setting deleted_at timestamp.
+
+        BE-069: the system Owner role (system_key == OWNER_SYSTEM_KEY) can
+        never be deleted -- it is the sole role that can ever confer Owner
+        status, so removing it would be far more severe than any single
+        membership mutation (it would simultaneously strip every current
+        Owner in this company). No other default role is protected here;
+        "Admin"/"Project Manager"/etc. remain deletable exactly like any
+        custom role -- 05_Security/Permissions.md documents no requirement
+        to protect them, and inventing one isn't this task's mandate.
         """
         with transaction.atomic():
             role = cls.get_role_by_id(role_id, company_id=company_id)
+
+            if role.system_key == OWNER_SYSTEM_KEY:
+                raise ConflictError(
+                    "The Owner system role cannot be deleted.",
+                    code="SYSTEM_ROLE_PROTECTED",
+                )
+
             role_id_val = role.id
             company_id_val = role.company_id
             before_state = {
@@ -386,6 +407,11 @@ class RoleService:
 
         Not backfilled onto companies that existed before this feature
         shipped; only new companies get auto-seeded roles.
+
+        BE-069: each seeded role gets a stable `system_key` (from
+        DEFAULT_ROLE_SYSTEM_KEYS) -- this is the ONLY code path in the
+        entire codebase permitted to set it. Renaming a role afterward via
+        RoleService.update_role never touches system_key.
         """
         all_permissions_by_code = {p.code: p for p in PermissionRepository.all()}
         created_roles: list[Role] = []
@@ -396,6 +422,7 @@ class RoleService:
                 name=role_name,
                 description=f"Default '{role_name}' role, auto-created for this company.",
                 is_active=True,
+                system_key=DEFAULT_ROLE_SYSTEM_KEYS[role_name],
             )
 
             resolved_codes = ALL_PERMISSION_CODES if codes == "__all__" else codes
@@ -452,6 +479,45 @@ class CompanyMembershipService:
     management (BE-052): invite, list, remove, suspend, reactivate, and
     assign/change role. Every mutation is audited (BE-055).
     """
+
+    @classmethod
+    def _reject_if_would_remove_last_active_owner(cls, membership: CompanyMembership) -> None:
+        """
+        BE-069 last-owner invariant: a company must never lose its final
+        ACTIVE membership holding the system Owner role. A no-op unless
+        `membership` is itself currently an active Owner -- callers invoke
+        this only from the specific mutation paths that could take it out
+        of that state (assign a different/no role, suspend, remove), never
+        unconditionally.
+
+        Identifies Owner via `membership.role.system_key ==
+        OWNER_SYSTEM_KEY` -- never `membership.role.name == "Owner"`, so a
+        custom role a customer happens to name "Owner" never triggers
+        this and never receives this protection.
+
+        Concurrency-safe (Phase 8): locks every currently-active Owner
+        membership row for this company (`SELECT ... FOR UPDATE`, via
+        CompanyMembershipRepository.lock_active_role_membership_ids)
+        before counting -- must be called from inside the caller's own
+        `transaction.atomic()` block. Two concurrent requests each trying
+        to demote/suspend/remove a *different* Owner serialize against
+        this lock: whichever transaction commits first is allowed, the
+        second re-evaluates the now-current (reduced) count and is
+        correctly rejected if only one Owner remains.
+        """
+        if not membership.role_id or membership.role.system_key != OWNER_SYSTEM_KEY:
+            return
+        if membership.status != CompanyMembershipStatus.ACTIVE:
+            return
+
+        locked_ids = CompanyMembershipRepository.lock_active_role_membership_ids(
+            membership.company_id, membership.role_id
+        )
+        if len(locked_ids) <= 1:
+            raise ConflictError(
+                "This company must have at least one active Owner.",
+                code="LAST_OWNER_REQUIRED",
+            )
 
     @classmethod
     def list_memberships(
@@ -758,6 +824,10 @@ class CompanyMembershipService:
                             f"yourself: {', '.join(escalating_codes)}"
                         )
 
+            new_is_owner = role is not None and role.system_key == OWNER_SYSTEM_KEY
+            if not new_is_owner:
+                cls._reject_if_would_remove_last_active_owner(membership)
+
             membership = CompanyMembershipRepository.save(membership, {"role": role})
 
             AuditLogService.record(
@@ -797,6 +867,9 @@ class CompanyMembershipService:
                 and str(actor_user.id) == str(membership.user_id)
             ):
                 raise drf_exceptions.PermissionDenied("You cannot suspend your own membership.")
+
+            if new_status != CompanyMembershipStatus.ACTIVE:
+                cls._reject_if_would_remove_last_active_owner(membership)
 
             before_state = cls._membership_snapshot(membership)
 
@@ -855,6 +928,8 @@ class CompanyMembershipService:
             # company.
             if actor_user is not None and str(actor_user.id) == str(membership.user_id):
                 raise drf_exceptions.PermissionDenied("You cannot remove your own membership.")
+
+            cls._reject_if_would_remove_last_active_owner(membership)
 
             membership_id_val = membership.id
             company_id_val = membership.company_id

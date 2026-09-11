@@ -5,7 +5,14 @@ from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
 from apps.company.models import Company
-from apps.users.models import CompanyMembership, Permission, Role, RolePermission, User
+from apps.users.models import (
+    CompanyMembership,
+    CompanyMembershipStatus,
+    Permission,
+    Role,
+    RolePermission,
+    User,
+)
 
 
 class RoleRepository:
@@ -36,6 +43,19 @@ class RoleRepository:
         if exclude_id is not None:
             queryset = queryset.exclude(id=exclude_id)
         return queryset.exists()
+
+    @staticmethod
+    def get_by_system_key(company_id: str | uuid.UUID, system_key: str) -> Optional[Role]:
+        """
+        BE-069: resolve a company's system role by its stable identity,
+        never by display name. Returns None rather than raising -- a
+        company predating the seeding feature may genuinely have no
+        Owner-system-key role at all (see RoleService.
+        seed_default_roles_for_company's own "not backfilled onto
+        existing companies" note), which callers must be able to treat as
+        "no system role of this kind exists here" rather than an error.
+        """
+        return Role.objects.filter(company_id=company_id, system_key=system_key).first()
 
     @staticmethod
     def create(**fields: Any) -> Role:
@@ -170,6 +190,37 @@ class CompanyMembershipRepository:
         return CompanyMembership.objects.filter(
             company_id=company_id, user_id=user_id
         ).exists()
+
+    @staticmethod
+    def lock_active_role_membership_ids(
+        company_id: str | uuid.UUID, role_id: str | uuid.UUID
+    ) -> list:
+        """
+        BE-069 last-owner invariant, concurrency safety (Phase 8): locks
+        (`SELECT ... FOR UPDATE`) every currently-active membership row
+        holding `role_id` in this company, for the remaining lifetime of
+        the caller's `transaction.atomic()` block -- must only be called
+        from inside one. A second concurrent transaction attempting to
+        mutate any of these same rows blocks until the first commits or
+        rolls back, then re-evaluates the now-current set -- this is what
+        makes "reject if this would remove the company's last active
+        Owner" correct even when two requests race to demote/remove two
+        different Owners at once.
+
+        Returns a plain list of ids (never `.count()`) — PostgreSQL
+        rejects `SELECT ... FOR UPDATE` combined with an aggregate;
+        callers use `len(...)`.
+        """
+        return list(
+            CompanyMembership.objects.select_for_update()
+            .filter(
+                company_id=company_id,
+                role_id=role_id,
+                status=CompanyMembershipStatus.ACTIVE,
+                deleted_at__isnull=True,
+            )
+            .values_list("id", flat=True)
+        )
 
     @staticmethod
     def create(**fields: Any) -> CompanyMembership:
