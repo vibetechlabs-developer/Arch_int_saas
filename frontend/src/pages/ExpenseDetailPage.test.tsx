@@ -26,6 +26,7 @@ jest.mock('@/lib/api/expenses', () => ({
 }));
 jest.mock('@/lib/api/memberships');
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
+jest.mock('@/lib/pdf', () => ({ previewPdf: jest.fn(), downloadPdf: jest.fn() }));
 
 const mockedGetExpense = getExpense as jest.Mock;
 const mockedUpdate = updateExpense as jest.Mock;
@@ -50,6 +51,7 @@ function makeExpense(overrides: Partial<Expense> = {}): Expense {
     date: '2026-09-01',
     paymentMethod: 'Bank transfer',
     receiptUrl: '',
+    hasStoredReceipt: false,
     notes: '',
     addedById: 'u1',
     addedByName: 'Alice Member',
@@ -104,12 +106,24 @@ describe('ExpenseDetailPage', () => {
     expect(link).toHaveAttribute('href', 'https://files.example.com/receipt.pdf');
   });
 
-  it('shows no receipt section when receiptUrl is empty', async () => {
+  it('shows no receipt section when receiptUrl is empty and no receipt is stored', async () => {
     mockedGetExpense.mockResolvedValue(makeExpense({ receiptUrl: '' }));
     renderPage();
 
     await screen.findByText('ABC Corp');
     expect(screen.queryByText('Receipt')).not.toBeInTheDocument();
+  });
+
+  it('shows Preview/Download actions for a stored receipt (BE-078)', async () => {
+    mockedGetExpense.mockResolvedValue(makeExpense({ receiptUrl: '', hasStoredReceipt: true }));
+    renderPage();
+
+    const previewButton = await screen.findByRole('button', { name: 'Preview' });
+    expect(screen.queryByRole('link', { name: /view receipt/i })).not.toBeInTheDocument();
+
+    await userEvent.click(previewButton);
+    const { previewPdf } = jest.requireMock('@/lib/pdf');
+    await waitFor(() => expect(previewPdf).toHaveBeenCalledWith('/expenses/e1/receipt'));
   });
 
   it('shows Edit, Submit, and Delete for a draft expense, but no Approve/Mark as Paid', async () => {

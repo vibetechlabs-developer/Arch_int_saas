@@ -5,6 +5,8 @@ from apps.expenses.views import (
     ExpenseDetailView,
     ExpenseListCreateView,
     ExpenseMarkPaidView,
+    ExpenseReceiptDownloadView,
+    ExpenseReceiptUploadView,
     ExpenseSubmitView,
 )
 
@@ -13,6 +15,16 @@ urlpatterns = [
         r"^projects/(?P<project_id>[0-9a-fA-F-]{36})/expenses/?$",
         ExpenseListCreateView.as_view(),
         name="expense-list",
+    ),
+    re_path(
+        r"^expenses/receipts/upload/?$",
+        ExpenseReceiptUploadView.as_view(),
+        name="expense-receipt-upload",
+    ),
+    re_path(
+        r"^expenses/(?P<expense_id>[0-9a-fA-F-]{36})/receipt/?$",
+        ExpenseReceiptDownloadView.as_view(),
+        name="expense-receipt-download",
     ),
     re_path(
         r"^expenses/(?P<expense_id>[0-9a-fA-F-]{36})/?$",

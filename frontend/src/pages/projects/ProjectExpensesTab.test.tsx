@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ProjectExpensesTab from '@/pages/projects/ProjectExpensesTab';
-import { createExpense, getExpenses, type Expense } from '@/lib/api/expenses';
+import { createExpense, getExpenses, uploadExpenseReceipt, type Expense } from '@/lib/api/expenses';
 import { searchActiveCompanyMembers } from '@/lib/api/memberships';
 import type { Project } from '@/lib/api/projects';
 import { ApiError } from '@/lib/api/client';
@@ -12,12 +12,14 @@ jest.mock('@/lib/api/expenses', () => ({
   ...jest.requireActual('@/lib/api/expenses'),
   getExpenses: jest.fn(),
   createExpense: jest.fn(),
+  uploadExpenseReceipt: jest.fn(),
 }));
 jest.mock('@/lib/api/memberships');
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
 
 const mockedGetExpenses = getExpenses as jest.Mock;
 const mockedCreate = createExpense as jest.Mock;
+const mockedUploadReceipt = uploadExpenseReceipt as jest.Mock;
 const mockedSearchMembers = searchActiveCompanyMembers as jest.Mock;
 
 const project: Project = {
@@ -52,6 +54,7 @@ function makeExpense(overrides: Partial<Expense> = {}): Expense {
     date: '2026-09-01',
     paymentMethod: '',
     receiptUrl: '',
+    hasStoredReceipt: false,
     notes: '',
     addedById: 'u1',
     addedByName: 'Alice Member',
@@ -198,6 +201,54 @@ describe('ProjectExpensesTab', () => {
         notes: '',
       }),
     );
+  });
+
+  it('uploads a receipt file and includes its storage key in the create payload (BE-078)', async () => {
+    mockedGetExpenses.mockResolvedValue([]);
+    mockedUploadReceipt.mockResolvedValue({ key: 'expenses/c1/abc.pdf', fileName: 'receipt.pdf', contentType: 'application/pdf', size: 100 });
+    mockedCreate.mockResolvedValue(makeExpense({ id: 'e9' }));
+    renderTab();
+    await screen.findAllByText('No expenses recorded yet');
+
+    await userEvent.click(screen.getAllByRole('button', { name: /add expense/i })[0]);
+    await userEvent.type(screen.getByLabelText('Amount'), '500.00');
+    await userEvent.type(screen.getByLabelText('Expense date'), '2026-09-01');
+
+    const file = new File(['%PDF-1.4'], 'receipt.pdf', { type: 'application/pdf' });
+    await userEvent.upload(screen.getByLabelText('Receipt file'), file);
+    await userEvent.click(screen.getByRole('button', { name: 'Add expense' }));
+
+    await waitFor(() => expect(mockedUploadReceipt).toHaveBeenCalledWith(file));
+    await waitFor(() =>
+      expect(mockedCreate).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ receiptUrl: '', receiptStorageKey: 'expenses/c1/abc.pdf' }),
+      ),
+    );
+  });
+
+  it('registers a receipt by URL when "Use a URL instead" is chosen', async () => {
+    mockedGetExpenses.mockResolvedValue([]);
+    mockedCreate.mockResolvedValue(makeExpense({ id: 'e9' }));
+    renderTab();
+    await screen.findAllByText('No expenses recorded yet');
+
+    await userEvent.click(screen.getAllByRole('button', { name: /add expense/i })[0]);
+    await userEvent.type(screen.getByLabelText('Amount'), '500.00');
+    await userEvent.type(screen.getByLabelText('Expense date'), '2026-09-01');
+    await userEvent.click(screen.getByRole('button', { name: /use a url instead/i }));
+    await userEvent.type(screen.getByPlaceholderText('https://…'), 'https://files.example.com/receipt.pdf');
+    await userEvent.click(screen.getByRole('button', { name: 'Add expense' }));
+
+    await waitFor(() => expect(mockedUploadReceipt).not.toHaveBeenCalled());
+    await waitFor(() =>
+      expect(mockedCreate).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ receiptUrl: 'https://files.example.com/receipt.pdf' }),
+      ),
+    );
+    const [, payload] = mockedCreate.mock.calls[0];
+    expect(payload).not.toHaveProperty('receiptStorageKey');
   });
 
   it('requires an amount and expense date before creating', async () => {

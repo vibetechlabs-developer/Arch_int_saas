@@ -23,6 +23,8 @@ export interface Expense {
   date: string;
   paymentMethod: string;
   receiptUrl: string;
+  /** True when this receipt was uploaded via uploadExpenseReceipt (BE-078) — fetch it through GET /expenses/{id}/receipt rather than receiptUrl (blank in that case). */
+  hasStoredReceipt: boolean;
   notes: string;
   addedById: string | null;
   addedByName: string | null;
@@ -51,6 +53,8 @@ export interface ExpenseListParams {
   ordering?: ExpenseOrdering;
 }
 
+// Exactly one of `receiptUrl` (legacy manual URL) / `receiptStorageKey`
+// (from uploadExpenseReceipt, BE-078) may be supplied — never both.
 export interface ExpenseCreateInput {
   category?: string;
   vendor?: string;
@@ -60,6 +64,7 @@ export interface ExpenseCreateInput {
   date: string;
   paymentMethod?: string;
   receiptUrl?: string;
+  receiptStorageKey?: string;
   notes?: string;
 }
 
@@ -76,7 +81,17 @@ export interface ExpenseUpdateInput {
   date?: string | null;
   paymentMethod?: string | null;
   receiptUrl?: string | null;
+  receiptStorageKey?: string | null;
   notes?: string | null;
+}
+
+// Mirrors backend/apps/expenses/serializers.py::ExpenseReceiptUploadSerializer.
+// No `url` — a private file's only access path is expenseReceiptDownloadUrl.
+export interface UploadedExpenseReceipt {
+  key: string;
+  fileName: string;
+  contentType: string;
+  size: number;
 }
 
 export async function getExpenses(projectId: string, params: ExpenseListParams = {}): Promise<Expense[]> {
@@ -121,4 +136,18 @@ export async function approveExpense(id: string): Promise<Expense> {
 
 export async function markExpensePaid(id: string): Promise<Expense> {
   return unwrap<Expense>(apiClient.post(`/expenses/${id}/mark-paid`));
+}
+
+// Multipart upload to private storage (BE-078) — returns a storage key
+// (no URL) that the caller passes to createExpense/updateExpense as
+// receiptStorageKey.
+export async function uploadExpenseReceipt(file: File): Promise<UploadedExpenseReceipt> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return unwrap<UploadedExpenseReceipt>(apiClient.post('/expenses/receipts/upload', formData));
+}
+
+/** The authenticated download endpoint for an expense receipt with `hasStoredReceipt: true` — use with previewPdf/downloadPdf from '@/lib/pdf'. */
+export function expenseReceiptDownloadUrl(expenseId: string): string {
+  return `/expenses/${expenseId}/receipt`;
 }

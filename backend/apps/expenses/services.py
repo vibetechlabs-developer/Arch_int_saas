@@ -9,6 +9,7 @@ from rest_framework import exceptions as drf_exceptions
 
 from apps.audit.models import AuditAction
 from apps.audit.services import AuditLogService
+from apps.common import storage as storage_service
 from apps.common.exceptions import ConflictError
 from apps.expenses import selectors, validators
 from apps.expenses.models import Expense, ExpenseApprovalStatus
@@ -26,6 +27,7 @@ EXPENSE_AUDITED_FIELDS = (
     "date",
     "payment_method",
     "receipt_url",
+    "receipt_storage_key",
     "notes",
     "added_by_id",
     "approval_status",
@@ -114,6 +116,7 @@ class ExpenseService:
         date: Any = None,
         payment_method: str = "",
         receipt_url: str = "",
+        receipt_storage_key: str = "",
         notes: str = "",
         actor_user: Any = None,
         request: Any = None,
@@ -153,6 +156,7 @@ class ExpenseService:
                 date=date,
                 payment_method=payment_method or "",
                 receipt_url=receipt_url or "",
+                receipt_storage_key=receipt_storage_key or "",
                 notes=notes or "",
                 added_by=actor_user,
                 approval_status=ExpenseApprovalStatus.DRAFT,
@@ -182,6 +186,7 @@ class ExpenseService:
         date: Any = None,
         payment_method: Optional[str] = None,
         receipt_url: Optional[str] = None,
+        receipt_storage_key: Optional[str] = None,
         notes: Optional[str] = None,
         actor_user: Any = None,
         request: Any = None,
@@ -195,6 +200,12 @@ class ExpenseService:
         `"unset"` rather than `None` so an explicit `null` (clear the
         employee) is distinguishable from "not supplied" (leave
         unchanged).
+
+        BE-078: a previously-uploaded receipt is deliberately never
+        physically deleted here, even when replaced -- unlike a Product
+        image or Company logo, a financial receipt may carry audit/
+        compliance value, and this codebase's own storage policy (BE-078)
+        treats that category conservatively: never auto-delete.
         """
         with transaction.atomic():
             if expense.approval_status != ExpenseApprovalStatus.DRAFT:
@@ -217,6 +228,8 @@ class ExpenseService:
                 fields["payment_method"] = payment_method
             if receipt_url is not None:
                 fields["receipt_url"] = receipt_url
+            if receipt_storage_key is not None:
+                fields["receipt_storage_key"] = receipt_storage_key
             if notes is not None:
                 fields["notes"] = notes
 
@@ -338,3 +351,28 @@ class ExpenseService:
             actor_user=actor_user,
             request=request,
         )
+
+
+class ExpenseReceiptUploadService:
+    """
+    Stores a validated receipt file via the shared storage abstraction
+    (BE-078, PRIVATE scope "expenses") and returns the storage `key` the
+    caller passes back as `receiptStorageKey` on
+    `POST /projects/{projectId}/expenses` or
+    `PATCH /expenses/{expenseId}`. Mirrors
+    `apps.documents.services.DocumentUploadService` exactly.
+    """
+
+    @classmethod
+    def upload_receipt(cls, company_id: str | uuid.UUID, uploaded_file: Any) -> Dict[str, Any]:
+        extension, content_type = storage_service.validate_document_upload(uploaded_file)
+
+        storage_key = storage_service.generate_storage_key("expenses", company_id, extension)
+        storage_service.save_upload("expenses", storage_key, uploaded_file)
+
+        return {
+            "key": storage_key,
+            "fileName": storage_service.safe_display_filename(getattr(uploaded_file, "name", "")),
+            "contentType": content_type,
+            "size": uploaded_file.size,
+        }

@@ -66,6 +66,17 @@ class Expense(BaseModel):
     date = models.DateField()
     payment_method = models.CharField(max_length=50, blank=True, default="")
     receipt_url = models.URLField(max_length=500, blank=True, default="")
+    receipt_storage_key = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text=(
+            "Internal-only (never publicly exposed). The private "
+            "object-storage key backing the receipt, set only when it "
+            "was uploaded via POST /expenses/receipts/upload (BE-078). "
+            "Blank for a legacy/manual receipt_url registration."
+        ),
+    )
     notes = models.TextField(blank=True, default="")
     added_by = models.ForeignKey(
         "users.User",

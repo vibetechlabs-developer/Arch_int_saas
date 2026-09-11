@@ -1,21 +1,26 @@
 from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import exceptions as drf_exceptions
 from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common import storage as storage_service
 from apps.common.responses import ApiResponse
 from apps.common.views import ObjectPermission404Mixin
 from apps.expenses.serializers import (
     ExpenseCreateSerializer,
     ExpenseListQuerySerializer,
+    ExpenseReceiptUploadSerializer,
     ExpenseSerializer,
     ExpenseUpdateSerializer,
 )
-from apps.expenses.services import ExpenseService
+from apps.expenses.services import ExpenseReceiptUploadService, ExpenseService
 from apps.projects.permissions import ProjectPermission
 from apps.projects.services import ProjectService
+from apps.users.permissions import is_platform_admin
 
 
 class ExpenseListCreateView(ObjectPermission404Mixin, APIView):
@@ -93,6 +98,7 @@ class ExpenseListCreateView(ObjectPermission404Mixin, APIView):
             date=validated["date"],
             payment_method=validated.get("payment_method", ""),
             receipt_url=validated.get("receipt_url", ""),
+            receipt_storage_key=validated.get("receipt_storage_key", ""),
             notes=validated.get("notes", ""),
             actor_user=request.user,
             request=request,
@@ -102,6 +108,79 @@ class ExpenseListCreateView(ObjectPermission404Mixin, APIView):
         return ApiResponse.created(
             data=response_data, request_id=getattr(request, "request_id", None)
         )
+
+
+class ExpenseReceiptUploadView(APIView):
+    """
+    `POST /expenses/receipts/upload` (BE-078). Decoupled from any specific
+    Expense row -- mirrors `apps.documents.views.DocumentUploadView`
+    exactly, adapted for the "expenses" PRIVATE scope. Gated by
+    `expense.create`, the same code the parent create endpoint requires
+    (a receipt is uploaded either while building a new Expense, or while
+    editing an existing draft one via `expense.edit`, so both codes are
+    accepted here since either caller may legitimately need to attach a
+    receipt file).
+    """
+
+    permission_classes = [IsAuthenticated, ProjectPermission]
+    parser_classes = [MultiPartParser, FormParser]
+    permission_code = "expense.create"
+
+    @extend_schema(
+        summary="Upload Expense Receipt",
+        description="Upload a PDF/JPEG/PNG/WEBP receipt (multipart/form-data, field name `file`, max 20 MB) to private storage. Returns a storage key usable as receiptStorageKey.",
+        request={"multipart/form-data": {"type": "object", "properties": {"file": {"type": "string", "format": "binary"}}}},
+        responses={status.HTTP_201_CREATED: ExpenseReceiptUploadSerializer},
+        tags=["Expenses"],
+    )
+    def post(self, request: Request) -> Response:
+        if is_platform_admin(request):
+            company_id = request.query_params.get("companyId")
+            if not company_id:
+                raise drf_exceptions.ValidationError(
+                    {"companyId": ["companyId is required for platform admin receipt upload."]}
+                )
+        else:
+            company_id = request.company_id
+
+        uploaded_file = request.FILES.get("file")
+        result = ExpenseReceiptUploadService.upload_receipt(
+            company_id=company_id, uploaded_file=uploaded_file
+        )
+
+        response_data = ExpenseReceiptUploadSerializer(result).data
+        return ApiResponse.created(
+            data=response_data, request_id=getattr(request, "request_id", None)
+        )
+
+
+class ExpenseReceiptDownloadView(ObjectPermission404Mixin, APIView):
+    """
+    `GET /expenses/{expenseId}/receipt` (BE-078) -- the only access path
+    for a receipt uploaded via `POST /expenses/receipts/upload`. Reuses
+    `expense.view`, the same code `ExpenseDetailView.get` already
+    requires.
+    """
+
+    permission_classes = [IsAuthenticated, ProjectPermission]
+    permission_code_map = {"get": "expense.view"}
+
+    @extend_schema(
+        summary="Download Expense Receipt",
+        responses={status.HTTP_200_OK: None},
+        tags=["Expenses"],
+    )
+    def get(self, request: Request, expense_id: str = None) -> Response:
+        expense = ExpenseService.get_expense_by_id(expense_id)
+        self.check_object_permissions(request, expense)
+
+        if not expense.receipt_storage_key:
+            raise drf_exceptions.NotFound("This expense has no stored receipt to download.")
+
+        key = expense.receipt_storage_key
+        extension = key.rsplit(".", 1)[-1] if "." in key else "bin"
+        filename = f"expense-receipt-{expense.id}.{extension}"
+        return storage_service.private_file_response("expenses", key, filename)
 
 
 class ExpenseDetailView(ObjectPermission404Mixin, APIView):
@@ -161,6 +240,7 @@ class ExpenseDetailView(ObjectPermission404Mixin, APIView):
             date=validated.get("date"),
             payment_method=validated.get("payment_method"),
             receipt_url=validated.get("receipt_url"),
+            receipt_storage_key=validated.get("receipt_storage_key"),
             notes=validated.get("notes"),
             actor_user=request.user,
             request=request,

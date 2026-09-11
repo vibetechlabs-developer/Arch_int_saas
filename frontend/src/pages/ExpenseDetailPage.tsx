@@ -8,11 +8,20 @@ import { ErrorState } from '@/components/common/ErrorState';
 import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { Money } from '@/components/common/Money';
+import { PdfActions } from '@/components/common/PdfActions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api/client';
-import { approveExpense, deleteExpense, getExpense, markExpensePaid, submitExpense, type Expense } from '@/lib/api/expenses';
+import {
+  approveExpense,
+  deleteExpense,
+  expenseReceiptDownloadUrl,
+  getExpense,
+  markExpensePaid,
+  submitExpense,
+  type Expense,
+} from '@/lib/api/expenses';
 import { expenseKeys } from '@/lib/queryKeys';
 import { formatDate, formatDateTime } from '@/lib/format';
 import { pageTransition, pageTransitionReduced } from '@/lib/motion';
@@ -226,26 +235,35 @@ export default function ExpenseDetailPage() {
               </CardContent>
             </Card>
 
-            {expense.receiptUrl && (
+            {(expense.receiptUrl || expense.hasStoredReceipt) && (
               <Card>
                 <CardHeader>
                   <CardTitle>Receipt</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <a
-                    href={expense.receiptUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-body font-medium text-accent-500 hover:underline focus-visible:outline-none focus-visible:shadow-focus"
-                  >
-                    View receipt
-                    <ExternalLink className="size-4" />
-                  </a>
+                  {expense.hasStoredReceipt ? (
+                    <PdfActions
+                      url={expenseReceiptDownloadUrl(expense.id)}
+                      previewLabel="Preview"
+                      downloadLabel="Download"
+                      genericErrorMessage="Receipt could not be loaded. Please try again."
+                    />
+                  ) : (
+                    <a
+                      href={expense.receiptUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-body font-medium text-accent-500 hover:underline focus-visible:outline-none focus-visible:shadow-focus"
+                    >
+                      View receipt
+                      <ExternalLink className="size-4" />
+                    </a>
+                  )}
                 </CardContent>
               </Card>
             )}
 
-            <Card className={expense.receiptUrl ? 'lg:col-span-2' : 'lg:col-span-3'}>
+            <Card className={expense.receiptUrl || expense.hasStoredReceipt ? 'lg:col-span-2' : 'lg:col-span-3'}>
               <CardHeader>
                 <CardTitle>Notes</CardTitle>
               </CardHeader>

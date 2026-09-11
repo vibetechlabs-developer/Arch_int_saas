@@ -19,6 +19,9 @@ class ExpenseSerializer(serializers.ModelSerializer):
     tax = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     paymentMethod = serializers.CharField(source="payment_method", read_only=True)
     receiptUrl = serializers.URLField(source="receipt_url", read_only=True)
+    hasStoredReceipt = serializers.SerializerMethodField(
+        help_text="True when this receipt was uploaded via POST /expenses/receipts/upload -- fetch it through GET /expenses/{id}/receipt rather than receiptUrl (blank in that case)."
+    )
     addedById = serializers.UUIDField(source="added_by_id", read_only=True, allow_null=True)
     addedByName = serializers.CharField(source="added_by.name", read_only=True, allow_null=True, default=None)
     approvalStatus = serializers.ChoiceField(
@@ -43,6 +46,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
             "date",
             "paymentMethod",
             "receiptUrl",
+            "hasStoredReceipt",
             "notes",
             "addedById",
             "addedByName",
@@ -52,10 +56,17 @@ class ExpenseSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_hasStoredReceipt(self, obj: Expense) -> bool:
+        return bool(obj.receipt_storage_key)
+
 
 class ExpenseCreateSerializer(serializers.Serializer):
     """
     Input serializer for `POST /projects/{projectId}/expenses` (BE-044).
+    `receiptStorageKey` (BE-078) is the `key` returned by
+    `POST /expenses/receipts/upload` -- provide it alongside a blank
+    `receiptUrl`, or provide `receiptUrl` alone for a legacy manual entry;
+    never both.
     """
 
     category = serializers.CharField(required=False, allow_blank=True, default="")
@@ -72,7 +83,25 @@ class ExpenseCreateSerializer(serializers.Serializer):
     receiptUrl = serializers.URLField(
         source="receipt_url", required=False, allow_blank=True, default="", max_length=500
     )
+    receiptStorageKey = serializers.CharField(
+        source="receipt_storage_key",
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=500,
+        write_only=True,
+        help_text="The `key` returned by POST /expenses/receipts/upload. Provide this or receiptUrl, not both.",
+    )
     notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        receipt_url = attrs.get("receipt_url", "")
+        receipt_key = attrs.get("receipt_storage_key", "")
+        if receipt_url and receipt_key:
+            raise serializers.ValidationError(
+                {"receiptUrl": ["Provide either receiptUrl or receiptStorageKey, not both."]}
+            )
+        return attrs
 
 
 class ExpenseUpdateSerializer(serializers.Serializer):
@@ -103,7 +132,31 @@ class ExpenseUpdateSerializer(serializers.Serializer):
     receiptUrl = serializers.URLField(
         source="receipt_url", required=False, allow_blank=True, default=None, allow_null=True, max_length=500
     )
+    receiptStorageKey = serializers.CharField(
+        source="receipt_storage_key",
+        required=False,
+        allow_blank=True,
+        default=None,
+        allow_null=True,
+        max_length=500,
+        write_only=True,
+        help_text="The `key` returned by POST /expenses/receipts/upload. Provide alongside receiptUrl when replacing the receipt with a real upload.",
+    )
     notes = serializers.CharField(required=False, allow_blank=True, default=None, allow_null=True)
+
+
+class ExpenseReceiptUploadSerializer(serializers.Serializer):
+    """
+    Output shape for `POST /expenses/receipts/upload` (BE-078, PRIVATE
+    scope). Mirrors `apps.documents.serializers.DocumentUploadSerializer`
+    exactly -- no `url`, since a private file's only access path is
+    `GET /expenses/{id}/receipt`.
+    """
+
+    key = serializers.CharField()
+    fileName = serializers.CharField()
+    contentType = serializers.CharField()
+    size = serializers.IntegerField()
 
 
 class ExpenseListQuerySerializer(serializers.Serializer):
