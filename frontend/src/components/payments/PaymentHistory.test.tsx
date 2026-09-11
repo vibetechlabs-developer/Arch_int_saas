@@ -11,12 +11,15 @@ jest.mock('@/lib/api/payments', () => ({
   getPayments: jest.fn(),
   createPayment: jest.fn(),
   voidPayment: jest.fn(),
+  uploadPaymentReceipt: jest.fn(),
 }));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
+jest.mock('@/lib/pdf', () => ({ previewPdf: jest.fn(), downloadPdf: jest.fn() }));
 
 const mockedGetPayments = getPayments as jest.Mock;
 const mockedCreate = createPayment as jest.Mock;
 const mockedVoid = voidPayment as jest.Mock;
+const mockedPreviewPdf = jest.requireMock('@/lib/pdf').previewPdf as jest.Mock;
 
 function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
   return {
@@ -57,6 +60,7 @@ function makePayment(overrides: Partial<Payment> = {}): Payment {
     method: 'Bank transfer',
     referenceNumber: 'TXN-123',
     receiptUrl: '',
+    hasStoredReceipt: false,
     notes: '',
     createdAt: '2026-09-01T00:00:00Z',
     updatedAt: '2026-09-01T00:00:00Z',
@@ -216,6 +220,37 @@ describe('PaymentHistory', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Void payment' }));
 
     await waitFor(() => expect(mockedVoid).toHaveBeenCalledWith('pay1'));
+  });
+
+  it('does not render a view-receipt action for a payment with no receipt at all', async () => {
+    mockedGetPayments.mockResolvedValue([makePayment()]);
+    renderHistory();
+    await screen.findAllByText('Bank transfer');
+
+    expect(screen.queryByRole('button', { name: /view receipt/i })).not.toBeInTheDocument();
+  });
+
+  it('previews a stored receipt via the authenticated download endpoint (BE-078)', async () => {
+    mockedGetPayments.mockResolvedValue([makePayment({ hasStoredReceipt: true })]);
+    renderHistory();
+    const [viewButton] = await screen.findAllByRole('button', { name: /view receipt/i });
+
+    await userEvent.click(viewButton);
+
+    await waitFor(() => expect(mockedPreviewPdf).toHaveBeenCalledWith('/payments/pay1/receipt'));
+  });
+
+  it('opens a legacy receipt URL directly in a new tab, never through the download endpoint', async () => {
+    mockedGetPayments.mockResolvedValue([makePayment({ receiptUrl: 'https://files.example.com/legacy.pdf' })]);
+    const openSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
+    renderHistory();
+    const [viewButton] = await screen.findAllByRole('button', { name: /view receipt/i });
+
+    await userEvent.click(viewButton);
+
+    expect(openSpy).toHaveBeenCalledWith('https://files.example.com/legacy.pdf', '_blank', 'noreferrer');
+    expect(mockedPreviewPdf).not.toHaveBeenCalled();
+    openSpy.mockRestore();
   });
 
   it('shows a distinct mobile card representation for payment rows alongside the desktop table', async () => {

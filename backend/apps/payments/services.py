@@ -9,6 +9,7 @@ from rest_framework import exceptions as drf_exceptions
 
 from apps.audit.models import AuditAction
 from apps.audit.services import AuditLogService
+from apps.common import storage as storage_service
 from apps.common.exceptions import ConflictError
 from apps.invoices.models import Invoice, InvoiceStatus
 from apps.invoices.services import InvoiceService
@@ -25,6 +26,7 @@ PAYMENT_AUDITED_FIELDS = (
     "method",
     "reference_number",
     "receipt_url",
+    "receipt_storage_key",
     "notes",
 )
 
@@ -100,6 +102,7 @@ class PaymentService:
         method: str = "",
         reference_number: str = "",
         receipt_url: str = "",
+        receipt_storage_key: str = "",
         notes: str = "",
         actor_user: Any = None,
         request: Any = None,
@@ -127,6 +130,7 @@ class PaymentService:
                 method=method or "",
                 reference_number=reference_number or "",
                 receipt_url=receipt_url or "",
+                receipt_storage_key=receipt_storage_key or "",
                 notes=notes or "",
             )
 
@@ -180,3 +184,30 @@ class PaymentService:
             InvoiceService.recompute_status_from_payments(
                 invoice, paid_total, actor_user=actor_user, request=request
             )
+
+
+class PaymentReceiptUploadService:
+    """
+    Stores a validated receipt file via the shared storage abstraction
+    (BE-078, PRIVATE scope "payments") and returns the storage `key` the
+    caller passes back as `receiptStorageKey` on
+    `POST /invoices/{invoiceId}/payments`. Mirrors
+    `apps.documents.services.DocumentUploadService` exactly. Decoupled
+    from any specific Payment row on purpose -- a receipt is always
+    uploaded *before* the Payment it belongs to exists, since Payment has
+    no update endpoint to attach one afterward.
+    """
+
+    @classmethod
+    def upload_receipt(cls, company_id: str | uuid.UUID, uploaded_file: Any) -> Dict[str, Any]:
+        extension, content_type = storage_service.validate_document_upload(uploaded_file)
+
+        storage_key = storage_service.generate_storage_key("payments", company_id, extension)
+        storage_service.save_upload("payments", storage_key, uploaded_file)
+
+        return {
+            "key": storage_key,
+            "fileName": storage_service.safe_display_filename(getattr(uploaded_file, "name", "")),
+            "contentType": content_type,
+            "size": uploaded_file.size,
+        }

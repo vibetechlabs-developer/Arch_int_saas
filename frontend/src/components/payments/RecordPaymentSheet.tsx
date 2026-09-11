@@ -1,17 +1,19 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { FileUp, Link2, Paperclip, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert } from '@/components/ui/alert';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { validateDocumentFile, ACCEPTED_DOCUMENT_FILE_TYPES } from '@/components/documents/RegisterDocumentSheet';
 import { ApiError } from '@/lib/api/client';
-import { createPayment } from '@/lib/api/payments';
+import { createPayment, uploadPaymentReceipt } from '@/lib/api/payments';
 import type { Invoice } from '@/lib/api/invoices';
 import { invoiceKeys, paymentKeys } from '@/lib/queryKeys';
 
@@ -45,8 +47,17 @@ export interface RecordPaymentSheetProps {
 // that figure is now visible on the page. `method` is a free text field
 // with no backend enum, so it's a plain Input, not a Select of invented
 // options.
+//
+// Receipt: primary experience is a real file upload to private storage
+// (BE-078), with "Use a URL instead" as an explicit, secondary mode —
+// mirrors RegisterDocumentSheet's pattern exactly. Payment has no update
+// endpoint, so this is the only moment a receipt can ever be attached.
 export function RecordPaymentSheet({ open, onOpenChange, invoice }: RecordPaymentSheetProps) {
   const queryClient = useQueryClient();
+  const [receiptUrlMode, setReceiptUrlMode] = useState(false);
+  const [selectedReceiptFile, setSelectedReceiptFile] = useState<File | null>(null);
+  const [receiptFileError, setReceiptFileError] = useState<string | null>(null);
+  const receiptInputRef = useRef<HTMLInputElement>(null);
 
   const {
     register,
@@ -56,19 +67,34 @@ export function RecordPaymentSheet({ open, onOpenChange, invoice }: RecordPaymen
   } = useForm<FormValues>({ resolver: zodResolver(formSchema), defaultValues: EMPTY_VALUES });
 
   useEffect(() => {
-    if (open) reset(EMPTY_VALUES);
+    if (open) {
+      reset(EMPTY_VALUES);
+      setReceiptUrlMode(false);
+      setSelectedReceiptFile(null);
+      setReceiptFileError(null);
+    }
   }, [open, reset]);
 
   const mutation = useMutation({
-    mutationFn: (values: FormValues) =>
-      createPayment(invoice.id, {
+    mutationFn: async (values: FormValues) => {
+      let receiptStorageKey: string | undefined;
+      let receiptUrl = values.receiptUrl || '';
+      if (!receiptUrlMode && selectedReceiptFile) {
+        const uploaded = await uploadPaymentReceipt(selectedReceiptFile);
+        receiptStorageKey = uploaded.key;
+        receiptUrl = '';
+      }
+
+      return createPayment(invoice.id, {
         paymentDate: values.paymentDate,
         amount: values.amount,
         method: values.method || '',
         referenceNumber: values.referenceNumber || '',
-        receiptUrl: values.receiptUrl || '',
+        receiptUrl,
+        ...(receiptStorageKey ? { receiptStorageKey } : {}),
         notes: values.notes || '',
-      }),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: paymentKeys.invoice(invoice.id) });
       queryClient.invalidateQueries({ queryKey: invoiceKeys.detail(invoice.id) });
@@ -80,6 +106,18 @@ export function RecordPaymentSheet({ open, onOpenChange, invoice }: RecordPaymen
       toast.error(error instanceof ApiError ? error.message : 'Something went wrong. Please try again.');
     },
   });
+
+  const handleReceiptFileChange = (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    const validationMessage = validateDocumentFile(file);
+    if (validationMessage) {
+      setReceiptFileError(validationMessage);
+      return;
+    }
+    setReceiptFileError(null);
+    setSelectedReceiptFile(file);
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -113,10 +151,91 @@ export function RecordPaymentSheet({ open, onOpenChange, invoice }: RecordPaymen
             <Input id="payment-reference" {...register('referenceNumber')} />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="payment-receipt-url">Receipt URL</Label>
-            <Input id="payment-receipt-url" invalid={!!errors.receiptUrl} {...register('receiptUrl')} />
-            {errors.receiptUrl && <p className="text-small text-danger-text">{errors.receiptUrl.message}</p>}
+          <div className="flex flex-col gap-2">
+            <Label>Receipt</Label>
+            {!receiptUrlMode ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-subtle p-4">
+                  {selectedReceiptFile ? (
+                    <div className="flex w-full items-center justify-between gap-2 rounded-md border border-border-subtle bg-surface-secondary px-3 py-2">
+                      <span className="flex items-center gap-2 truncate text-small text-text-primary">
+                        <Paperclip className="size-4 shrink-0 text-text-tertiary" />
+                        {selectedReceiptFile.name}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={mutation.isPending}
+                        onClick={() => {
+                          setSelectedReceiptFile(null);
+                          setReceiptFileError(null);
+                        }}
+                      >
+                        <X />
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-small text-text-secondary">Attach a receipt (optional)</p>
+                  )}
+                  <input
+                    ref={receiptInputRef}
+                    type="file"
+                    accept={ACCEPTED_DOCUMENT_FILE_TYPES.join(',')}
+                    className="hidden"
+                    aria-label="Receipt file"
+                    disabled={mutation.isPending}
+                    onChange={(e) => {
+                      handleReceiptFileChange(e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={mutation.isPending}
+                    onClick={() => receiptInputRef.current?.click()}
+                  >
+                    <FileUp />
+                    {selectedReceiptFile ? 'Choose a different file' : 'Choose File'}
+                  </Button>
+                </div>
+                {receiptFileError && <p className="text-small text-danger-text">{receiptFileError}</p>}
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="w-fit px-0"
+                  disabled={mutation.isPending}
+                  onClick={() => setReceiptUrlMode(true)}
+                >
+                  <Link2 className="size-3.5" />
+                  Use a URL instead
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Input
+                  id="payment-receipt-url"
+                  placeholder="https://…"
+                  invalid={!!errors.receiptUrl}
+                  {...register('receiptUrl')}
+                />
+                {errors.receiptUrl && <p className="text-small text-danger-text">{errors.receiptUrl.message}</p>}
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="w-fit px-0"
+                  disabled={mutation.isPending}
+                  onClick={() => setReceiptUrlMode(false)}
+                >
+                  <FileUp className="size-3.5" />
+                  Upload a file instead
+                </Button>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">

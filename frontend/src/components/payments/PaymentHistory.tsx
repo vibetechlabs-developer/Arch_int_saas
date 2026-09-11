@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Receipt as ReceiptIcon, Undo2 } from 'lucide-react';
+import { ExternalLink, Plus, Receipt as ReceiptIcon, Undo2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,11 +10,39 @@ import { ErrorState } from '@/components/common/ErrorState';
 import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
 import { Money } from '@/components/common/Money';
 import { ApiError } from '@/lib/api/client';
-import { getPayments, voidPayment, type Payment } from '@/lib/api/payments';
+import { previewPdf } from '@/lib/pdf';
+import { getPayments, paymentReceiptDownloadUrl, voidPayment, type Payment } from '@/lib/api/payments';
 import type { Invoice } from '@/lib/api/invoices';
 import { invoiceKeys, paymentKeys } from '@/lib/queryKeys';
 import { formatDate } from '@/lib/format';
 import { RecordPaymentSheet } from './RecordPaymentSheet';
+
+function ViewReceiptButton({ payment }: { payment: Payment }) {
+  if (!payment.receiptUrl && !payment.hasStoredReceipt) return null;
+
+  const handleClick = async () => {
+    if (payment.hasStoredReceipt) {
+      try {
+        await previewPdf(paymentReceiptDownloadUrl(payment.id));
+      } catch {
+        toast.error('Receipt could not be loaded. Please try again.');
+      }
+    } else {
+      window.open(payment.receiptUrl, '_blank', 'noreferrer');
+    }
+  };
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label={`View receipt for payment of ${payment.amount} on ${formatDate(payment.paymentDate)}`}
+      onClick={handleClick}
+    >
+      <ExternalLink className="size-4 text-text-tertiary" />
+    </Button>
+  );
+}
 
 export interface PaymentHistoryProps {
   invoice: Invoice;
@@ -105,7 +133,8 @@ export function PaymentHistory({ invoice, canRecordPayment, currency }: PaymentH
                         <Money value={payment.amount} currency={currency} />
                       </td>
                       <td className="px-3 py-2.5">
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-1">
+                          <ViewReceiptButton payment={payment} />
                           <Button
                             variant="ghost"
                             size="icon"
@@ -128,14 +157,17 @@ export function PaymentHistory({ invoice, canRecordPayment, currency }: PaymentH
                 <div key={payment.id} className="flex flex-col gap-2 p-4">
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-body font-medium text-text-primary">{formatDate(payment.paymentDate)}</span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Void payment of ${payment.amount} on ${formatDate(payment.paymentDate)}`}
-                      onClick={() => setVoidingPayment(payment)}
-                    >
-                      <Undo2 className="size-4 text-danger-text" />
-                    </Button>
+                    <div className="flex gap-1">
+                      <ViewReceiptButton payment={payment} />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Void payment of ${payment.amount} on ${formatDate(payment.paymentDate)}`}
+                        onClick={() => setVoidingPayment(payment)}
+                      >
+                        <Undo2 className="size-4 text-danger-text" />
+                      </Button>
+                    </div>
                   </div>
                   <div className="flex items-center justify-between text-small text-text-secondary">
                     <span>{payment.method || 'No method recorded'}</span>

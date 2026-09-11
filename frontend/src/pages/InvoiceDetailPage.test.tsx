@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import InvoiceDetailPage from '@/pages/InvoiceDetailPage';
 import { cancelInvoice, getInvoice, sendInvoice, updateInvoice, type Invoice } from '@/lib/api/invoices';
 import { getQuotation, type Quotation } from '@/lib/api/quotations';
-import { createPayment, getPayments, type Payment } from '@/lib/api/payments';
+import { createPayment, getPayments, uploadPaymentReceipt, type Payment } from '@/lib/api/payments';
 import { ApiError } from '@/lib/api/client';
 
 jest.mock('@/lib/api/invoices', () => ({
@@ -24,6 +24,7 @@ jest.mock('@/lib/api/payments', () => ({
   getPayments: jest.fn(),
   createPayment: jest.fn(),
   voidPayment: jest.fn(),
+  uploadPaymentReceipt: jest.fn(),
 }));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
 jest.mock('@/lib/api/auth', () => ({
@@ -43,6 +44,7 @@ const mockedUpdate = updateInvoice as jest.Mock;
 const mockedGetQuotation = getQuotation as jest.Mock;
 const mockedGetPayments = getPayments as jest.Mock;
 const mockedCreatePayment = createPayment as jest.Mock;
+const mockedUploadPaymentReceipt = uploadPaymentReceipt as jest.Mock;
 const mockedVoidPayment = jest.requireMock('@/lib/api/payments').voidPayment as jest.Mock;
 const mockedPreviewPdf = jest.requireMock('@/lib/pdf').previewPdf as jest.Mock;
 const mockedDownloadPdf = jest.requireMock('@/lib/pdf').downloadPdf as jest.Mock;
@@ -61,6 +63,7 @@ function makePayment(overrides: Partial<Payment> = {}): Payment {
     method: 'Bank transfer',
     referenceNumber: '',
     receiptUrl: '',
+    hasStoredReceipt: false,
     notes: '',
     createdAt: '2026-09-01T00:00:00Z',
     updatedAt: '2026-09-01T00:00:00Z',
@@ -478,6 +481,52 @@ describe('InvoiceDetailPage', () => {
 
     await waitFor(() => expect(mockedGetInvoice).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('Partially Paid')).toBeInTheDocument();
+  });
+
+  it('uploads a receipt file and includes its storage key in the payment payload (BE-078)', async () => {
+    mockedGetPayments.mockResolvedValue([]);
+    mockedUploadPaymentReceipt.mockResolvedValue({ key: 'payments/c1/abc.pdf', fileName: 'receipt.pdf', contentType: 'application/pdf', size: 100 });
+    mockedCreatePayment.mockResolvedValue(makePayment());
+    renderPage();
+
+    await screen.findByText('No payments recorded yet');
+    await userEvent.click(screen.getAllByRole('button', { name: 'Record Payment' })[0]);
+    await userEvent.type(screen.getByLabelText('Payment date'), '2026-09-01');
+    await userEvent.type(screen.getByLabelText('Amount'), '200.00');
+
+    const file = new File(['%PDF-1.4'], 'receipt.pdf', { type: 'application/pdf' });
+    await userEvent.upload(screen.getByLabelText('Receipt file'), file);
+    await userEvent.click(screen.getByRole('button', { name: 'Record payment' }));
+
+    await waitFor(() => expect(mockedUploadPaymentReceipt).toHaveBeenCalledWith(file));
+    await waitFor(() =>
+      expect(mockedCreatePayment).toHaveBeenCalledWith(
+        'inv1',
+        expect.objectContaining({ receiptUrl: '', receiptStorageKey: 'payments/c1/abc.pdf' }),
+      ),
+    );
+  });
+
+  it('records a payment with a receipt URL when "Use a URL instead" is chosen', async () => {
+    mockedGetPayments.mockResolvedValue([]);
+    mockedCreatePayment.mockResolvedValue(makePayment());
+    renderPage();
+
+    await screen.findByText('No payments recorded yet');
+    await userEvent.click(screen.getAllByRole('button', { name: 'Record Payment' })[0]);
+    await userEvent.type(screen.getByLabelText('Payment date'), '2026-09-01');
+    await userEvent.type(screen.getByLabelText('Amount'), '200.00');
+    await userEvent.click(screen.getByRole('button', { name: /use a url instead/i }));
+    await userEvent.type(screen.getByPlaceholderText('https://…'), 'https://files.example.com/receipt.pdf');
+    await userEvent.click(screen.getByRole('button', { name: 'Record payment' }));
+
+    await waitFor(() => expect(mockedUploadPaymentReceipt).not.toHaveBeenCalled());
+    await waitFor(() =>
+      expect(mockedCreatePayment).toHaveBeenCalledWith(
+        'inv1',
+        expect.objectContaining({ receiptUrl: 'https://files.example.com/receipt.pdf' }),
+      ),
+    );
   });
 
   it('shows a permission-denied error rather than the invoice when the request is forbidden', async () => {

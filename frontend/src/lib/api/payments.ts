@@ -16,6 +16,8 @@ export interface Payment {
   method: string;
   referenceNumber: string;
   receiptUrl: string;
+  /** True when this receipt was uploaded via uploadPaymentReceipt (BE-078) — fetch it through GET /payments/{id}/receipt rather than receiptUrl (blank in that case). */
+  hasStoredReceipt: boolean;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -24,13 +26,26 @@ export interface Payment {
 // `method` is a free-text field with no backend enum (confirmed in
 // Payment's model docstring — "no documented value domain") — never
 // render it as a fixed Select of invented options (Cash/UPI/etc).
+// Exactly one of `receiptUrl` (legacy manual URL) / `receiptStorageKey`
+// (from uploadPaymentReceipt, BE-078) may be supplied — never both.
+// Payment has no update endpoint, so a receipt is only ever attached
+// here, at creation.
 export interface PaymentCreateInput {
   paymentDate: string;
   amount: string;
   method?: string;
   referenceNumber?: string;
   receiptUrl?: string;
+  receiptStorageKey?: string;
   notes?: string;
+}
+
+// Mirrors backend/apps/payments/serializers.py::PaymentReceiptUploadSerializer.
+export interface UploadedPaymentReceipt {
+  key: string;
+  fileName: string;
+  contentType: string;
+  size: number;
 }
 
 // GET /invoices/{id}/payments — unpaginated, no ordering param (backend
@@ -47,4 +62,19 @@ export async function createPayment(invoiceId: string, input: PaymentCreateInput
 // is a plain confirmation message, not an updated Payment.
 export async function voidPayment(paymentId: string): Promise<void> {
   await apiClient.delete(`/payments/${paymentId}`);
+}
+
+// Multipart upload to private storage (BE-078) — returns a storage key
+// (no URL) that the caller passes to createPayment as receiptStorageKey.
+// Decoupled from any specific Payment on purpose: a receipt is always
+// uploaded *before* the Payment it belongs to exists.
+export async function uploadPaymentReceipt(file: File): Promise<UploadedPaymentReceipt> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return unwrap<UploadedPaymentReceipt>(apiClient.post('/payments/receipts/upload', formData));
+}
+
+/** The authenticated download endpoint for a payment receipt with `hasStoredReceipt: true` — use with previewPdf/downloadPdf from '@/lib/pdf'. */
+export function paymentReceiptDownloadUrl(paymentId: string): string {
+  return `/payments/${paymentId}/receipt`;
 }
