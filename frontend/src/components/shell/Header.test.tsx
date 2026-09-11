@@ -93,6 +93,7 @@ const expense: Expense = {
   date: '2026-09-01',
   paymentMethod: '',
   receiptUrl: '',
+  hasStoredReceipt: false,
   notes: '',
   addedById: null,
   addedByName: null,
