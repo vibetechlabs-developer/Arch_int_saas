@@ -31,6 +31,8 @@ const sampleRole: Role = {
   companyId: 'c1',
   companyName: 'Studio One',
   isActive: true,
+  systemKey: null,
+  isSystem: false,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
@@ -77,6 +79,35 @@ describe('RolesPage', () => {
 
     expect((await screen.findAllByText('Accountant / Finance')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Handles invoices and payments.').length).toBeGreaterThan(0);
+  });
+
+  it('shows a "System role" badge for a role with a systemKey, never inferred from its name', async () => {
+    // DataTable renders a desktop table row and a mobile card for every
+    // item simultaneously in jsdom — matching every other assertion in
+    // this file, presence is checked via .length > 0, not an exact count.
+    const ownerRole: Role = { ...sampleRole, id: 'owner-role', name: 'Owner', systemKey: 'owner', isSystem: true };
+    mockList([ownerRole]);
+    renderWithProviders(<RolesPage />);
+
+    await screen.findAllByText('Owner');
+    expect(screen.getAllByText('System role').length).toBeGreaterThan(0);
+  });
+
+  it('does not show a "System role" badge for an ordinary custom role', async () => {
+    mockList([sampleRole]);
+    renderWithProviders(<RolesPage />);
+
+    await screen.findAllByText('Accountant / Finance');
+    expect(screen.queryByText('System role')).not.toBeInTheDocument();
+  });
+
+  it('does not show a "System role" badge for a custom role literally named "Owner"', async () => {
+    const fakeOwner: Role = { ...sampleRole, id: 'fake-owner', name: 'Owner', systemKey: null, isSystem: false };
+    mockList([fakeOwner]);
+    renderWithProviders(<RolesPage />);
+
+    await screen.findAllByText('Owner');
+    expect(screen.queryByText('System role')).not.toBeInTheDocument();
   });
 
   it('shows an empty state prompting role creation', async () => {

@@ -33,6 +33,8 @@ export interface CompanyMembership {
   userName: string;
   roleId: string | null;
   roleName: string | null;
+  /** Stable system-role identity of this membership's role (BE-069), e.g. 'owner' — null for any custom role, including one named "Owner". Compare against this, never roleName, to detect the real system Owner. */
+  roleSystemKey: string | null;
   status: MembershipStatus;
   createdAt: string;
   updatedAt: string;

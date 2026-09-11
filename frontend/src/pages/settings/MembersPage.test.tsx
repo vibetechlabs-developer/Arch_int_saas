@@ -26,6 +26,7 @@ const activeMember: CompanyMembership = {
   userName: 'Dana Designer',
   roleId: 'r1',
   roleName: 'Designer / Architect',
+  roleSystemKey: 'designer_architect',
   status: 'active',
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
@@ -73,6 +74,30 @@ describe('MembersPage', () => {
     expect(screen.getAllByText('designer@example.com').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Designer / Architect').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Active').length).toBeGreaterThan(0);
+  });
+
+  it('shows an "Owner" badge next to a member whose role is the system Owner role', async () => {
+    const ownerMember: CompanyMembership = { ...activeMember, id: 'm2', roleName: 'Owner', roleSystemKey: 'owner' };
+    mockList([ownerMember]);
+    renderWithProviders(<MembersPage />);
+
+    await screen.findAllByText('Owner');
+    const badges = document.querySelectorAll('.rounded-full.bg-surface-secondary');
+    expect(badges.length).toBeGreaterThan(0);
+  });
+
+  it('does not show an "Owner" badge for a custom role with no system key, even one literally named "Owner"', async () => {
+    const fakeOwnerMember: CompanyMembership = { ...activeMember, id: 'm3', roleName: 'Owner', roleSystemKey: null };
+    mockList([fakeOwnerMember]);
+    renderWithProviders(<MembersPage />);
+
+    // DataTable renders a desktop row + a mobile card for every item in
+    // jsdom, so the role NAME "Owner" (from roleName) legitimately
+    // renders twice on its own -- the badge span, driven by
+    // roleSystemKey, must never add a third/fourth occurrence.
+    await screen.findAllByText('Owner');
+    const roleColumnCells = document.querySelectorAll('.rounded-full.bg-surface-secondary');
+    expect(roleColumnCells).toHaveLength(0);
   });
 
   it('shows an empty state with an Invite CTA when there are no members', async () => {

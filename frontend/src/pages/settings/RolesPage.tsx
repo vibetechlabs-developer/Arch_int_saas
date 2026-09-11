@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { type ColumnDef, type SortingState } from '@tanstack/react-table';
-import { Info, KeyRound, MoreHorizontal, Pencil, ShieldCheck, Trash2 } from 'lucide-react';
+import { Info, KeyRound, Lock, MoreHorizontal, Pencil, ShieldCheck, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable } from '@/components/common/DataTable';
 import { ErrorState } from '@/components/common/ErrorState';
@@ -17,7 +17,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ApiError } from '@/lib/api/client';
-import { deleteRole, getRoles, type Role, type RoleOrdering } from '@/lib/api/roles';
+import { deleteRole, getRoles, OWNER_SYSTEM_KEY, type Role, type RoleOrdering } from '@/lib/api/roles';
 import { roleKeys } from '@/lib/queryKeys';
 import { formatDate } from '@/lib/format';
 import { RoleFormSheet } from '@/components/settings/RoleFormSheet';
@@ -74,6 +74,12 @@ export default function RolesPage() {
       cell: ({ row }) => (
         <div className="flex items-center gap-2">
           <span className="text-body font-medium text-text-primary">{row.original.name}</span>
+          {row.original.isSystem && (
+            <Badge variant="neutral" className="gap-1">
+              <Lock className="size-3" />
+              System role
+            </Badge>
+          )}
           {!row.original.isActive && <Badge variant="neutral">Inactive</Badge>}
         </div>
       ),
@@ -96,7 +102,14 @@ export default function RolesPage() {
       header: '',
       enableSorting: false,
       enableHiding: false,
-      cell: ({ row }) => (
+      cell: ({ row }) => {
+        // Only the system Owner role is undeletable server-side — every
+        // other role (including other system roles like Admin) follows
+        // ordinary delete rules. Disabling here is a UX courtesy, never
+        // the security boundary: an attempt past this would still be
+        // rejected by the backend's own systemKey check.
+        const isProtectedOwner = row.original.systemKey === OWNER_SYSTEM_KEY;
+        return (
         <div className="flex justify-end">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -118,14 +131,19 @@ export default function RolesPage() {
                 <Pencil className="size-4" />
                 Edit
               </DropdownMenuItem>
-              <DropdownMenuItem destructive onSelect={() => setDeletingRole(row.original)}>
+              <DropdownMenuItem
+                destructive
+                disabled={isProtectedOwner}
+                onSelect={() => setDeletingRole(row.original)}
+              >
                 <Trash2 className="size-4" />
-                Delete
+                {isProtectedOwner ? 'Delete (system role — cannot be deleted)' : 'Delete'}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      ),
+        );
+      },
     },
   ];
 

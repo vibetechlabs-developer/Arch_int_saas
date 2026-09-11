@@ -1,9 +1,15 @@
 import { apiClient, unwrap, unwrapPaginated, type PaginationMeta } from './client';
 
-// Mirrors backend/apps/users/serializers.py::RoleSerializer. There is no
-// system/protected-role flag on the backend (confirmed — Role has only
-// name/description/company/isActive) — edit/delete restrictions can't be
-// derived, so this UI never invents any.
+// Mirrors backend/apps/users/serializers.py::RoleSerializer.
+//
+// systemKey (BE-069) is the stable machine identity for a default/system
+// role, e.g. 'owner' — null for every customer-created role, including
+// one a customer names "Owner". Read-only everywhere: never send it back
+// on create/update (RoleMutableInput deliberately has no field for it —
+// the backend ignores it even if sent). isSystem is a convenience
+// boolean (systemKey !== null) for UI branching — never treat
+// `role.name === 'Owner'` as meaningful; only systemKey identifies a
+// system role.
 export interface Role {
   id: string;
   name: string;
@@ -11,9 +17,14 @@ export interface Role {
   companyId: string;
   companyName: string;
   isActive: boolean;
+  systemKey: string | null;
+  isSystem: boolean;
   createdAt: string;
   updatedAt: string;
 }
+
+/** The one system role with dedicated protection (undeletable, last-active-owner invariant). Compare against Role.systemKey — never Role.name. */
+export const OWNER_SYSTEM_KEY = 'owner';
 
 export type RoleOrdering = 'name' | '-name' | 'created_at' | '-created_at' | 'updated_at' | '-updated_at' | 'is_active' | '-is_active';
 

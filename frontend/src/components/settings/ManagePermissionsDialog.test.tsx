@@ -32,6 +32,8 @@ const roleA: Role = {
   companyId: 'c1',
   companyName: 'Studio One',
   isActive: true,
+  systemKey: null,
+  isSystem: false,
   createdAt: '',
   updatedAt: '',
 };

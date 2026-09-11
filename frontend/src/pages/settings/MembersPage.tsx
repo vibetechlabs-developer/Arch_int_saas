@@ -28,6 +28,7 @@ import {
   type CompanyMembership,
   type MembershipStatus,
 } from '@/lib/api/memberships';
+import { OWNER_SYSTEM_KEY } from '@/lib/api/roles';
 import { membershipKeys } from '@/lib/queryKeys';
 import { formatDate } from '@/lib/format';
 import { useAuth } from '@/context/AuthContext';
@@ -143,7 +144,16 @@ export default function MembersPage() {
       accessorKey: 'roleName',
       header: 'Role',
       enableSorting: false,
-      cell: ({ row }) => <span className="text-body text-text-secondary">{row.original.roleName ?? '—'}</span>,
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <span className="text-body text-text-secondary">{row.original.roleName ?? '—'}</span>
+          {row.original.roleSystemKey === OWNER_SYSTEM_KEY && (
+            <span className="rounded-full bg-surface-secondary px-2 py-0.5 text-caption font-medium text-text-secondary">
+              Owner
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       accessorKey: 'status',
@@ -272,7 +282,11 @@ export default function MembersPage() {
         open={!!suspendTarget}
         onOpenChange={(open) => !open && setSuspendTarget(null)}
         title="Suspend this member?"
-        description={`${suspendTarget?.userName ?? 'This member'} will lose access to this company until reactivated. Their account and any other company memberships are not affected.`}
+        description={`${suspendTarget?.userName ?? 'This member'} will lose access to this company until reactivated. Their account and any other company memberships are not affected.${
+          suspendTarget?.roleSystemKey === OWNER_SYSTEM_KEY
+            ? ' If this is the company’s only active Owner, this action will be rejected — every company must keep at least one.'
+            : ''
+        }`}
         confirmLabel="Suspend member"
         destructive
         loading={suspendMutation.isPending}
@@ -293,7 +307,11 @@ export default function MembersPage() {
         open={!!removeTarget}
         onOpenChange={(open) => !open && setRemoveTarget(null)}
         title="Remove this member from the company?"
-        description={`${removeTarget?.userName ?? 'This member'} loses access to this company. This does not delete their user account or affect any other company they belong to.`}
+        description={`${removeTarget?.userName ?? 'This member'} loses access to this company. This does not delete their user account or affect any other company they belong to.${
+          removeTarget?.roleSystemKey === OWNER_SYSTEM_KEY
+            ? ' If this is the company’s only active Owner, this action will be rejected — every company must keep at least one.'
+            : ''
+        }`}
         confirmLabel="Remove from company"
         destructive
         loading={removeMutation.isPending}
