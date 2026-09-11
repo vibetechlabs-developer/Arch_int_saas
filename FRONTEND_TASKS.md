@@ -357,6 +357,20 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 - New tests: 4 new test files/additions across the touched areas — `test_image_storage_cleanup`-equivalent coverage lives in backend tests; frontend additions are new `it(...)` cases inside the existing `ProjectExpensesTab.test.tsx`, `InvoiceDetailPage.test.tsx`, `PaymentHistory.test.tsx`, `ExpenseDetailPage.test.tsx`, and `ProjectDocumentsTab.test.tsx` suites (file-upload happy path, URL-mode fallback, stored-file Preview/Download rendering and click-through) — no new standalone test files needed since every upload surface already had integration coverage through its parent page. TypeScript: PASS. Production build: PASS (bundle size unaffected). Full frontend suite: see final report for the exact total/skipped count (baseline 6 skipped, unchanged).
 - Visual QA: **PENDING** — no browser tooling available in this environment.
 
+## Phase 21 — System Role Identity & Last-Owner Protection
+
+| Task | Description | Status |
+|---|---|---|
+| F45 | Roles/Members pages use real backend system-role metadata (`systemKey`/`isSystem`/`roleSystemKey`) instead of inferring anything from a role's display name (BE-069) | Review |
+
+**Implementation notes (F45):**
+- `lib/api/roles.ts::Role` gained `systemKey`/`isSystem` (read-only, never sent on create/update — `RoleMutableInput` deliberately has no field for it) and a shared `OWNER_SYSTEM_KEY` constant. `lib/api/memberships.ts::CompanyMembership` gained `roleSystemKey`.
+- `RolesPage.tsx` shows a "System role" badge (`Lock` icon) driven by `role.isSystem`, and disables the row's Delete action specifically when `role.systemKey === OWNER_SYSTEM_KEY` (with an explanatory label) — never when `role.name === 'Owner'`. A custom role a customer names "Owner" gets neither. The backend remains the real boundary regardless: an attempt past the disabled control still gets rejected server-side (`SYSTEM_ROLE_PROTECTED`).
+- `MembersPage.tsx` shows a small "Owner" indicator next to the role name (driven by `roleSystemKey`, not `roleName`), and the Suspend/Remove confirmation dialogs add one explanatory sentence when the target holds the Owner role ("If this is the company's only active Owner, this action will be rejected...") — informational only; the existing `mutationError.message` toast already surfaces the backend's real `LAST_OWNER_REQUIRED` message verbatim on rejection, so no new error-handling plumbing was needed.
+- `AddUserSheet.tsx`/`ChangeMemberRoleDialog.tsx` audited — both already select roles by `id` and display by `name` only, with zero name-based logic; no changes needed (confirmed by inspection and by the full regression suite).
+- New tests: `RolesPage.test.tsx` (+3 — System role badge renders for a real system role, absent for an ordinary custom role, absent for a custom role literally named "Owner"), `MembersPage.test.tsx` (+2 — Owner badge renders for `roleSystemKey === 'owner'`, absent for a custom role named "Owner" with no system key). TypeScript: PASS. Build: see final report. Full frontend suite: see final report for the exact total/skipped count (baseline 6 skipped, unchanged).
+- Visual QA: **PENDING** — no browser tooling available in this environment.
+
 ## Not Yet Started
 
-Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Last-owner/protected-role safety (blocked on `Role.system_key`, BE-069).
+Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists).
