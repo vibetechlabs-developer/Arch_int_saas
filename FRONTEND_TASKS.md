@@ -343,6 +343,20 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 - Live HTTP verification (see `BACKEND_TASKS.md` BE-068): confirmed against a real running backend that a `report.view`-only token's response contains no financial keys and no real financial figures anywhere in the raw body.
 - Visual QA: **PENDING** — no browser tooling available in this environment.
 
+## Phase 20 — Production Object Storage & File Upload
+
+| Task | Description | Status |
+|---|---|---|
+| F44 | File upload experiences for Company logo, Project documents, Expense/Payment receipts, plus real orphan-safe threading for Product images (BE-078) | Review |
+
+**Implementation notes (F44):**
+- `ProductImagePicker.tsx` generalized (new `label`/`previewAlt` props, defaulting to the original Product wording) and reused as-is for Company logo — one upload widget, not two. `ProductFormSheet.tsx` now threads `imageStorageKey` through from `uploadProductImage`'s response, and only includes `imageUrl`/`imageStorageKey` in the save payload when the image was actually touched this session (`imageTouchedRef`) — otherwise an unrelated edit (renaming a product) would have silently reset the backend's tracked storage key to blank, undoing BE-078's own orphan-cleanup fix.
+- `CompanySettingsPage.tsx` gained a "Company logo" card — upload/replace/remove are instant actions (their own mutations), independent of the profile form's Save button, matching how a logo is typically managed.
+- `RegisterDocumentSheet.tsx` rebuilt: primary experience is a real file upload (PDF/JPEG/PNG/WEBP, 20MB) to `POST /documents/upload`, with "Use a URL instead" as an explicit secondary mode for the legacy manual-registration flow — mirrors `ProductImagePicker`'s pattern, generalized for a non-image file type. Dropped `react-hook-form`/Zod for this form (the two modes validate entirely different things; a single shared schema would have had to validate `fileUrl` even mid-upload) in favor of plain state + manual validation. `ExpenseFormSheet.tsx`/`RecordPaymentSheet.tsx` gained the identical receipt-upload pattern, reusing `RegisterDocumentSheet`'s exported `validateDocumentFile`/`ACCEPTED_DOCUMENT_FILE_TYPES` rather than duplicating them.
+- `ProjectDocumentsTab.tsx`/`ExpenseDetailPage.tsx` now render `PdfActions` (Preview/Download, reused from BE-076 unchanged except for two new label-override props) for any document/receipt with `hasStoredFile`/`hasStoredReceipt: true`, falling back to the original plain "Open" external link for a legacy URL-registered one. `PaymentHistory.tsx` gained a small view-receipt action per row (previously showed nothing for a receipt at all) — a stored receipt calls `previewPdf` against the authenticated download endpoint, a legacy URL opens directly in a new tab.
+- New tests: 4 new test files/additions across the touched areas — `test_image_storage_cleanup`-equivalent coverage lives in backend tests; frontend additions are new `it(...)` cases inside the existing `ProjectExpensesTab.test.tsx`, `InvoiceDetailPage.test.tsx`, `PaymentHistory.test.tsx`, `ExpenseDetailPage.test.tsx`, and `ProjectDocumentsTab.test.tsx` suites (file-upload happy path, URL-mode fallback, stored-file Preview/Download rendering and click-through) — no new standalone test files needed since every upload surface already had integration coverage through its parent page. TypeScript: PASS. Production build: PASS (bundle size unaffected). Full frontend suite: see final report for the exact total/skipped count (baseline 6 skipped, unchanged).
+- Visual QA: **PENDING** — no browser tooling available in this environment.
+
 ## Not Yet Started
 
 Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Last-owner/protected-role safety (blocked on `Role.system_key`, BE-069).

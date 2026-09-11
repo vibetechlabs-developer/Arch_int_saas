@@ -1335,7 +1335,6 @@ Depends On
 | ID | Task |
 |---|---|
 | BE-057 | General API throttling for business endpoints (reads/writes/reports/exports), env-configurable scopes, 429 via the standard error envelope. Auth throttling (existing) is out of scope. |
-| BE-058 | Real file upload pipeline (local storage in dev, S3-compatible in prod) for Documents/Payments receipts/Expense receipts/Product images: upload endpoint, MIME/extension/size validation, tenant-scoped storage paths, safe filenames, delete/archive, audit events. Includes a backward-compatible migration plan for existing `*_url` fields. |
 | BE-059 | Data-integrity enums: `Company.currency` (ISO-4217-validated choices), `Payment.method`, `Expense.category`/`vendor`/`payment_method`, and `Project.priority` (already a `CharField`, deliberately left free-text per an earlier Backend Lead decision since `01_Business/FRS.md §10` names the field but never defines its values — re-confirm that decision before constraining it) — pending confirmation of the exact allowed value sets (flagged, not invented). |
 | BE-069 | Add a stable, non-user-editable identifier to `Role` (e.g. a `system_key` field, never exposed via `/roles`) so default-role reconciliation migrations (`0006`–`0008`) stop matching by exact display `name` — a real forward risk once customer-created roles exist, flagged during BE-054's migration safety review. |
 
@@ -1348,6 +1347,43 @@ Depends On
 | BE-076 | BOQ/Quotation/Invoice PDF export — shared server-side rendering infrastructure, three `GET .../pdf` endpoints — see writeup below. | **Review** |
 | BE-068 | Dashboard financial access separation — `GET /reports/dashboard` no longer sends financial data to `report.view`-only roles — see writeup below. | **Review** |
 | BE-077 | CSRF trusted origins made environment-driven via `DJANGO_CSRF_TRUSTED_ORIGINS` — see writeup below. | **Review** |
+| BE-078 | Production object storage & file upload foundation — shared storage abstraction, S3-compatible production backend, Product image orphan-cleanup fix, Company logo, real Document/Expense-receipt/Payment-receipt uploads — see writeup below. | **Review** |
+
+#### BE-078 — Production Object Storage & File Upload Foundation — 2026-09-11
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** P0 — release blocker (last remaining one per the prior release-hardening report).
+
+**Owner:** Backend Team
+
+**Audit before coding:** confirmed `MEDIA_ROOT`/`MEDIA_URL` were hardcoded with no `STORAGES`/`DEFAULT_FILE_STORAGE` override, `django-storages`/`boto3` were not installed, and no storage env vars existed anywhere (`.env.example` had none). Product images were the one real upload endpoint that existed, already using `default_storage` — but with no shared abstraction (logic lived entirely in `apps/products/services.py`), no orphan cleanup on replace/remove, and a plain `URLField` with no tracked storage key. Documents/Expense receipts/Payment receipts were all caller-supplied URL strings with zero upload endpoints. Company had no logo field at all.
+
+**Shared storage abstraction (`apps/common/storage.py`):** every upload goes through this module, classified PUBLIC or PRIVATE at the call site:
+- PUBLIC (`products`, `companies`) → `STORAGES["default"]` — permanently public URL, unchanged from how `Product.imageUrl` already worked.
+- PRIVATE (`documents`, `expenses`, `payments`) → `STORAGES["private"]` — never a public URL. Local dev points this at `media_private/` (outside `MEDIA_ROOT`, no `base_url` configured, so nginx's `/media/` alias can never serve it and `.url()` deliberately raises if ever called). Production S3 mode gives it a private-ACL bucket path and only ever resolves a signed URL fresh, from inside an already-authorized proxy view — never persisted to the database.
+
+Provides: `generate_storage_key`/`save_upload`/`delete_file` (tenant-namespaced UUID keys, matching Product's original scheme exactly), `public_url`/`private_signed_url`/`open_private_file`/`private_file_response` (redirects to a signed URL on S3, streams via `FileResponse` on local), `validate_image_upload` (JPEG/PNG/WEBP, 5MB — generalized from the pre-existing Product validator, now shared with Company logos) and `validate_document_upload` (PDF via real magic-byte signature, or JPEG/PNG/WEBP, 20MB — matches nginx's `client_max_body_size`).
+
+**Production configuration (`config/settings.py`):** new `STORAGE_BACKEND` env var (`local` default, `s3`). Selecting `s3` requires `AWS_STORAGE_BUCKET_NAME`/`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_S3_REGION_NAME` — Django refuses to boot with a clear `ImproperlyConfigured` error if any are missing (never silently falls back to local disk). Optional `AWS_S3_ENDPOINT_URL` (non-AWS S3-compatible providers) and `AWS_S3_CUSTOM_DOMAIN` (CDN in front of the public bucket only). `django-storages`/`boto3` added to `requirements/base.txt` (needed in production, not dev-only, since the backend choice is a deployment concern). No developer needs AWS credentials to run `manage.py runserver` locally.
+
+**Product image orphan-cleanup fix:** `Product.image_storage_key` (new, internal-only field, never serialized) tracks the exact key this app uploaded — populated only when the frontend passes through the `key` from `POST /products/images/upload`'s response. Replacing or removing an image now deletes the previously-tracked file via `transaction.on_commit` (never before the new state actually commits) — but **only** when the current key is non-blank, so a manually-entered `imageUrl` (the pre-existing alternate URL-entry flow) is never guessed at or deleted. `ProductImageService` refactored onto the shared abstraction with identical behavior.
+
+**Company logo (BE-078, new capability):** `Company.logoUrl`/`logoStorageKey` (mirrors Product exactly) + `POST /companies/{id}/logo/upload` (gated by `company.manage`, reuses `IsPlatformAdminOrCompanyAccess` — cross-tenant 404, same-tenant-without-permission 403). Same orphan-cleanup-on-replace/remove behavior as Product images.
+
+**Real file upload for Documents/Expense receipts/Payment receipts:** each gets a decoupled `POST .../upload` endpoint (PRIVATE scope, returns a storage `key` only — never a URL, since a private file has no permanent public URL) plus an authenticated `GET .../download` (Documents) / `GET .../receipt` (Expenses/Payments) proxy endpoint, reusing the exact same permission code and tenant/RBAC check the existing detail view already requires. Each model gained an internal-only `*_storage_key` field; the pre-existing `file_url`/`receipt_url` fields are kept unchanged for full backward compatibility with legacy/manually-registered URLs — exactly one of URL or storage key may be supplied per create call (`require_exactly_one_file_source` for Document; a `validate()` check on the Expense/Payment create serializers). **Payment** has no update endpoint at all (create + void only) — a receipt is only ever attached at creation via the same decoupled-upload pattern, so this required zero changes to Payment's financial-field immutability.
+
+**Retention policy (deliberate, documented — not silently decided):** Product images and Company logos are physically deleted on replace/remove (catalog/branding assets, no compliance value). Documents, Expense receipts, and Payment receipts are **never** automatically deleted, even when the owning row is soft-deleted or a payment is voided — these may carry audit/compliance evidence; formal retention-period requirements remain an open decision (`07_DevOps/Production.md` §6.3, unchanged, not resolved by this task).
+
+**PDF integration:** `apps.common.pdf_service.company_logo_data_uri` reads the company's logo bytes directly from storage and inlines them as a base64 `data:` URI in the BOQ/Quotation/Invoice PDF header — deliberately **never** fetches `logoUrl` over HTTP (an SSRF risk if that URL were ever manually entered rather than uploaded through this app's own endpoint) and only renders when `logoStorageKey` is set. Any read failure degrades to no logo, not a failed PDF export.
+
+**Audit (disclosed scope note):** the decoupled upload step itself (`POST .../upload`) is not separately audit-logged — matches the pre-existing convention `ProductImageUploadView` already established (a read/no-DB-write action). The entity mutation that actually attaches the resulting key (Product/Company update, Document/Expense/Payment create) is already audit-logged via each app's existing `AuditLogService.record` call, now also carrying the `*_storage_key` field in its before/after snapshot.
+
+**Security:** every upload validates real decoded content, never filename/Content-Type (existing convention, now shared). No SVG anywhere (script-injection risk). No credentials in frontend/git. Tenant isolation and RBAC unchanged for every existing endpoint; new endpoints reuse existing permission codes exclusively — no permission code invented.
+
+**Tests:** `apps/common/tests/test_storage.py` (29 — scope classification, save/delete round-trip and idempotency, image/document content validation including HTML/executable-disguised-as-PDF rejection), `apps/common/tests/test_settings_hardening.py` (+6 — `STORAGE_BACKEND` local/s3 boot behavior, missing-config failure, public/private ACL and signing configuration), `apps/common/tests/test_pdf_service.py` (+4 — logo data-URI generation/absence/failure-degradation), `apps/products/tests/test_image_storage_cleanup.py` (7 — new), `apps/company/tests/test_logo_upload.py` (9 — new), `apps/documents/tests/test_upload_download.py` (12 — new), `apps/expenses/tests/test_receipt_upload_download.py` (9 — new), `apps/payments/tests/test_receipt_upload_download.py` (9 — new). Focused regression (`apps.products apps.company apps.documents apps.expenses apps.payments apps.common`): 467/467 passed. Full backend suite: see final report.
+
+**Validation:** `manage.py check` clean. Migrations generated for all 4 new fields (`Product.image_storage_key`, `Company.logo_url`/`logo_storage_key`, `Document.file_storage_key`, `Expense.receipt_storage_key`, `Payment.receipt_storage_key`) — see final report for `makemigrations --check --dry-run` result.
 
 #### BE-077 — CSRF Trusted Origins Configuration — 2026-09-10
 
