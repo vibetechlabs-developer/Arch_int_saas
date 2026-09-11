@@ -17,6 +17,9 @@ class DocumentSerializer(serializers.ModelSerializer):
     entityType = serializers.CharField(source="entity_type", read_only=True)
     entityId = serializers.UUIDField(source="entity_id", read_only=True)
     fileUrl = serializers.URLField(source="file_url", read_only=True)
+    hasStoredFile = serializers.SerializerMethodField(
+        help_text="True when this document was uploaded via POST /documents/upload -- fetch it through GET /documents/{id}/download rather than fileUrl (blank in that case)."
+    )
     uploadedById = serializers.UUIDField(source="uploaded_by_id", read_only=True, allow_null=True)
     uploadedByName = serializers.CharField(
         source="uploaded_by.name", read_only=True, allow_null=True, default=None
@@ -32,6 +35,7 @@ class DocumentSerializer(serializers.ModelSerializer):
             "entityType",
             "entityId",
             "fileUrl",
+            "hasStoredFile",
             "version",
             "uploadedById",
             "uploadedByName",
@@ -39,19 +43,54 @@ class DocumentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_hasStoredFile(self, obj: Document) -> bool:
+        return bool(obj.file_storage_key)
+
 
 class DocumentCreateSerializer(serializers.Serializer):
     """
-    Input serializer for `POST /projects/{projectId}/documents` (BE-046).
-    `entityType`/`entityId` are optional -- omitted, they default to
-    `("project", project.id)` in DocumentService.create_document.
+    Input serializer for `POST /projects/{projectId}/documents`
+    (BE-046/BE-078). `entityType`/`entityId` are optional -- omitted, they
+    default to `("project", project.id)` in
+    DocumentService.create_document. Exactly one of `fileUrl` (legacy
+    manual URL registration) / `fileStorageKey` (from a real
+    `POST /documents/upload` call) must be supplied --
+    validators.require_exactly_one_file_source enforces this in the
+    service layer, since which one is "required" depends on the other.
     """
 
-    fileUrl = serializers.URLField(source="file_url", required=True, max_length=500)
+    fileUrl = serializers.URLField(
+        source="file_url", required=False, allow_blank=True, default="", max_length=500
+    )
+    fileStorageKey = serializers.CharField(
+        source="file_storage_key",
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=500,
+        write_only=True,
+        help_text="The `key` returned by POST /documents/upload. Provide this or fileUrl, not both.",
+    )
     entityType = serializers.CharField(
         source="entity_type", required=False, allow_blank=True, default="", max_length=50
     )
     entityId = serializers.UUIDField(source="entity_id", required=False, allow_null=True, default=None)
+
+
+class DocumentUploadSerializer(serializers.Serializer):
+    """
+    Output shape for `POST /documents/upload` (BE-078, PRIVATE scope) --
+    deliberately no `url` field (unlike Product image's PUBLIC-scope
+    upload response): a private file has no permanent, publicly-usable
+    URL at all. The caller passes `key` back as `fileStorageKey` on
+    `POST /projects/{projectId}/documents`, then reads the file back
+    later through `GET /documents/{id}/download`.
+    """
+
+    key = serializers.CharField()
+    fileName = serializers.CharField()
+    contentType = serializers.CharField()
+    size = serializers.IntegerField()
 
 
 class DocumentListQuerySerializer(serializers.Serializer):

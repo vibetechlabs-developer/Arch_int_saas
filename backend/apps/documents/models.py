@@ -24,11 +24,15 @@ class Document(BaseModel):
     project.id)` when a document is registered without a more specific
     target (DocumentService.create_document).
 
-    No file upload endpoint exists anywhere in this codebase -- `file_url`
-    is a caller-supplied URL string, the same pattern already established
-    for Payment.receipt_url/Expense.receipt_url/Product.image_url (the
-    actual file lives in object storage, uploaded out-of-band; this row
-    just registers the resulting URL).
+    BE-078 adds a real multipart upload path via `POST /documents/upload`
+    (PRIVATE storage scope) alongside the original URL-registration flow:
+    `file_storage_key`, when non-blank, means this row owns a file in this
+    app's own private object storage, accessible only through the
+    authenticated, tenant/RBAC-checked `GET /documents/{id}/download` proxy
+    (never a permanently public or persisted-signed URL). `file_url` stays
+    blank in that case -- it remains populated only for a legacy/manually-
+    registered external URL, the original (BE-046) behavior, kept for
+    backward compatibility with any such existing rows.
     """
 
     company = models.ForeignKey(
@@ -52,7 +56,18 @@ class Document(BaseModel):
     entity_id = models.UUIDField(
         help_text="The specific entity's primary key. Not a real FK -- spans many entity tables.",
     )
-    file_url = models.URLField(max_length=500)
+    file_url = models.URLField(max_length=500, blank=True, default="")
+    file_storage_key = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text=(
+            "Internal-only (never publicly exposed). The private "
+            "object-storage key backing this document, set only when it "
+            "was uploaded via POST /documents/upload (BE-078). Blank for "
+            "a legacy/manual file_url registration."
+        ),
+    )
     version = models.PositiveIntegerField(
         default=1,
         help_text="Auto-assigned: next version among documents sharing this (entity_type, entity_id).",

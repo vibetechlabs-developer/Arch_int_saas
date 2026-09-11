@@ -7,12 +7,21 @@ from rest_framework import exceptions as drf_exceptions
 
 from apps.audit.models import AuditAction
 from apps.audit.services import AuditLogService
+from apps.common import storage as storage_service
 from apps.documents import selectors, validators
 from apps.documents.models import Document
 from apps.documents.repositories import DocumentRepository
 from apps.projects.models import Project
 
-DOCUMENT_AUDITED_FIELDS = ("project_id", "entity_type", "entity_id", "file_url", "version", "uploaded_by_id")
+DOCUMENT_AUDITED_FIELDS = (
+    "project_id",
+    "entity_type",
+    "entity_id",
+    "file_url",
+    "file_storage_key",
+    "version",
+    "uploaded_by_id",
+)
 
 
 def _serialize_document_audit_value(value: Any) -> Any:
@@ -74,7 +83,8 @@ class DocumentService:
     def create_document(
         cls,
         project: Project,
-        file_url: str,
+        file_url: str = "",
+        file_storage_key: str = "",
         entity_type: Optional[str] = None,
         entity_id: Optional[str | uuid.UUID] = None,
         actor_user: Any = None,
@@ -91,9 +101,15 @@ class DocumentService:
         QuotationRepository.next_quote_number already established) --
         uploading a new file against the same target is how a document
         gets "re-versioned," with no separate endpoint needed.
+
+        BE-078: exactly one of `file_url` (legacy manual URL) /
+        `file_storage_key` (from `POST /documents/upload`) must be
+        supplied -- validators.require_exactly_one_file_source enforces
+        this.
         """
         with transaction.atomic():
-            cleaned_file_url = validators.require_file_url(file_url)
+            validators.require_exactly_one_file_source(file_url, file_storage_key)
+            cleaned_file_url = file_url.strip() if file_url else ""
 
             target_entity_type = entity_type or "project"
             target_entity_id = entity_id or project.id
@@ -106,6 +122,7 @@ class DocumentService:
                 entity_type=target_entity_type,
                 entity_id=target_entity_id,
                 file_url=cleaned_file_url,
+                file_storage_key=file_storage_key or "",
                 version=next_version,
                 uploaded_by=actor_user,
             )
@@ -129,6 +146,16 @@ class DocumentService:
         actor_user: Any = None,
         request: Any = None,
     ) -> None:
+        """
+        Soft-delete only -- the underlying stored file (when
+        `file_storage_key` is set) is deliberately never physically
+        deleted here. A Document may be evidence of a signed contract, a
+        client approval, or another record with audit/compliance value;
+        BE-078's own guidance is explicit that this category of file must
+        not be automatically destroyed the way a superseded Product image
+        or Company logo is. The row can be restored (`SoftDeleteModel`),
+        and the file remains reachable through it if it is.
+        """
         with transaction.atomic():
             document_id = document.id
             company_id = document.company_id
@@ -145,3 +172,35 @@ class DocumentService:
                 before_state=before_state,
                 request=request,
             )
+
+
+class DocumentUploadService:
+    """
+    Stores a validated document/receipt file via the shared storage
+    abstraction (BE-078, PRIVATE scope "documents") and returns the
+    storage `key` the caller then passes back as `fileStorageKey` on
+    `POST /projects/{projectId}/documents`. Deliberately no model of its
+    own and no `url` in its response -- a private file's actual access
+    path is always the authenticated `GET /documents/{id}/download` proxy,
+    never a directly resolvable URL. Mirrors
+    `apps.products.services.ProductImageService` exactly, adapted for a
+    PRIVATE scope.
+    """
+
+    @classmethod
+    def upload_document(
+        cls,
+        company_id: str | uuid.UUID,
+        uploaded_file: Any,
+    ) -> Dict[str, Any]:
+        extension, content_type = storage_service.validate_document_upload(uploaded_file)
+
+        storage_key = storage_service.generate_storage_key("documents", company_id, extension)
+        storage_service.save_upload("documents", storage_key, uploaded_file)
+
+        return {
+            "key": storage_key,
+            "fileName": storage_service.safe_display_filename(getattr(uploaded_file, "name", "")),
+            "contentType": content_type,
+            "size": uploaded_file.size,
+        }

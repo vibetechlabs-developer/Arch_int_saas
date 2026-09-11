@@ -8,8 +8,9 @@ import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/common/DataTable';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
+import { PdfActions } from '@/components/common/PdfActions';
 import { ApiError } from '@/lib/api/client';
-import { deleteDocument, getDocuments, type Document } from '@/lib/api/documents';
+import { deleteDocument, documentDownloadUrl, getDocuments, type Document } from '@/lib/api/documents';
 import { documentKeys } from '@/lib/queryKeys';
 import { formatDateTime } from '@/lib/format';
 import { displayFileName, documentTypeInfo } from '@/lib/fileType';
@@ -19,7 +20,7 @@ import { RegisterDocumentSheet } from '@/components/documents/RegisterDocumentSh
 function DocumentName({ document }: { document: Document }) {
   const { icon: Icon, isImage } = documentTypeInfo(document.fileUrl);
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
-  const name = displayFileName(document.fileUrl);
+  const name = document.hasStoredFile ? 'Uploaded file' : displayFileName(document.fileUrl);
   const isGeneralProjectDocument = document.entityType === 'project';
 
   return (
@@ -102,15 +103,25 @@ export default function ProjectDocumentsTab() {
       enableHiding: false,
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-1">
-          <Button variant="ghost" size="icon" aria-label={`Open ${displayFileName(row.original.fileUrl)}`} asChild>
-            <a href={row.original.fileUrl} target="_blank" rel="noreferrer">
-              <ExternalLink className="size-4" />
-            </a>
-          </Button>
+          {row.original.hasStoredFile ? (
+            <PdfActions
+              url={documentDownloadUrl(row.original.id)}
+              previewLabel="Preview"
+              downloadLabel="Download"
+              genericErrorMessage="Document could not be loaded. Please try again."
+              className="flex items-center gap-1"
+            />
+          ) : (
+            <Button variant="ghost" size="icon" aria-label={`Open ${displayFileName(row.original.fileUrl)}`} asChild>
+              <a href={row.original.fileUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="size-4" />
+              </a>
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
-            aria-label={`Delete ${displayFileName(row.original.fileUrl)}`}
+            aria-label={`Delete ${row.original.hasStoredFile ? 'Uploaded file' : displayFileName(row.original.fileUrl)}`}
             onClick={() => setDeletingDocument(row.original)}
           >
             <Trash2 className="size-4 text-danger-text" />
@@ -149,7 +160,7 @@ export default function ProjectDocumentsTab() {
         open={!!deletingDocument}
         onOpenChange={(open) => !open && setDeletingDocument(null)}
         title="Delete document?"
-        description={`This removes "${deletingDocument ? displayFileName(deletingDocument.fileUrl) : ''}" from this project. It does not delete the underlying file from where it's hosted.`}
+        description={`This removes "${deletingDocument ? (deletingDocument.hasStoredFile ? 'Uploaded file' : displayFileName(deletingDocument.fileUrl)) : ''}" from this project. The stored file itself is kept for audit/compliance purposes.`}
         confirmLabel="Delete document"
         destructive
         loading={deleteMutation.isPending}

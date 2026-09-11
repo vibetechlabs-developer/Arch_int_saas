@@ -1,8 +1,6 @@
 import { apiClient, unwrap } from './client';
 
-// Mirrors backend/apps/documents/serializers.py::DocumentSerializer. This
-// is the entire field set — there is no title, description, category,
-// MIME type, file size, or original filename anywhere in this API.
+// Mirrors backend/apps/documents/serializers.py::DocumentSerializer.
 export interface Document {
   id: string;
   companyId: string;
@@ -10,6 +8,8 @@ export interface Document {
   entityType: string;
   entityId: string;
   fileUrl: string;
+  /** True when this document was uploaded via uploadDocumentFile (BE-078) — fetch it through GET /documents/{id}/download rather than fileUrl (blank in that case). */
+  hasStoredFile: boolean;
   version: number;
   uploadedById: string | null;
   uploadedByName: string | null;
@@ -30,8 +30,21 @@ export interface DocumentListParams {
 // entityId=<project id>). Attaching a document to a specific sub-entity
 // (a quotation, invoice, expense, ...) is a real backend capability but
 // isn't exposed from this general project-level workspace.
+//
+// Exactly one of `fileUrl` (legacy manual URL registration) /
+// `fileStorageKey` (from uploadDocumentFile, BE-078) must be supplied.
 export interface DocumentCreateInput {
-  fileUrl: string;
+  fileUrl?: string;
+  fileStorageKey?: string;
+}
+
+// Mirrors backend/apps/documents/serializers.py::DocumentUploadSerializer.
+// No `url` — a private file's only access path is downloadDocumentUrl.
+export interface UploadedDocumentFile {
+  key: string;
+  fileName: string;
+  contentType: string;
+  size: number;
 }
 
 export async function getDocuments(projectId: string, params: DocumentListParams = {}): Promise<Document[]> {
@@ -52,4 +65,19 @@ export async function createDocument(projectId: string, input: DocumentCreateInp
 
 export async function deleteDocument(id: string): Promise<void> {
   await apiClient.delete(`/documents/${id}`);
+}
+
+// Multipart upload to private storage (BE-078) — the browser/axios set the
+// Content-Type boundary automatically; never set it manually. Returns a
+// storage key (no URL) that the caller passes to createDocument as
+// fileStorageKey.
+export async function uploadDocumentFile(file: File): Promise<UploadedDocumentFile> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return unwrap<UploadedDocumentFile>(apiClient.post('/documents/upload', formData));
+}
+
+/** The authenticated download endpoint for a document with `hasStoredFile: true` — use with previewFile/downloadFile from '@/lib/pdf'. */
+export function documentDownloadUrl(documentId: string): string {
+  return `/documents/${documentId}/download`;
 }

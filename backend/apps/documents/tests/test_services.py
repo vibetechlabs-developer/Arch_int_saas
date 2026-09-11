@@ -64,9 +64,30 @@ class DocumentServiceCreateTestCase(TestCase):
         self.assertEqual(first.version, 1)
         self.assertEqual(second.version, 1)
 
-    def test_create_document_blank_file_url_raises_value_error(self):
-        with self.assertRaises(ValueError):
+    def test_create_document_blank_file_url_and_no_storage_key_raises_validation_error(self):
+        """
+        BE-078: create_document now requires exactly one file source
+        (fileUrl or fileStorageKey) -- neither supplied (or fileUrl is
+        blank/whitespace-only) raises a proper DRF ValidationError (400),
+        not a bare ValueError.
+        """
+        with self.assertRaises(drf_exceptions.ValidationError):
             DocumentService.create_document(project=self.project, file_url="   ")
+
+    def test_create_document_both_file_url_and_storage_key_raises_validation_error(self):
+        with self.assertRaises(drf_exceptions.ValidationError):
+            DocumentService.create_document(
+                project=self.project,
+                file_url="https://files.example.com/doc.pdf",
+                file_storage_key="documents/some-company/some-key.pdf",
+            )
+
+    def test_create_document_with_storage_key_only_succeeds(self):
+        document = DocumentService.create_document(
+            project=self.project, file_storage_key="documents/some-company/some-key.pdf"
+        )
+        self.assertEqual(document.file_storage_key, "documents/some-company/some-key.pdf")
+        self.assertEqual(document.file_url, "")
 
 
 class DocumentServiceGetAndDeleteTestCase(TestCase):

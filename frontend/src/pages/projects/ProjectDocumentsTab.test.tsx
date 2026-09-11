@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ProjectDocumentsTab from '@/pages/projects/ProjectDocumentsTab';
-import { createDocument, deleteDocument, getDocuments, type Document } from '@/lib/api/documents';
+import { createDocument, deleteDocument, getDocuments, uploadDocumentFile, type Document } from '@/lib/api/documents';
 import type { Project } from '@/lib/api/projects';
 import { ApiError } from '@/lib/api/client';
 
@@ -12,12 +12,16 @@ jest.mock('@/lib/api/documents', () => ({
   getDocuments: jest.fn(),
   createDocument: jest.fn(),
   deleteDocument: jest.fn(),
+  uploadDocumentFile: jest.fn(),
 }));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
+jest.mock('@/lib/pdf', () => ({ previewPdf: jest.fn(), downloadPdf: jest.fn() }));
 
 const mockedGetDocuments = getDocuments as jest.Mock;
 const mockedCreate = createDocument as jest.Mock;
 const mockedDelete = deleteDocument as jest.Mock;
+const mockedUploadFile = uploadDocumentFile as jest.Mock;
+const mockedPreviewPdf = jest.requireMock('@/lib/pdf').previewPdf as jest.Mock;
 
 const project: Project = {
   id: 'p1',
@@ -44,6 +48,7 @@ function makeDocument(overrides: Partial<Document> = {}): Document {
     entityType: 'project',
     entityId: 'p1',
     fileUrl: 'https://files.example.com/site-plan.pdf',
+    hasStoredFile: false,
     version: 1,
     uploadedById: 'u1',
     uploadedByName: 'Alice Member',
@@ -156,6 +161,7 @@ describe('ProjectDocumentsTab', () => {
     await screen.findAllByText('No documents uploaded yet');
 
     await userEvent.click(screen.getAllByRole('button', { name: /add document/i })[0]);
+    await userEvent.click(screen.getByRole('button', { name: /use a url instead/i }));
     await userEvent.type(screen.getByLabelText('File URL'), 'https://files.example.com/contract.pdf');
     await userEvent.click(screen.getByRole('button', { name: 'Add document' }));
 
@@ -168,6 +174,7 @@ describe('ProjectDocumentsTab', () => {
     await screen.findAllByText('No documents uploaded yet');
 
     await userEvent.click(screen.getAllByRole('button', { name: /add document/i })[0]);
+    await userEvent.click(screen.getByRole('button', { name: /use a url instead/i }));
     await userEvent.type(screen.getByLabelText('File URL'), 'not-a-url');
     await userEvent.click(screen.getByRole('button', { name: 'Add document' }));
 
@@ -181,9 +188,22 @@ describe('ProjectDocumentsTab', () => {
     await screen.findAllByText('No documents uploaded yet');
 
     await userEvent.click(screen.getAllByRole('button', { name: /add document/i })[0]);
+    await userEvent.click(screen.getByRole('button', { name: /use a url instead/i }));
     await userEvent.click(screen.getByRole('button', { name: 'Add document' }));
 
     expect(await screen.findByText('File URL is required')).toBeInTheDocument();
+    expect(mockedCreate).not.toHaveBeenCalled();
+  });
+
+  it('requires a file to be chosen before registering a document in upload mode', async () => {
+    mockedGetDocuments.mockResolvedValue([]);
+    renderTab();
+    await screen.findAllByText('No documents uploaded yet');
+
+    await userEvent.click(screen.getAllByRole('button', { name: /add document/i })[0]);
+    await userEvent.click(screen.getByRole('button', { name: 'Add document' }));
+
+    expect(await screen.findByText('Choose a file to upload.')).toBeInTheDocument();
     expect(mockedCreate).not.toHaveBeenCalled();
   });
 
@@ -194,6 +214,7 @@ describe('ProjectDocumentsTab', () => {
     await screen.findAllByText('No documents uploaded yet');
 
     await userEvent.click(screen.getAllByRole('button', { name: /add document/i })[0]);
+    await userEvent.click(screen.getByRole('button', { name: /use a url instead/i }));
     await userEvent.type(screen.getByLabelText('File URL'), 'https://files.example.com/contract.pdf');
     await userEvent.click(screen.getByRole('button', { name: 'Add document' }));
 
@@ -208,12 +229,43 @@ describe('ProjectDocumentsTab', () => {
     await screen.findAllByText('No documents uploaded yet');
 
     await userEvent.click(screen.getAllByRole('button', { name: /add document/i })[0]);
+    await userEvent.click(screen.getByRole('button', { name: /use a url instead/i }));
     await userEvent.type(screen.getByLabelText('File URL'), 'https://files.example.com/contract.pdf');
     const submitButton = screen.getByRole('button', { name: 'Add document' });
     await userEvent.click(submitButton);
 
     await waitFor(() => expect(submitButton).toBeDisabled());
     resolveCreate(makeDocument());
+  });
+
+  it('uploads a file and registers the document with its storage key (BE-078)', async () => {
+    mockedGetDocuments.mockResolvedValue([]);
+    mockedUploadFile.mockResolvedValue({ key: 'documents/c1/abc.pdf', fileName: 'contract.pdf', contentType: 'application/pdf', size: 100 });
+    mockedCreate.mockResolvedValue(makeDocument({ id: 'd9' }));
+    renderTab();
+    await screen.findAllByText('No documents uploaded yet');
+
+    await userEvent.click(screen.getAllByRole('button', { name: /add document/i })[0]);
+    const file = new File(['%PDF-1.4'], 'contract.pdf', { type: 'application/pdf' });
+    await userEvent.upload(screen.getByLabelText('Document file'), file);
+    await userEvent.click(screen.getByRole('button', { name: 'Add document' }));
+
+    await waitFor(() => expect(mockedUploadFile).toHaveBeenCalledWith(file));
+    await waitFor(() =>
+      expect(mockedCreate).toHaveBeenCalledWith('p1', { fileStorageKey: 'documents/c1/abc.pdf' }),
+    );
+  });
+
+  it('renders Preview/Download actions (not a plain Open link) for a stored-file document', async () => {
+    mockedGetDocuments.mockResolvedValue([makeDocument({ id: 'd1', fileUrl: '', hasStoredFile: true })]);
+    renderTab();
+
+    await screen.findAllByText('Uploaded file');
+    expect(screen.queryByRole('link', { name: /open/i })).not.toBeInTheDocument();
+    const [previewButton] = await screen.findAllByRole('button', { name: 'Preview' });
+
+    await userEvent.click(previewButton);
+    await waitFor(() => expect(mockedPreviewPdf).toHaveBeenCalledWith('/documents/d1/download'));
   });
 
   it('shows a confirmation dialog before deleting, then deletes on confirm', async () => {
