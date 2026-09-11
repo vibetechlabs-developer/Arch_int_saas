@@ -7,10 +7,14 @@
 # (07_DevOps/Development_Environment.md §2) — the app-tier services below
 # read it via env_file.
 #
-# Frontend/object-storage services from 07_DevOps/Docker.md's indicative
+# Frontend/S3-emulator services from 07_DevOps/Docker.md's indicative
 # compose (web, minio) are intentionally not included here — no frontend
-# code exists in this repo yet, and no object-storage backend is wired into
-# Django settings. Backend-only scope per BE-020.
+# code exists in this repo yet, and this compose file always runs the
+# backend in its default STORAGE_BACKEND=local mode (BE-078), which needs
+# no object-storage service. A real deployment sets STORAGE_BACKEND=s3 via
+# its own environment/secrets, at which point neither the `media` nor
+# `media_private` named volumes below are used at all — see
+# backend/.env.example's Object Storage section.
 
 services:
   postgres:
@@ -46,6 +50,7 @@ services:
       - ./backend:/app
       - staticfiles:/app/staticfiles
       - media:/app/media
+      - media_private:/app/media_private
     ports:
       - "8000:8000"
     env_file:
@@ -118,3 +123,9 @@ volumes:
   pgdata:
   staticfiles:
   media:
+  # Deliberately not mounted into the nginx service above — private files
+  # (documents, expense/payment receipts) are only ever served through the
+  # Django app's own authenticated, tenant/RBAC-checked download proxy
+  # views (apps.common.storage.open_private_file), never through nginx's
+  # public /media/ alias.
+  media_private:

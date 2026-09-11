@@ -18,6 +18,15 @@ django-environ>=0.12.1,<0.13
 # Image Processing
 Pillow>=11.3.0,<12.0
 
+# Object Storage (BE-078) -- S3-compatible production backend, selected via
+# STORAGE_BACKEND=s3 (config/settings.py). Local development uses Django's
+# built-in FileSystemStorage and needs neither of these installed at
+# runtime, but both are declared unconditionally here (not dev-only) since
+# STORAGE_BACKEND is a per-deployment env choice, not a per-environment
+# code branch.
+django-storages>=1.14.4,<1.15
+boto3>=1.35.0,<2.0
+
 # PDF Generation (BOQ/Quotation/Invoice export)
 # Chosen over WeasyPrint: WeasyPrint is incidentally present in some local
 # dev environments' Python installs but requires native GTK/Pango/Cairo

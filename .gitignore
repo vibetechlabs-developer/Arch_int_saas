@@ -29,6 +29,7 @@ env/
 # Django
 backend/staticfiles/
 backend/media/
+backend/media_private/
 *.sqlite3
 
 # Node / frontend (future)

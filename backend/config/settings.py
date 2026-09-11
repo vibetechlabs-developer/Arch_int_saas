@@ -36,6 +36,8 @@ env = environ.Env(
     DJANGO_CSRF_TRUSTED_ORIGINS=(list, []),
     CELERY_BROKER_URL=(str, "redis://localhost:6379/0"),
     CELERY_RESULT_BACKEND=(str, "redis://localhost:6379/0"),
+    STORAGE_BACKEND=(str, "local"),
+    AWS_S3_SIGNED_URL_EXPIRE_SECONDS=(int, 3600),
 )
 
 # Read .env file if present
@@ -201,6 +203,108 @@ MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# --- Object Storage (BE-078) --------------------------------------------
+#
+# `apps.common.storage` is the only place business apps touch a storage
+# backend directly -- everything below exists purely so that module's
+# `storages["default"]`/`storages["private"]` lookups resolve to the right
+# concrete backend, selected entirely by `STORAGE_BACKEND` (never inferred
+# from DEBUG -- an explicit choice, so a real deployment can't silently
+# fall back to local disk just because someone forgot to set it, and local
+# dev never needs AWS credentials just to run `manage.py runserver`).
+#
+# "default" (PUBLIC scope: product images, company logos) -- publicly
+# readable, permanent URLs, unchanged from how Product.imageUrl has always
+# worked. "private" (PRIVATE scope: project documents, expense/payment
+# receipts) -- never publicly reachable; local dev points it at a plain
+# filesystem directory *outside* MEDIA_ROOT with no base_url configured at
+# all (so `.url()` against it deliberately raises -- access only ever goes
+# through `apps.common.storage.open_private_file`, streamed by an
+# authenticated, tenant/RBAC-checked proxy view, never nginx's public
+# `/media/` alias). Production S3 mode gives "private" its own bucket
+# path with a private ACL and signed, time-limited URLs regenerated on
+# every access, never persisted to the database.
+STORAGE_BACKEND = env("STORAGE_BACKEND")
+
+if STORAGE_BACKEND == "s3":
+    from django.core.exceptions import ImproperlyConfigured as _ImproperlyConfigured
+
+    _S3_REQUIRED_ENV = [
+        "AWS_STORAGE_BUCKET_NAME",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_S3_REGION_NAME",
+    ]
+    _s3_missing = [name for name in _S3_REQUIRED_ENV if not env(name, default="")]
+    if _s3_missing:
+        # Fail loudly at boot, not silently fall back to local disk -- a
+        # deployment that explicitly selected S3 and is missing its
+        # required config is a real misconfiguration, not something to
+        # paper over (§22's "fail safely... do not silently fall back").
+        raise _ImproperlyConfigured(
+            "STORAGE_BACKEND=s3 requires the following environment "
+            f"variable(s), which are missing or empty: {', '.join(_s3_missing)}. "
+            "See backend/.env.example for the full S3 configuration block."
+        )
+
+    AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME")
+    AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY")
+    AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME")
+    # Both optional: a non-AWS S3-compatible provider (MinIO, DigitalOcean
+    # Spaces, Cloudflare R2, ...) sets AWS_S3_ENDPOINT_URL; a CDN in front
+    # of the public bucket sets AWS_S3_CUSTOM_DOMAIN for the "default"
+    # (public) storage only -- "private" never uses a CDN domain, since
+    # its whole point is that a URL is never durably public.
+    _s3_endpoint_url = env("AWS_S3_ENDPOINT_URL", default="") or None
+    _s3_custom_domain = env("AWS_S3_CUSTOM_DOMAIN", default="") or None
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": {
+                "bucket_name": AWS_STORAGE_BUCKET_NAME,
+                "region_name": AWS_S3_REGION_NAME,
+                "endpoint_url": _s3_endpoint_url,
+                "custom_domain": _s3_custom_domain,
+                "default_acl": "public-read",
+                "querystring_auth": False,
+                "location": "public",
+            },
+        },
+        "private": {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": {
+                "bucket_name": AWS_STORAGE_BUCKET_NAME,
+                "region_name": AWS_S3_REGION_NAME,
+                "endpoint_url": _s3_endpoint_url,
+                "default_acl": "private",
+                "querystring_auth": True,
+                "querystring_expire": env("AWS_S3_SIGNED_URL_EXPIRE_SECONDS"),
+                "location": "private",
+            },
+        },
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
+else:
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "private": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {
+                # Deliberately outside MEDIA_ROOT and with no base_url --
+                # nginx's `/media/` alias (backend/nginx/nginx.conf) can
+                # never serve this directory even by accident, and calling
+                # `.url()` against it raises rather than silently
+                # returning a URL nothing actually serves.
+                "location": str(BASE_DIR / "media_private"),
+                "base_url": None,
+            },
+        },
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
 
 
 # --- Django REST Framework (DRF) --------------------------------------------

@@ -131,6 +131,76 @@ class CsrfTrustedOriginsTestCase(SimpleTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+class StorageBackendHardeningTestCase(SimpleTestCase):
+    """
+    BE-078: STORAGE_BACKEND selects the object-storage backend
+    (config/settings.py's STORAGES dict). DEBUG/SECRET_KEY-style subprocess
+    isolation isn't strictly required here (STORAGE_BACKEND doesn't branch
+    on DEBUG), but the required-env-var validation raises at import time --
+    exactly like the SECRET_KEY guard -- so the same subprocess pattern
+    applies.
+    """
+
+    def test_unset_defaults_to_local_filesystem_storage(self):
+        result = _load_settings_in_subprocess({}, print_expr="settings.STORAGES['default']['BACKEND']")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("FileSystemStorage", result.stdout)
+
+    def test_local_mode_needs_no_aws_credentials(self):
+        result = _load_settings_in_subprocess({"STORAGE_BACKEND": "local"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_s3_mode_missing_all_credentials_refuses_to_start(self):
+        result = _load_settings_in_subprocess({"STORAGE_BACKEND": "s3"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ImproperlyConfigured", result.stderr)
+        self.assertIn("AWS_STORAGE_BUCKET_NAME", result.stderr)
+
+    def test_s3_mode_missing_one_credential_refuses_to_start(self):
+        result = _load_settings_in_subprocess(
+            {
+                "STORAGE_BACKEND": "s3",
+                "AWS_STORAGE_BUCKET_NAME": "test-bucket",
+                "AWS_ACCESS_KEY_ID": "fake-key",
+                "AWS_SECRET_ACCESS_KEY": "fake-secret",
+                # AWS_S3_REGION_NAME deliberately omitted
+            }
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("AWS_S3_REGION_NAME", result.stderr)
+
+    def test_s3_mode_with_full_config_boots_and_configures_public_and_private_backends(self):
+        result = _load_settings_in_subprocess(
+            {
+                "STORAGE_BACKEND": "s3",
+                "AWS_STORAGE_BUCKET_NAME": "test-bucket",
+                "AWS_ACCESS_KEY_ID": "fake-key",
+                "AWS_SECRET_ACCESS_KEY": "fake-secret",
+                "AWS_S3_REGION_NAME": "us-east-1",
+            },
+            print_expr=(
+                "(settings.STORAGES['default']['OPTIONS']['default_acl'], "
+                "settings.STORAGES['default']['OPTIONS']['querystring_auth'], "
+                "settings.STORAGES['private']['OPTIONS']['default_acl'], "
+                "settings.STORAGES['private']['OPTIONS']['querystring_auth'])"
+            ),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # default (PUBLIC) -> public-read, permanent (unsigned) URLs.
+        # private (PRIVATE) -> private ACL, always signed URLs.
+        self.assertIn("('public-read', False, 'private', True)", result.stdout)
+
+    def test_never_silently_falls_back_to_local_when_s3_explicitly_selected(self):
+        """
+        §22's explicit requirement: a deployment that selected S3 and is
+        missing config must fail loudly, never silently serve from local
+        disk instead.
+        """
+        result = _load_settings_in_subprocess({"STORAGE_BACKEND": "s3"})
+        self.assertNotIn("FileSystemStorage", result.stdout)
+        self.assertNotEqual(result.returncode, 0)
+
+
 class BrowsableApiRendererHardeningTestCase(SimpleTestCase):
     """BE-021 master task Part 12."""
 
