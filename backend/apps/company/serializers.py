@@ -15,6 +15,11 @@ class CompanySerializer(serializers.ModelSerializer):
         allow_null=True,
         allow_blank=True,
     )
+    logoUrl = serializers.URLField(
+        source="logo_url",
+        required=False,
+        allow_blank=True,
+    )
     createdAt = serializers.DateTimeField(
         source="created_at",
         read_only=True,
@@ -32,6 +37,7 @@ class CompanySerializer(serializers.ModelSerializer):
             "status",
             "currency",
             "gstNumber",
+            "logoUrl",
             "settings",
             "createdAt",
             "updatedAt",
@@ -86,6 +92,23 @@ class CompanyCreateSerializer(serializers.Serializer):
         return cleaned
 
 
+class CompanyLogoUploadSerializer(serializers.Serializer):
+    """
+    Output shape for `POST /company/{id}/logo/upload` (BE-078). Mirrors
+    `apps.products.serializers.ProductImageUploadSerializer` exactly -- a
+    plain Serializer over `CompanyService.upload_logo`'s returned dict (no
+    model behind this endpoint).
+    """
+
+    url = serializers.URLField()
+    key = serializers.CharField(
+        help_text="Internal storage key -- pass back as logoStorageKey when saving the Company so a later replace/remove can clean up this file."
+    )
+    fileName = serializers.CharField()
+    contentType = serializers.CharField()
+    size = serializers.IntegerField()
+
+
 class CompanyListQuerySerializer(serializers.Serializer):
     """
     Validates ?status=/?search=/?ordering= query params for GET /companies —
@@ -125,6 +148,21 @@ class CompanyUpdateSerializer(serializers.Serializer):
         allow_null=True,
         allow_blank=True,
         help_text="Goods and Services Tax Identification Number.",
+    )
+    logoUrl = serializers.URLField(
+        source="logo_url",
+        required=False,
+        allow_blank=True,
+        max_length=500,
+        help_text="Absolute URL returned by POST /company/{id}/logo/upload. Set to an empty string to remove the logo.",
+    )
+    logoStorageKey = serializers.CharField(
+        source="logo_storage_key",
+        required=False,
+        allow_blank=True,
+        max_length=500,
+        write_only=True,
+        help_text="Internal-only. Pass through the `key` returned by the logo upload endpoint alongside logoUrl.",
     )
     status = serializers.ChoiceField(
         choices=Company.status.field.choices,

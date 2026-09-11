@@ -20,6 +20,7 @@ const company: Company = {
   status: 'active',
   currency: 'INR',
   gstNumber: '22AAAAA0000A1Z5',
+  logoUrl: '',
   settings: {},
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',

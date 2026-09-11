@@ -11,6 +11,7 @@ export interface Company {
   status: CompanyStatus;
   currency: string;
   gstNumber: string | null;
+  logoUrl: string;
   settings: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -24,6 +25,18 @@ export interface CompanyUpdateInput {
   name?: string;
   currency?: string;
   gstNumber?: string | null;
+  logoUrl?: string;
+  /** Internal-only (BE-078) — the `key` from uploadCompanyLogo's response, passed through so replacing/removing the logo cleans up the exact file. Omit for a manually-entered logoUrl, and omit both fields entirely when the logo wasn't touched. */
+  logoStorageKey?: string;
+}
+
+// Mirrors backend/apps/company/serializers.py::CompanyLogoUploadSerializer.
+export interface UploadedCompanyLogo {
+  url: string;
+  key: string;
+  fileName: string;
+  contentType: string;
+  size: number;
 }
 
 export async function getCompany(id: string): Promise<Company> {
@@ -32,4 +45,15 @@ export async function getCompany(id: string): Promise<Company> {
 
 export async function updateCompany(id: string, input: CompanyUpdateInput): Promise<Company> {
   return unwrap<Company>(apiClient.patch(`/companies/${id}`, input));
+}
+
+// Multipart upload — the browser/axios set the Content-Type boundary
+// automatically from the FormData body; never set it manually. Returns an
+// absolute URL + internal key that the caller then passes to
+// updateCompany as logoUrl/logoStorageKey — this endpoint never touches
+// Company itself (mirrors uploadProductImage's decoupled design).
+export async function uploadCompanyLogo(companyId: string, file: File): Promise<UploadedCompanyLogo> {
+  const formData = new FormData();
+  formData.append('logo', file);
+  return unwrap<UploadedCompanyLogo>(apiClient.post(`/companies/${companyId}/logo/upload`, formData));
 }

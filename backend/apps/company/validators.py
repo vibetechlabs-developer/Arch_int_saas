@@ -48,6 +48,14 @@ def build_update_fields(
             validated_data["gst_number"].strip() if validated_data["gst_number"] else None
         )
 
+    if "logo_url" in validated_data:
+        fields["logo_url"] = validated_data["logo_url"] or ""
+        # Mirrors ProductService.update_product's invariant: logo_url and
+        # logo_storage_key must never drift out of sync -- a fresh
+        # logoUrl always carries either a real logoStorageKey (an actual
+        # upload) or resets to "" (manual URL entry / explicit removal).
+        fields["logo_storage_key"] = validated_data.get("logo_storage_key") or ""
+
     if "status" in validated_data and is_platform_admin:
         fields["status"] = validated_data["status"]
 

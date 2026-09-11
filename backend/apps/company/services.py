@@ -5,11 +5,12 @@ from django.db.models import QuerySet
 
 from apps.audit.models import AuditAction
 from apps.audit.services import AuditLogService
+from apps.common import storage as storage_service
 from apps.company import selectors, validators
 from apps.company.models import Company
 from apps.company.repositories import CompanyRepository
 
-AUDITED_FIELDS = ("name", "status", "currency", "gst_number", "settings")
+AUDITED_FIELDS = ("name", "status", "currency", "gst_number", "logo_url", "settings")
 
 
 def _audit_snapshot(company: Company) -> Dict[str, Any]:
@@ -110,11 +111,23 @@ class CompanyService:
         with transaction.atomic():
             company = cls.get_company_by_id(company_id)
             before_state = _audit_snapshot(company)
+            previous_logo_key = company.logo_storage_key
 
             fields = validators.build_update_fields(
                 validated_data, company.settings, is_platform_admin
             )
             company = CompanyRepository.save(company, fields)
+
+            # Orphan cleanup (BE-078), mirroring
+            # ProductService.update_product exactly: only ever delete a
+            # file this app actually owns (a non-blank previous key), and
+            # only after the new state has actually committed.
+            if "logo_url" in validated_data and previous_logo_key:
+                new_logo_key = fields.get("logo_storage_key", "")
+                if previous_logo_key != new_logo_key:
+                    transaction.on_commit(
+                        lambda key=previous_logo_key: storage_service.delete_file("companies", key)
+                    )
 
             AuditLogService.record(
                 action=AuditAction.UPDATE,
@@ -128,6 +141,40 @@ class CompanyService:
             )
 
             return company
+
+    @classmethod
+    def upload_logo(
+        cls,
+        company_id: str | uuid.UUID,
+        uploaded_file: Any,
+        request: Any = None,
+    ) -> Dict[str, Any]:
+        """
+        Stores a validated company logo via the shared storage
+        abstraction (BE-078, PUBLIC scope "companies") and returns a URL
+        (persisted through `Company.logoUrl`) plus the storage `key`
+        (persisted through the internal-only `Company.logoStorageKey`) so
+        a later replace/remove can clean up this exact file. Mirrors
+        `apps.products.services.ProductImageService.upload_image` exactly
+        -- deliberately decoupled from `update_company` (the caller
+        PATCHes the company with the returned url+key immediately after),
+        the same two-step pattern Product images already established.
+        """
+        from apps.common.storage import validate_image_upload
+
+        extension, content_type = validate_image_upload(uploaded_file)
+
+        storage_key = storage_service.generate_storage_key("companies", company_id, extension)
+        storage_service.save_upload("companies", storage_key, uploaded_file)
+        url = storage_service.public_url("companies", storage_key, request=request)
+
+        return {
+            "url": url,
+            "key": storage_key,
+            "fileName": storage_service.safe_display_filename(getattr(uploaded_file, "name", "")),
+            "contentType": content_type,
+            "size": uploaded_file.size,
+        }
 
     @classmethod
     def soft_delete_company(

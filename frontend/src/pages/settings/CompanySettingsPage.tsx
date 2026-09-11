@@ -1,10 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Building2 } from 'lucide-react';
+import { Building2, ImageIcon } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { ErrorState } from '@/components/common/ErrorState';
 import { RestrictedState } from '@/components/common/RestrictedState';
@@ -14,8 +14,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ProductImagePicker, validateProductImageFile } from '@/components/products/ProductImagePicker';
 import { ApiError } from '@/lib/api/client';
-import { getCompany, updateCompany } from '@/lib/api/company';
+import { getCompany, updateCompany, uploadCompanyLogo } from '@/lib/api/company';
 import { companyKeys } from '@/lib/queryKeys';
 import { useCurrentCompanyId } from '@/hooks/useCurrentCompanyId';
 
@@ -69,6 +70,55 @@ export default function CompanySettingsPage() {
       toast.error(mutationError instanceof ApiError ? mutationError.message : 'Failed to save company details.');
     },
   });
+
+  // Logo upload/remove are instant actions (Upload / Replace / Remove),
+  // independent of the profile form's Save button above — matches how a
+  // logo is typically managed in real settings pages, and mirrors
+  // ProductFormSheet's own two-step upload-then-attach pattern (BE-078).
+  const [logoUrlDraft, setLogoUrlDraft] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState<string | null>(null);
+
+  const logoUploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const uploaded = await uploadCompanyLogo(companyId!, file);
+      return updateCompany(companyId!, { logoUrl: uploaded.url, logoStorageKey: uploaded.key });
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(companyKeys.detail(companyId!), updated);
+      setLogoError(null);
+      toast.success('Company logo updated');
+    },
+    onError: (mutationError: unknown) => {
+      const message = mutationError instanceof ApiError ? mutationError.message : 'Failed to upload logo. Please try again.';
+      setLogoError(message);
+    },
+  });
+
+  const logoUrlMutation = useMutation({
+    mutationFn: (logoUrl: string) => updateCompany(companyId!, { logoUrl }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(companyKeys.detail(companyId!), updated);
+      setLogoUrlDraft(null);
+      setLogoError(null);
+      toast.success(updated.logoUrl ? 'Company logo updated' : 'Company logo removed');
+    },
+    onError: (mutationError: unknown) => {
+      const message = mutationError instanceof ApiError ? mutationError.message : 'Failed to save logo. Please try again.';
+      setLogoError(message);
+    },
+  });
+
+  const logoBusy = logoUploadMutation.isPending || logoUrlMutation.isPending;
+
+  const handleLogoFileSelect = (file: File) => {
+    const validationMessage = validateProductImageFile(file);
+    if (validationMessage) {
+      setLogoError(validationMessage);
+      return;
+    }
+    setLogoError(null);
+    logoUploadMutation.mutate(file);
+  };
 
   if (membershipError || isError) {
     const err = isError ? error : membershipErrorObj;
@@ -140,6 +190,47 @@ export default function CompanySettingsPage() {
                 </Button>
               </div>
             </form>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <ImageIcon className="size-4 text-text-tertiary" />
+            Company logo
+          </CardTitle>
+          <CardDescription>Used across the app shell and on BOQ/Quotation/Invoice PDF exports.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <Skeleton className="h-32 w-32" />
+          ) : (
+            <ProductImagePicker
+              label="Company logo"
+              previewAlt="Company logo preview"
+              currentUrl={logoUrlDraft ?? company.logoUrl}
+              pendingFile={null}
+              onFileSelect={handleLogoFileSelect}
+              onRemove={() => logoUrlMutation.mutate('')}
+              onUrlChange={setLogoUrlDraft}
+              error={logoError}
+              uploading={logoBusy}
+              disabled={logoBusy}
+            />
+          )}
+          {logoUrlDraft !== null && logoUrlDraft !== company?.logoUrl && (
+            <div className="mt-3 flex justify-end">
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                loading={logoUrlMutation.isPending}
+                onClick={() => logoUrlMutation.mutate(logoUrlDraft)}
+              >
+                Save logo URL
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

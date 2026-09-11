@@ -1,8 +1,10 @@
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import status, viewsets
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.common.pagination import StandardPagination
 from apps.common.responses import ApiResponse
@@ -12,6 +14,7 @@ from apps.company.permissions import IsPlatformAdminOrCompanyAccess, is_platform
 from apps.company.serializers import (
     CompanyCreateSerializer,
     CompanyListQuerySerializer,
+    CompanyLogoUploadSerializer,
     CompanySerializer,
     CompanyUpdateSerializer,
 )
@@ -170,4 +173,47 @@ class CompanyViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
         return ApiResponse.success(
             data={"message": "Company deleted successfully."},
             request_id=request_id,
+        )
+
+
+class CompanyLogoUploadView(ObjectPermission404Mixin, APIView):
+    """
+    `POST /companies/{id}/logo/upload` (BE-078). Reuses
+    `IsPlatformAdminOrCompanyAccess` directly -- its object-level check
+    (tenant match against `request.company_id`) and permission-code
+    resolution (`company.manage`, the same code
+    `CompanyViewSet.partial_update` already requires) apply unchanged;
+    `action = "partial_update"` is a deliberate fixed class attribute (not
+    DRF's own ViewSet-assigned one, since this is a plain APIView) purely
+    so that permission class's own `view.action` check resolves the same
+    way it already does for the real `partial_update` action. Cross-tenant
+    upload attempts 404 (`ObjectPermission404Mixin`); same-tenant callers
+    without `company.manage` get 403 at the view-permission stage, before
+    the object is even fetched.
+    """
+
+    permission_classes = [IsAuthenticated, IsPlatformAdminOrCompanyAccess]
+    parser_classes = [MultiPartParser, FormParser]
+    action = "partial_update"
+    permission_code = "company.manage"
+
+    @extend_schema(
+        summary="Upload Company Logo",
+        description="Upload a JPEG/PNG/WEBP company logo (multipart/form-data, field name `logo`, max 5 MB). Returns an absolute URL usable as Company.logoUrl plus an internal storage key to pass back as logoStorageKey.",
+        request={"multipart/form-data": {"type": "object", "properties": {"logo": {"type": "string", "format": "binary"}}}},
+        responses={status.HTTP_201_CREATED: CompanyLogoUploadSerializer},
+        tags=["Company"],
+    )
+    def post(self, request: Request, pk: str = None) -> Response:
+        company = CompanyService.get_company_by_id(pk)
+        self.check_object_permissions(request, company)
+
+        uploaded_file = request.FILES.get("logo")
+        result = CompanyService.upload_logo(
+            company_id=company.id, uploaded_file=uploaded_file, request=request
+        )
+
+        response_data = CompanyLogoUploadSerializer(result).data
+        return ApiResponse.created(
+            data=response_data, request_id=getattr(request, "request_id", None)
         )

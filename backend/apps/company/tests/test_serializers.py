@@ -31,6 +31,7 @@ class CompanySerializerTestCase(TestCase):
             "status",
             "currency",
             "gstNumber",
+            "logoUrl",
             "settings",
             "createdAt",
             "updatedAt",
@@ -41,6 +42,7 @@ class CompanySerializerTestCase(TestCase):
         self.assertEqual(data["status"], "active")
         self.assertEqual(data["currency"], "INR")
         self.assertEqual(data["gstNumber"], "29ABCDE1234F1Z5")
+        self.assertEqual(data["logoUrl"], "")
         self.assertEqual(data["settings"], {"numbering": {"invoicePrefix": "SF-INV-"}})
 
     def test_company_serializer_with_null_gst(self):

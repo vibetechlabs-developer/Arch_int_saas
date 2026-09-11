@@ -1,6 +1,6 @@
 from django.urls import re_path
 
-from apps.company.views import CompanyViewSet
+from apps.company.views import CompanyLogoUploadView, CompanyViewSet
 
 company_list = CompanyViewSet.as_view(
     {
@@ -24,5 +24,10 @@ urlpatterns = [
         r"^companies/(?P<pk>[0-9a-fA-F-]{36})/?$",
         company_detail,
         name="company-detail",
+    ),
+    re_path(
+        r"^companies/(?P<pk>[0-9a-fA-F-]{36})/logo/upload/?$",
+        CompanyLogoUploadView.as_view(),
+        name="company-logo-upload",
     ),
 ]

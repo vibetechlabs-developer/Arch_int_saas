@@ -52,6 +52,23 @@ class Company(BaseModel):
         blank=True,
         help_text=_("Goods and Services Tax Identification Number (GSTIN)."),
     )
+    logo_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text=_("URL of the company's branding logo, if any (BE-078)."),
+    )
+    logo_storage_key = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text=_(
+            "Internal-only (never serialized). The object-storage key "
+            "backing logo_url, set only when the logo was uploaded via "
+            "POST /company/{id}/logo/upload. Mirrors "
+            "Product.image_storage_key's reasoning exactly."
+        ),
+    )
     settings = models.JSONField(
         default=get_default_company_settings,
         blank=True,
