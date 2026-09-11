@@ -159,6 +159,25 @@ class Role(BaseModel):
         default=True,
         help_text="Indicates whether the role is currently usable.",
     )
+    system_key = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        default=None,
+        editable=False,
+        help_text=(
+            "Stable machine identity for a default/system role (BE-069), "
+            "e.g. 'owner'. NULL for every customer-created role, "
+            "including one a customer names 'Owner' -- a role's system "
+            "identity is never inferred from its display `name`, which "
+            "remains freely editable. Set only by "
+            "RoleService.seed_default_roles_for_company at company-"
+            "creation time (or by the historical backfill migration); "
+            "never accepted from any API input. See "
+            "apps.users.permission_catalog.OWNER_SYSTEM_KEY for the one "
+            "value with dedicated protection semantics."
+        ),
+    )
 
     # objects/all_objects/deleted_objects are inherited unchanged from
     # BaseModel/SoftDeleteModel — no override needed (unlike User, which
@@ -169,6 +188,11 @@ class Role(BaseModel):
         db_table = "role"
         ordering = ["-created_at"]
         constraints = [
+            models.UniqueConstraint(
+                fields=["company", "system_key"],
+                condition=models.Q(system_key__isnull=False),
+                name="unique_system_key_per_company",
+            ),
             models.UniqueConstraint(
                 fields=["company", "name"],
                 condition=models.Q(deleted_at__isnull=True),

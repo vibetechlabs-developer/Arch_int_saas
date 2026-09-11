@@ -15,6 +15,8 @@ change, since RolePermission is a plain many-to-many join. No view enforces
 these yet (enforcement cutover is BE-054, deliberately deferred).
 """
 
+import re
+
 # (code, module, action, description)
 PERMISSION_CATALOG: list[tuple[str, str, str, str]] = [
     ("company.view", "company", "view", "View own company profile."),
@@ -206,4 +208,34 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str] | str] = {
         "quotation.create",
         "report.view",
     ],
+}
+
+
+def _slugify_system_key(name: str) -> str:
+    """
+    Deterministic `Role.system_key` derivation from a documented default
+    role's display name -- used ONLY at seed time
+    (RoleService.seed_default_roles_for_company) and, for historical
+    backfill, only against the exact names above. Never re-derived from a
+    role's *current* display name afterward (renaming a role never
+    changes its system_key), and never run against a customer-created
+    role regardless of what that role happens to be named (BE-069).
+    """
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+#: The one default role with dedicated protection (undeletable; a company
+#: must always keep at least one ACTIVE membership holding it) -- see
+#: apps.users.models.Role.system_key and apps.users.services.
+#: CompanyMembershipService's last-owner invariant. Every other default
+#: role also gets a stable system_key (identity, not protection).
+OWNER_SYSTEM_KEY: str = _slugify_system_key("Owner")
+
+#: role display name -> stable system_key, for every documented default
+#: role. Consulted only by the seeding path and by the one-time historical
+#: backfill migration -- never by request-time authorization logic, which
+#: must always compare against `Role.system_key` on the actual row, never
+#: recompute this mapping from a role's current (possibly renamed) name.
+DEFAULT_ROLE_SYSTEM_KEYS: dict[str, str] = {
+    role_name: _slugify_system_key(role_name) for role_name in DEFAULT_ROLE_PERMISSIONS
 }

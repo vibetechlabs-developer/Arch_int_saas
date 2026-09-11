@@ -52,6 +52,9 @@ class CompanyMembershipSerializer(serializers.ModelSerializer):
     userName = serializers.CharField(source="user.name", read_only=True)
     roleId = serializers.UUIDField(source="role_id", read_only=True, allow_null=True)
     roleName = serializers.CharField(source="role.name", read_only=True, allow_null=True, default=None)
+    roleSystemKey = serializers.CharField(
+        source="role.system_key", read_only=True, allow_null=True, default=None
+    )
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
 
@@ -67,6 +70,7 @@ class CompanyMembershipSerializer(serializers.ModelSerializer):
             "userName",
             "roleId",
             "roleName",
+            "roleSystemKey",
             "status",
             "createdAt",
             "updatedAt",
@@ -205,6 +209,8 @@ class RoleSerializer(serializers.ModelSerializer):
     companyId = serializers.UUIDField(source="company_id", read_only=True)
     companyName = serializers.CharField(source="company.name", read_only=True)
     isActive = serializers.BooleanField(source="is_active", default=True)
+    systemKey = serializers.CharField(source="system_key", read_only=True, allow_null=True)
+    isSystem = serializers.SerializerMethodField()
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
 
@@ -217,16 +223,28 @@ class RoleSerializer(serializers.ModelSerializer):
             "companyId",
             "companyName",
             "isActive",
+            "systemKey",
+            "isSystem",
             "createdAt",
             "updatedAt",
         ]
         read_only_fields = [
             "id",
             "companyId",
+            "systemKey",
+            "isSystem",
             "companyName",
             "createdAt",
             "updatedAt",
         ]
+
+    def get_isSystem(self, obj: Role) -> bool:
+        """
+        Convenience boolean for the frontend (avoids every call site
+        re-deriving `systemKey != null`) -- purely a UX label, never the
+        authorization boundary. `systemKey` itself is the source of truth.
+        """
+        return obj.system_key is not None
 
 
 class RoleCreateSerializer(serializers.Serializer):

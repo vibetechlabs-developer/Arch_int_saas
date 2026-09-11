@@ -178,6 +178,7 @@ class CompanyMembershipTestCase(TestCase):
             "userName",
             "roleId",
             "roleName",
+            "roleSystemKey",
             "status",
             "createdAt",
             "updatedAt",
