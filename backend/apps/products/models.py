@@ -180,6 +180,21 @@ class Product(BaseModel):
         default="",
         help_text="URL of the product's image, if any.",
     )
+    image_storage_key = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text=(
+            "Internal-only (never serialized). The object-storage key "
+            "backing image_url, set only when the image was uploaded via "
+            "POST /products/images/upload (BE-078). Blank when image_url "
+            "was entered manually via the alternate URL-entry flow -- in "
+            "that case this app does not own the file and must never "
+            "attempt to delete it. Used by ProductService.update_product "
+            "to safely clean up a superseded image on replace/remove "
+            "without ever deleting a file this app doesn't own."
+        ),
+    )
     unit = models.CharField(
         max_length=20,
         choices=ProductUnit.choices,

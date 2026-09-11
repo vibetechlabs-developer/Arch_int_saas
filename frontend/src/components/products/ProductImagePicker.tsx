@@ -34,12 +34,18 @@ export interface ProductImagePickerProps {
   /** True while the image is actively uploading (or the whole form save is in flight). */
   uploading?: boolean;
   disabled?: boolean;
+  /** Field label — defaults to "Product image"; Company Settings' logo upload (BE-078) passes "Company logo" to reuse this same picker rather than building a second one. */
+  label?: string;
+  /** Alt text for the preview thumbnail — defaults to "Product preview". */
+  previewAlt?: string;
 }
 
 // Primary experience is real file selection/upload (Choose Image / drag &
 // drop), with "Use an image URL instead" as an explicit, secondary,
 // non-simultaneous mode — never both a file picker and a URL field shown
-// at once, per the brief's "keep the interface clean" instruction.
+// at once, per the brief's "keep the interface clean" instruction. Reused
+// as-is for Company logo upload (BE-078) via the `label`/`previewAlt`
+// props — the picker itself has no Product-specific behavior.
 export function ProductImagePicker({
   currentUrl,
   pendingFile,
@@ -49,6 +55,8 @@ export function ProductImagePicker({
   error,
   uploading,
   disabled,
+  label = 'Product image',
+  previewAlt = 'Product preview',
 }: ProductImagePickerProps) {
   const [urlMode, setUrlMode] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -82,7 +90,7 @@ export function ProductImagePicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label>Product image</Label>
+      <Label>{label}</Label>
 
       {!urlMode ? (
         <div className="flex flex-col gap-3">
@@ -107,7 +115,7 @@ export function ProductImagePicker({
               <div className="relative">
                 <img
                   src={displayUrl}
-                  alt="Product preview"
+                  alt={previewAlt}
                   onError={() => setImageBroken(true)}
                   className="h-32 w-32 rounded-md border border-border-subtle object-cover"
                 />
@@ -183,7 +191,7 @@ export function ProductImagePicker({
           {hasImage && (
             <img
               src={displayUrl}
-              alt="Product preview"
+              alt={previewAlt}
               onError={() => setImageBroken(true)}
               className="h-24 w-24 rounded-md border border-border-subtle object-cover"
             />

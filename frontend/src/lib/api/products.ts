@@ -49,6 +49,8 @@ export interface ProductListParams {
 export interface ProductMutableInput {
   name: string;
   imageUrl?: string;
+  /** Internal-only (BE-078) — the `key` from uploadProductImage's response, passed through so replacing/removing the image cleans up the exact file. Omit for a manually-entered imageUrl. */
+  imageStorageKey?: string;
   unit?: ProductUnit | '';
   defaultCost?: string | null;
   defaultSellingRate?: string | null;
@@ -96,6 +98,8 @@ export async function deleteProduct(id: string): Promise<void> {
 // Mirrors backend/apps/products/serializers.py::ProductImageUploadSerializer.
 export interface UploadedProductImage {
   url: string;
+  /** Internal-only (BE-078) — pass through as imageStorageKey when saving the Product. */
+  key: string;
   fileName: string;
   contentType: string;
   size: number;

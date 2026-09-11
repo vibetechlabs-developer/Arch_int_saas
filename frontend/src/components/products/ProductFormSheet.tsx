@@ -77,7 +77,15 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
   // URL instead of uploading the same file again.
   const uploadedFileRef = useRef<File | null>(null);
   const uploadedUrlRef = useRef<string | null>(null);
+  const uploadedKeyRef = useRef<string>('');
   const uploadStageFailedRef = useRef(false);
+  // Only when the user actually interacts with the image picker during
+  // this edit session do imageUrl/imageStorageKey get included in the
+  // save payload at all — omitted otherwise (e.g. editing just the price)
+  // so the backend's own "a fresh imageUrl always resets the key too"
+  // invariant (BE-078) never wipes an existing tracked storage key just
+  // because an unrelated field changed.
+  const imageTouchedRef = useRef(false);
 
   const {
     register,
@@ -94,6 +102,8 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
     setSelectedFile(null);
     uploadedFileRef.current = null;
     uploadedUrlRef.current = null;
+    uploadedKeyRef.current = '';
+    imageTouchedRef.current = false;
     if (product) {
       reset({
         name: product.name,
@@ -120,17 +130,21 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
     mutationFn: async (values: ProductFormValues) => {
       uploadStageFailedRef.current = false;
       let resolvedImageUrl = imageUrl;
+      let resolvedImageKey = uploadedKeyRef.current;
 
       if (selectedFile) {
         if (uploadedFileRef.current === selectedFile && uploadedUrlRef.current) {
           resolvedImageUrl = uploadedUrlRef.current;
+          resolvedImageKey = uploadedKeyRef.current;
         } else {
           setSaveStage('uploading');
           try {
             const uploaded = await uploadProductImage(selectedFile);
             uploadedFileRef.current = selectedFile;
             uploadedUrlRef.current = uploaded.url;
+            uploadedKeyRef.current = uploaded.key;
             resolvedImageUrl = uploaded.url;
+            resolvedImageKey = uploaded.key;
           } catch (uploadError) {
             uploadStageFailedRef.current = true;
             throw uploadError;
@@ -141,16 +155,19 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
       setSaveStage('saving');
       const mutableInput: ProductMutableInput = {
         name: values.name,
-        imageUrl: resolvedImageUrl,
         unit: unit || '',
         defaultCost: values.defaultCost || null,
         defaultSellingRate: values.defaultSellingRate || null,
         taxRate: values.taxRate || null,
         status: statusValue,
       };
+      if (imageTouchedRef.current) {
+        mutableInput.imageUrl = resolvedImageUrl;
+        mutableInput.imageStorageKey = resolvedImageKey;
+      }
       return isEdit
         ? updateProduct(product!.id, mutableInput)
-        : createProduct({ ...mutableInput, subcategoryId: subcategoryId! });
+        : createProduct({ ...mutableInput, imageUrl: resolvedImageUrl, imageStorageKey: resolvedImageKey, subcategoryId: subcategoryId! });
     },
     onSuccess: (saved) => {
       setSaveStage('idle');
@@ -204,6 +221,7 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
     }
     setImageError(null);
     setSelectedFile(file);
+    imageTouchedRef.current = true;
   };
 
   const handleRemoveImage = () => {
@@ -212,12 +230,16 @@ export function ProductFormSheet({ open, onOpenChange, product, onSaved }: Produ
     setImageError(null);
     uploadedFileRef.current = null;
     uploadedUrlRef.current = null;
+    uploadedKeyRef.current = '';
+    imageTouchedRef.current = true;
   };
 
   const handleUrlChange = (value: string) => {
     setImageUrl(value);
     setSelectedFile(null);
+    uploadedKeyRef.current = '';
     setImageError(null);
+    imageTouchedRef.current = true;
   };
 
   return (

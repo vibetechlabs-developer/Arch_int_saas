@@ -214,6 +214,21 @@ class ProductCreateSerializer(serializers.Serializer):
     imageUrl = serializers.URLField(
         source="image_url", required=False, allow_blank=True, default="", max_length=500
     )
+    imageStorageKey = serializers.CharField(
+        source="image_storage_key",
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=500,
+        write_only=True,
+        help_text=(
+            "Internal-only. Pass through the `key` returned by "
+            "POST /products/images/upload alongside imageUrl so a later "
+            "replace/remove can clean up this exact file. Omit (or leave "
+            "blank) when imageUrl was entered manually -- this app will "
+            "then never attempt to delete it."
+        ),
+    )
     unit = serializers.ChoiceField(
         choices=ProductUnit.choices, required=False, allow_blank=True, default=""
     )
@@ -270,6 +285,19 @@ class ProductUpdateSerializer(serializers.Serializer):
     imageUrl = serializers.URLField(
         source="image_url", required=False, allow_blank=True, max_length=500
     )
+    imageStorageKey = serializers.CharField(
+        source="image_storage_key",
+        required=False,
+        allow_blank=True,
+        max_length=500,
+        write_only=True,
+        help_text=(
+            "Internal-only. Pass through the `key` returned by "
+            "POST /products/images/upload alongside imageUrl so replacing "
+            "or removing the image cleans up this exact file. Omit (or "
+            "leave blank) when imageUrl was entered manually."
+        ),
+    )
     unit = serializers.ChoiceField(choices=ProductUnit.choices, required=False, allow_blank=True)
     defaultCost = serializers.DecimalField(
         source="default_cost", max_digits=14, decimal_places=2, required=False, allow_null=True
@@ -302,6 +330,9 @@ class ProductImageUploadSerializer(serializers.Serializer):
     """
 
     url = serializers.URLField()
+    key = serializers.CharField(
+        help_text="Internal storage key -- pass back as imageStorageKey when saving the Product so a later replace/remove can clean up this file."
+    )
     fileName = serializers.CharField()
     contentType = serializers.CharField()
     size = serializers.IntegerField()

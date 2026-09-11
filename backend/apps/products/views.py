@@ -491,6 +491,7 @@ class ProductViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
             subcategory_id=validated["subcategory_id"],
             name=validated["name"],
             image_url=validated.get("image_url", ""),
+            image_storage_key=validated.get("image_storage_key", ""),
             unit=validated.get("unit", ""),
             default_cost=validated.get("default_cost"),
             default_selling_rate=validated.get("default_selling_rate"),

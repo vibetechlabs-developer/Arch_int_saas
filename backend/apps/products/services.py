@@ -1,15 +1,13 @@
-import os
 import uuid
 from decimal import Decimal
 from typing import Any, Dict, Optional
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import QuerySet
 from rest_framework import exceptions as drf_exceptions
 
 from apps.audit.models import AuditAction
 from apps.audit.services import AuditLogService
+from apps.common import storage as storage_service
 from apps.common.exceptions import ConflictError
 from apps.products import selectors, validators
 from apps.products.models import Product, ProductCategory, ProductStatus, ProductSubcategory
@@ -494,6 +492,7 @@ class ProductService:
         subcategory_id: str | uuid.UUID,
         name: str,
         image_url: str = "",
+        image_storage_key: str = "",
         unit: str = "",
         default_cost: Any = None,
         default_selling_rate: Any = None,
@@ -528,6 +527,7 @@ class ProductService:
                 subcategory=subcategory,
                 name=cleaned_name,
                 image_url=image_url or "",
+                image_storage_key=image_storage_key or "",
                 unit=unit or "",
                 default_cost=default_cost,
                 default_selling_rate=default_selling_rate,
@@ -561,19 +561,43 @@ class ProductService:
         not documented as a supported reassignment anywhere (mirrors
         ProjectService.update_project's exclusion of `client` for the same
         reasoning: set at creation, not casually reassigned via edit).
+
+        Orphan cleanup (BE-078): when `image_url` changes (replaced with a
+        new image, or cleared entirely), the previously-stored image is
+        deleted from object storage -- but ONLY when this app actually
+        owns that file, i.e. the product's *current* `image_storage_key`
+        (captured before the overwrite) is non-blank. A blank key means
+        the existing `image_url` was either never set or was entered
+        manually via the alternate URL-entry flow -- in either case this
+        app has no storage key to delete and must never guess one from
+        the URL itself (an arbitrary external URL could coincidentally
+        collide with a real storage key on the same backend). The delete
+        is deferred to `transaction.on_commit` so a superseded file is
+        never destroyed unless the new Product state actually committed
+        successfully (BE-078 §15: never delete the old valid object before
+        the new DB state is committed).
         """
         with transaction.atomic():
             product = cls.get_product_by_id(product_id, company_id=company_id)
             before_state = _product_audit_state(product)
+            previous_image_key = product.image_storage_key
 
             fields: Dict[str, Any] = {}
 
             if "name" in validated_data:
                 fields["name"] = validators.require_product_name(validated_data["name"])
 
-            for field in ("image_url", "unit"):
-                if field in validated_data:
-                    fields[field] = validated_data[field] or ""
+            if "image_url" in validated_data:
+                fields["image_url"] = validated_data["image_url"] or ""
+                # A new imageUrl always resets the key too: either the
+                # caller supplied a fresh imageStorageKey (a real upload)
+                # or it defaults to "" (manual URL entry / explicit
+                # removal) -- image_url and image_storage_key must never
+                # drift out of sync with each other.
+                fields["image_storage_key"] = validated_data.get("image_storage_key") or ""
+
+            if "unit" in validated_data:
+                fields["unit"] = validated_data["unit"] or ""
 
             for field in ("default_cost", "default_selling_rate", "tax_rate"):
                 if field in validated_data:
@@ -583,6 +607,13 @@ class ProductService:
                 fields["status"] = validated_data["status"]
 
             product = ProductRepository.save(product, fields)
+
+            if "image_url" in validated_data and previous_image_key:
+                new_image_key = fields.get("image_storage_key", "")
+                if previous_image_key != new_image_key:
+                    transaction.on_commit(
+                        lambda key=previous_image_key: storage_service.delete_file("products", key)
+                    )
 
             AuditLogService.record(
                 action=AuditAction.UPDATE,
@@ -630,27 +661,19 @@ class ProductService:
             )
 
 
-def _safe_display_filename(original_name: str) -> str:
-    """
-    Cosmetic only — never used as a storage key or filesystem path. Strips
-    directory components (defends against a client sending a path-
-    traversal-shaped `name`, e.g. "../../etc/passwd.jpg") and truncates to
-    a sane display length.
-    """
-    return os.path.basename(original_name or "image")[:255]
-
-
 class ProductImageService:
     """
-    Stores a validated product image via Django's storage abstraction
-    (`default_storage` — `FileSystemStorage` against `MEDIA_ROOT` in
-    development today, swappable to S3/object storage later purely via
-    settings, with no business-logic change) and returns a URL the caller
-    persists through the ordinary `Product.imageUrl` field. Deliberately
-    has no model of its own — an uploaded image is not a first-class
-    tenant entity the way Document is; it is a blob a Product's own
-    `imageUrl` field will end up referencing, mirroring the "smallest
-    correct design" the image-upload brief calls for.
+    Stores a validated product image via the shared storage abstraction
+    (`apps.common.storage` — PUBLIC scope "products"; `FileSystemStorage`
+    against `MEDIA_ROOT` in development today, swappable to S3/object
+    storage later purely via `STORAGE_BACKEND`, with no business-logic
+    change here) and returns a URL (persisted through the ordinary
+    `Product.imageUrl` field) plus the storage `key` (persisted through
+    the internal-only `Product.imageStorageKey` field, BE-078) so a later
+    replace/remove can clean up this exact file. Deliberately has no model
+    of its own — an uploaded image is not a first-class tenant entity the
+    way Document is; it is a blob a Product's own `imageUrl` field ends up
+    referencing.
     """
 
     @classmethod
@@ -662,23 +685,14 @@ class ProductImageService:
     ) -> Dict[str, Any]:
         extension, content_type = validators.validate_product_image(uploaded_file)
 
-        # UUID-based storage key, namespaced by company — never the raw
-        # user filename (collision + path-traversal risk) and never
-        # exposes anything about the tenant beyond its own id, which the
-        # URL's caller already necessarily knows.
-        storage_key = f"products/{company_id}/{uuid.uuid4()}.{extension}"
-        saved_path = default_storage.save(storage_key, ContentFile(uploaded_file.read()))
-        relative_url = default_storage.url(saved_path)
-
-        # Product.imageUrl is a plain URLField requiring an absolute URL
-        # (scheme + host) — default_storage.url() returns a path relative
-        # to MEDIA_URL, so it must be resolved against the current request
-        # before it can ever be round-tripped back through that field.
-        url = request.build_absolute_uri(relative_url) if request is not None else relative_url
+        storage_key = storage_service.generate_storage_key("products", company_id, extension)
+        storage_service.save_upload("products", storage_key, uploaded_file)
+        url = storage_service.public_url("products", storage_key, request=request)
 
         return {
             "url": url,
-            "fileName": _safe_display_filename(getattr(uploaded_file, "name", "")),
+            "key": storage_key,
+            "fileName": storage_service.safe_display_filename(getattr(uploaded_file, "name", "")),
             "contentType": content_type,
             "size": uploaded_file.size,
         }
