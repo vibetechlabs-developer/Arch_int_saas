@@ -23,6 +23,8 @@ const DashboardPage = lazy(() => import('@/pages/DashboardPage'));
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
 const ClientsListPage = lazy(() => import('@/pages/clients/ClientsListPage'));
 const ClientDetailPage = lazy(() => import('@/pages/clients/ClientDetailPage'));
+const LeadsListPage = lazy(() => import('@/pages/leads/LeadsListPage'));
+const LeadDetailPage = lazy(() => import('@/pages/leads/LeadDetailPage'));
 const ProjectsListPage = lazy(() => import('@/pages/projects/ProjectsListPage'));
 const ProjectWorkspaceLayout = lazy(() => import('@/pages/projects/ProjectWorkspaceLayout'));
 const ProjectOverviewTab = lazy(() => import('@/pages/projects/ProjectOverviewTab'));
@@ -70,6 +72,8 @@ const App: React.FC = () => {
                               <Route path="/reports" element={<ReportsPage />} />
                               <Route path="/clients" element={<ClientsListPage />} />
                               <Route path="/clients/:clientId" element={<ClientDetailPage />} />
+                              <Route path="/leads" element={<LeadsListPage />} />
+                              <Route path="/leads/:leadId" element={<LeadDetailPage />} />
                               <Route path="/projects" element={<ProjectsListPage />} />
                               <Route path="/projects/:projectId" element={<ProjectWorkspaceLayout />}>
                                 <Route index element={<Navigate to="overview" replace />} />

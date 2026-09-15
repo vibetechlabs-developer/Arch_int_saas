@@ -11,6 +11,7 @@ import {
   User,
   UserPlus,
   UserRound,
+  UserRoundSearch,
   Users,
 } from 'lucide-react';
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -43,6 +44,10 @@ export function CommandPaletteImpl({ open, onOpenChange }: CommandPaletteImplPro
           <CommandItem onSelect={() => go('/dashboard')}>
             <LayoutDashboard className="size-4" />
             Dashboard
+          </CommandItem>
+          <CommandItem onSelect={() => go('/leads')}>
+            <UserRoundSearch className="size-4" />
+            Leads
           </CommandItem>
           <CommandItem onSelect={() => go('/clients')}>
             <Users className="size-4" />
@@ -90,6 +95,10 @@ export function CommandPaletteImpl({ open, onOpenChange }: CommandPaletteImplPro
           </CommandItem>
         </CommandGroup>
         <CommandGroup heading="Create">
+          <CommandItem onSelect={() => go('/leads?new=true')}>
+            <UserRoundSearch className="size-4" />
+            New Lead
+          </CommandItem>
           <CommandItem onSelect={() => go('/clients?new=true')}>
             <UserRound className="size-4" />
             New Client

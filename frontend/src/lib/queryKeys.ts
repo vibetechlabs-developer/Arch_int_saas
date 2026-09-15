@@ -9,6 +9,13 @@ export const clientKeys = {
   detail: (id: string) => [...clientKeys.all, 'detail', id] as const,
 };
 
+export const leadKeys = {
+  all: ['leads'] as const,
+  lists: () => [...leadKeys.all, 'list'] as const,
+  list: (params: Record<string, unknown>) => [...leadKeys.lists(), params] as const,
+  detail: (id: string) => [...leadKeys.all, 'detail', id] as const,
+};
+
 export const projectKeys = {
   all: ['projects'] as const,
   lists: () => [...projectKeys.all, 'list'] as const,

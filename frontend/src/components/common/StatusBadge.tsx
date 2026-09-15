@@ -36,6 +36,13 @@ const STATUS_SEMANTICS: Record<string, Semantic> = {
   // Product catalog above, same semantic color applies)
   invited: 'info',
   revoked: 'danger',
+  // Lead (BE-061) — `new` shares the neutral semantic with Project's `draft`.
+  new: 'neutral',
+  qualified: 'info',
+  follow_up: 'warning',
+  site_visit_scheduled: 'warning',
+  won: 'success',
+  lost: 'danger',
 };
 
 export function humanizeStatus(status: string): string {
