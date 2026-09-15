@@ -371,6 +371,28 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 - New tests: `RolesPage.test.tsx` (+3 — System role badge renders for a real system role, absent for an ordinary custom role, absent for a custom role literally named "Owner"), `MembersPage.test.tsx` (+2 — Owner badge renders for `roleSystemKey === 'owner'`, absent for a custom role named "Owner" with no system key). TypeScript: PASS. Build: see final report. Full frontend suite: see final report for the exact total/skipped count (baseline 6 skipped, unchanged).
 - Visual QA: **PENDING** — no browser tooling available in this environment.
 
+## Phase 22 — Leads/CRM Module
+
+| Task | Description | Status |
+|---|---|---|
+| F46 | Leads/CRM screens — list/detail/create/edit, status-transition, mark-lost, and convert-to-client(+project) dialogs (BE-061) | Review |
+
+**Governance note:** this module is Phase 3 per `06_UI/Wireframes.md`'s module order, built ahead of that sequencing on the same explicit product-owner instruction disclosed in `BACKEND_TASKS.md`'s BE-061 writeup — not a decision made unilaterally by this task.
+
+**Implementation notes (F46):**
+- `lib/api/leads.ts` (new) — `Lead`/`LeadStatus`/`LeadInput` types mirroring `LeadSerializer` exactly, `getLeads`/`getLead`/`createLead`/`updateLead`/`deleteLead`/`transitionLeadStatus`/`markLeadLost`/`convertLead`. `LEAD_STATUS_TRANSITION_OPTIONS` deliberately excludes `won` — it is never reachable via `PATCH .../status` (only `/convert`), so it's never offered as a plain-transition option in the UI at all, rather than being offered and always failing with 409.
+- `lib/queryKeys.ts` gained a `leadKeys` factory (all/lists/list/detail), matching `clientKeys`'s exact shape.
+- `pages/leads/LeadsListPage.tsx` — mirrors `ClientsListPage.tsx`'s `DataTable` structure (search/sort/paginate, row click → detail, dropdown Edit/Delete), plus a status filter `Select` (not present on Clients, since Lead has a real status dimension Client doesn't).
+- `pages/leads/LeadDetailPage.tsx` — mirrors `ClientDetailPage.tsx`'s layout; header actions conditionally show Change Status/Convert/Mark Lost only while the lead is not yet in a terminal status (`won`/`lost`), and a "Converted" card links out to the real created Client/Project once `status === won`.
+- `components/leads/LeadFormSheet.tsx` — mirrors `ClientFormSheet.tsx`, reusing `CompanyMemberCombobox` (from `apps/projects`) for `assignedToId` rather than building a second picker. No `status` field — status only moves through the three dedicated actions below.
+- `components/leads/LeadStatusDialog.tsx` — mirrors `apps/projects`' `StatusTransitionDialog.tsx` exactly: the backend graph is the sole authority, this only pre-excludes the always-invalid `won` option.
+- `components/leads/MarkLostDialog.tsx` (new pattern, no Project equivalent) — required `lossReason` + optional `followUpReminderAt`.
+- `components/leads/ConvertLeadDialog.tsx` (new pattern, no Project equivalent) — a `Switch` reveals an optional project-name field only when "also create a project" is on; relies entirely on the backend's own idempotency (no client-side "already converted" guard invented).
+- `components/common/StatusBadge.tsx` gained the 6 Lead status keys (`new`/`qualified`/`follow_up`/`site_visit_scheduled`/`won`/`lost`) in the shared semantic-color map.
+- Routing: `/leads` and `/leads/:leadId` added to `App.tsx`; sidebar (`navConfig.ts`), Quick Create menu, and Command Palette all gained a Leads entry, matching every other shipped module's exact wiring.
+- New tests: `LeadsListPage.test.tsx` (3 — success/empty/error states, mirroring `ClientsListPage.test.tsx`), `LeadFormSheet.test.tsx` (4, mirroring `ClientFormSheet.test.tsx`), `MarkLostDialog.test.tsx` (3), `ConvertLeadDialog.test.tsx` (3), `LeadStatusDialog.test.tsx` (2, both `it.skip` — same documented Radix `<Select>`-in-jsdom environment limitation as `StatusTransitionDialog.test.tsx`, not a defect in this component). TypeScript (`tsc --noEmit`): PASS. Full frontend suite: 341 passed, 8 skipped (baseline 6 skipped + this task's 2 new documented skips), 0 failed. Production build: PASS (`LeadsListPage`/`LeadDetailPage`/`LeadFormSheet` each their own lazy chunk, consistent with F41's code-splitting).
+- Visual QA: **PENDING** — no browser tooling available in this environment; live HTTP verification against the real running backend covers the functional contract (see BE-061's report).
+
 ## Not Yet Started
 
 Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists).

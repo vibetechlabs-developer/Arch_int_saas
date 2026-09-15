@@ -44,12 +44,15 @@
 | 025 | `create_expenses` | `expense` | `company`, `project`, `user` (added_by, employee) | |
 | 026 | `create_tasks` | `task` | `project`, `user` (assigned_to) | |
 | 027 | `create_documents` | `document` | `project`, `user` (uploaded_by) | Generic `entity_type`/`entity_id` pattern also allows attaching to other entities later |
+| 028 | `create_leads` | `lead` | `company`, `clients` (converted_client, nullable), `projects` (converted_project, nullable), `user` (assigned_to, nullable) | **Phase 3 table, built ahead of schedule 2026-09-15 — see Deviations below.** |
 
 ---
 
 ## Deviations From This Plan
 
 - **`project_member` (012a), added 2026-08-27, implemented in BE-026 (2026-08-31).** The original 001–027 sequence gave Project only a single `assigned_to` FK — no multi-user "Team" table. `01_Business/FRS.md` §10 and `02_Architecture/Solution_Architecture.md` §3 both name Team as a distinct aggregated concept, and `04_API/Project_API.md` documents `/team` add/remove-by-user endpoints that a single FK cannot represent. Backend Lead approved adding `project_member` (fields: `company`, `project`, `user` nullable, `assigned_by` nullable — see `BACKEND_TASKS.md` BE-026) as a documented exception to this plan rather than silently building it unrecorded. `assigned_to` is unaffected and remains the primary/point-of-contact field. Implemented as `apps/projects/migrations/0002_projectmember.py` (Django's own per-app auto-numbering — this table did not get a real standalone migration numbered "012a"; that label is this plan's cross-app-ordering placeholder only), with a soft-delete-aware `UniqueConstraint(project, user)` preventing duplicate active memberships.
+
+- **`lead` (028), added and implemented 2026-09-15 (BE-061).** This document's own header and `09_Project/Roadmap.md` both gate Phase 3+ tables behind explicit client confirmation/scheduling. This table was built ahead of that gate on the strength of the product owner's own explicit in-session instruction to continue building the remaining SaaS modules beyond Phases 1–2 — a real-time authorization substituting for the normally-required Roadmap scheduling step, not a silent skip of the gate. Flagged here transparently per this project's standing practice of disclosing any such deviation rather than proceeding as if no gate existed. Fields/status vocabulary are a literal transcription of `01_Business/FRS.md §8`'s documented Lead flow (no field list was documented, unlike Client's explicit field set) — see `apps/leads/models.py`'s own docstring for the exact reasoning. Implemented as `apps/leads/migrations/0001_initial.py` (Django's own per-app auto-numbering; "028" above is this plan's cross-app-ordering placeholder only, matching the `012a` precedent).
 
 ---
 
