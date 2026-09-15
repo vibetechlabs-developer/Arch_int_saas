@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import {
   BarChart3,
+  CalendarCheck,
   FolderKanban,
   FolderTree,
   KeyRound,
@@ -48,6 +49,10 @@ export function CommandPaletteImpl({ open, onOpenChange }: CommandPaletteImplPro
           <CommandItem onSelect={() => go('/leads')}>
             <UserRoundSearch className="size-4" />
             Leads
+          </CommandItem>
+          <CommandItem onSelect={() => go('/site-visits')}>
+            <CalendarCheck className="size-4" />
+            Site Visits
           </CommandItem>
           <CommandItem onSelect={() => go('/clients')}>
             <Users className="size-4" />
@@ -98,6 +103,10 @@ export function CommandPaletteImpl({ open, onOpenChange }: CommandPaletteImplPro
           <CommandItem onSelect={() => go('/leads?new=true')}>
             <UserRoundSearch className="size-4" />
             New Lead
+          </CommandItem>
+          <CommandItem onSelect={() => go('/site-visits?new=true')}>
+            <CalendarCheck className="size-4" />
+            Schedule Site Visit
           </CommandItem>
           <CommandItem onSelect={() => go('/clients?new=true')}>
             <UserRound className="size-4" />

@@ -25,6 +25,8 @@ const ClientsListPage = lazy(() => import('@/pages/clients/ClientsListPage'));
 const ClientDetailPage = lazy(() => import('@/pages/clients/ClientDetailPage'));
 const LeadsListPage = lazy(() => import('@/pages/leads/LeadsListPage'));
 const LeadDetailPage = lazy(() => import('@/pages/leads/LeadDetailPage'));
+const SiteVisitsListPage = lazy(() => import('@/pages/siteVisits/SiteVisitsListPage'));
+const SiteVisitDetailPage = lazy(() => import('@/pages/siteVisits/SiteVisitDetailPage'));
 const ProjectsListPage = lazy(() => import('@/pages/projects/ProjectsListPage'));
 const ProjectWorkspaceLayout = lazy(() => import('@/pages/projects/ProjectWorkspaceLayout'));
 const ProjectOverviewTab = lazy(() => import('@/pages/projects/ProjectOverviewTab'));
@@ -74,6 +76,8 @@ const App: React.FC = () => {
                               <Route path="/clients/:clientId" element={<ClientDetailPage />} />
                               <Route path="/leads" element={<LeadsListPage />} />
                               <Route path="/leads/:leadId" element={<LeadDetailPage />} />
+                              <Route path="/site-visits" element={<SiteVisitsListPage />} />
+                              <Route path="/site-visits/:siteVisitId" element={<SiteVisitDetailPage />} />
                               <Route path="/projects" element={<ProjectsListPage />} />
                               <Route path="/projects/:projectId" element={<ProjectWorkspaceLayout />}>
                                 <Route index element={<Navigate to="overview" replace />} />

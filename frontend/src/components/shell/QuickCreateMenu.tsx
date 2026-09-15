@@ -1,4 +1,4 @@
-import { FolderKanban, Package, Plus, UserRound, UserRoundSearch } from 'lucide-react';
+import { CalendarCheck, FolderKanban, Package, Plus, UserRound, UserRoundSearch } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,6 +26,10 @@ export function QuickCreateMenu() {
         <DropdownMenuItem onSelect={() => navigate('/leads?new=true')}>
           <UserRoundSearch className="size-4" />
           New Lead
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => navigate('/site-visits?new=true')}>
+          <CalendarCheck className="size-4" />
+          Schedule Site Visit
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => navigate('/clients?new=true')}>
           <UserRound className="size-4" />

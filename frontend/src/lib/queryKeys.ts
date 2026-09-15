@@ -16,6 +16,13 @@ export const leadKeys = {
   detail: (id: string) => [...leadKeys.all, 'detail', id] as const,
 };
 
+export const siteVisitKeys = {
+  all: ['siteVisits'] as const,
+  lists: () => [...siteVisitKeys.all, 'list'] as const,
+  list: (params: Record<string, unknown>) => [...siteVisitKeys.lists(), params] as const,
+  detail: (id: string) => [...siteVisitKeys.all, 'detail', id] as const,
+};
+
 export const projectKeys = {
   all: ['projects'] as const,
   lists: () => [...projectKeys.all, 'list'] as const,

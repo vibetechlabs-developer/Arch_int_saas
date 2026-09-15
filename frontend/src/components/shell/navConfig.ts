@@ -1,4 +1,4 @@
-import { BarChart3, FolderKanban, LayoutDashboard, Package, Settings, UserRoundSearch, Users, type LucideIcon } from 'lucide-react';
+import { BarChart3, CalendarCheck, FolderKanban, LayoutDashboard, Package, Settings, UserRoundSearch, Users, type LucideIcon } from 'lucide-react';
 
 export interface NavItem {
   label: string;
@@ -42,6 +42,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Workspace',
     items: [
       { label: 'Leads', path: '/leads', icon: UserRoundSearch },
+      { label: 'Site Visits', path: '/site-visits', icon: CalendarCheck },
       { label: 'Clients', path: '/clients', icon: Users },
       { label: 'Projects', path: '/projects', icon: FolderKanban },
     ],
