@@ -193,6 +193,26 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
     # BE-049/BE-051: only the resulting permission-code set is recorded,
     # never full Permission objects (a code is not sensitive).
     "role_permission": {"permission_codes"},
+    # BE-061: `notes` excluded for the same privacy/payload-size reasoning
+    # as Client's own exclusion (BE-023) -- free-form internal text, not a
+    # simple identifier. assigned_to_id/converted_client_id/
+    # converted_project_id (UUIDs) and follow_up_reminder_at (a datetime)
+    # are stringified by apps.leads.services._serialize_audit_value before
+    # reaching here -- same JSONField-has-no-custom-encoder reasoning as
+    # every prior sprint's audit helper.
+    "lead": {
+        "name",
+        "company_name",
+        "email",
+        "mobile",
+        "source",
+        "status",
+        "assigned_to_id",
+        "loss_reason",
+        "follow_up_reminder_at",
+        "converted_client_id",
+        "converted_project_id",
+    },
 }
 
 
