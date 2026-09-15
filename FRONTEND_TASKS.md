@@ -393,6 +393,26 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 - New tests: `LeadsListPage.test.tsx` (3 — success/empty/error states, mirroring `ClientsListPage.test.tsx`), `LeadFormSheet.test.tsx` (4, mirroring `ClientFormSheet.test.tsx`), `MarkLostDialog.test.tsx` (3), `ConvertLeadDialog.test.tsx` (3), `LeadStatusDialog.test.tsx` (2, both `it.skip` — same documented Radix `<Select>`-in-jsdom environment limitation as `StatusTransitionDialog.test.tsx`, not a defect in this component). TypeScript (`tsc --noEmit`): PASS. Full frontend suite: 341 passed, 8 skipped (baseline 6 skipped + this task's 2 new documented skips), 0 failed. Production build: PASS (`LeadsListPage`/`LeadDetailPage`/`LeadFormSheet` each their own lazy chunk, consistent with F41's code-splitting).
 - Visual QA: **PENDING** — no browser tooling available in this environment; live HTTP verification against the real running backend covers the functional contract (see BE-061's report).
 
+## Phase 23 — Site Visit Module
+
+| Task | Description | Status |
+|---|---|---|
+| F47 | Site Visit screens — list/detail/create/edit and a submit-report dialog (optional project creation) (BE-062) | Review |
+
+**Governance note:** same as F46/BE-062 — this is a Phase 3 module pulled forward on the same explicit product-owner instruction, disclosed in `BACKEND_TASKS.md`'s BE-062 writeup.
+
+**Implementation notes (F47):**
+- `lib/api/siteVisits.ts` (new) — `SiteVisit`/`SiteVisitInput` types mirroring `SiteVisitSerializer` exactly, `getSiteVisits`/`getSiteVisit`/`createSiteVisit`/`updateSiteVisit`/`deleteSiteVisit`/`submitSiteVisitReport`. No `search` param — `SiteVisitListQuerySerializer` doesn't document one (no obvious single free-text field, unlike Lead/Client), so the list page uses `hideSearch` (the same prop `ProjectsListPage.tsx` already uses for the identical reason).
+- `lib/queryKeys.ts` gained a `siteVisitKeys` factory.
+- Two new remote-searched pickers: `components/projects/ProjectCombobox.tsx` (`shouldFilter` — Project has no `search` query param either, mirroring `CategoryCombobox.tsx`'s exact local-filter pattern) and `components/leads/LeadCombobox.tsx` (server-searched, mirroring `ClientCombobox.tsx` — Lead's own endpoint does support `search`).
+- `pages/siteVisits/SiteVisitsListPage.tsx` — mirrors `LeadsListPage.tsx`'s structure minus the search box (see above); a "Linked to" column shows the project/lead + resolved client, and a Scheduled/Completed badge reflects `isCompleted` (derived from `reportSubmittedAt`, not an invented status enum — see BE-062's own model docstring).
+- `pages/siteVisits/SiteVisitDetailPage.tsx` — mirrors `LeadDetailPage.tsx`'s layout; "Submit Report" only shows while `!isCompleted`.
+- `components/siteVisits/SiteVisitFormSheet.tsx` — mirrors `LeadFormSheet.tsx`; the Lead/Project pickers only appear in create mode (matching `ProjectFormSheet.tsx`'s identical treatment of its own create-only Client field) — edit mode shows the link as static text, since no "reassign" flow is documented.
+- `components/siteVisits/SubmitReportDialog.tsx` — mirrors `ConvertLeadDialog.tsx`'s structure; the "also create a project" `Switch` is disabled with an explanatory caption whenever no client is resolved yet (a lead-only visit before that lead has been converted), rather than letting the user hit the backend's 409.
+- Routing: `/site-visits` and `/site-visits/:siteVisitId` added to `App.tsx`; sidebar, Quick Create, and Command Palette all gained a Site Visits entry.
+- New tests: `SiteVisitsListPage.test.tsx` (3), `SiteVisitFormSheet.test.tsx` (5), `SubmitReportDialog.test.tsx` (4) — all real assertions, no new `it.skip`s (neither dialog here opens a Radix `<Select>`, unlike `LeadStatusDialog`/`StatusTransitionDialog`). TypeScript (`tsc --noEmit`): PASS. Full frontend suite: 353 passed, 8 skipped (unchanged baseline — this task added zero new skips). Production build: PASS.
+- Visual QA: **PENDING** — no browser tooling available in this environment; live HTTP verification against the real running backend covers the functional contract (see BE-062's report).
+
 ## Not Yet Started
 
 Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists).

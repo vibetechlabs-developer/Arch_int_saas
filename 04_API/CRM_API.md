@@ -1,7 +1,7 @@
 # CRM API (Draft)
 ## INT Projects — Multi-Company Interior & Architecture Management SaaS
 
-**Status:** Draft endpoint sketch. `Site Visit` endpoints remain Phase 3 (not MVP, not built) — included here for completeness since they belong to the CRM module conceptually. **`Lead` endpoints were implemented 2026-09-15 (BE-061)**, ahead of their originally-planned Phase 3 scheduling — see the "Lead Endpoints" section below for the real, as-built shape (which diverges from this doc's original path sketch the same way Client's real implementation does — see the note there).
+**Status:** Draft endpoint sketch, MVP scope fully implemented. **`Lead` and `Site Visit` endpoints were both implemented 2026-09-15 (BE-061/BE-062)**, ahead of their originally-planned Phase 3 scheduling — see their sections below for the real, as-built shape (which diverges from this doc's original path sketch the same way Client's real implementation does — see the note there).
 
 ---
 
@@ -38,14 +38,18 @@ Client management (MVP) + Lead/Site Visit (Phase 3). All endpoints are company-s
 
 Status vocabulary (`apps/leads/models.py::LeadStatus`): `new → qualified → follow_up → site_visit_scheduled`, plus side-states `lost` (reachable from any non-terminal status) and `won` (reachable *only* via `/convert`, never via the plain `/status` endpoint — converting has real side effects that a bare status flip must never be able to skip).
 
-## Site Visit Endpoints (Phase 3)
+## Site Visit Endpoints (Phase 3 — implemented 2026-09-15, BE-062)
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/companies/{companyId}/site-visits` | List site visits |
-| POST | `/companies/{companyId}/site-visits` | Schedule a site visit (against lead or client/project) |
-| PATCH | `/companies/{companyId}/site-visits/{visitId}` | Update visit (assign, capture measurements/requirements/photos/notes) |
-| POST | `/companies/{companyId}/site-visits/{visitId}/report` | Submit site visit report (may trigger project creation) |
+| Method | Path | Purpose | Permission |
+|---|---|---|---|
+| GET | `/site-visits` | List site visits (filter: `lead`, `project`, `assignedTo`; `ordering`) | `site_visit.view` |
+| POST | `/site-visits` | Schedule a site visit against a lead and/or a project (at least one required) | `site_visit.create` |
+| GET | `/site-visits/{siteVisitId}` | Retrieve site visit | `site_visit.view` |
+| PATCH | `/site-visits/{siteVisitId}` | Update visit (assign, capture measurements/requirements/photos/videos/notes/budget/site conditions/follow-up actions) | `site_visit.edit` |
+| DELETE | `/site-visits/{siteVisitId}` | Soft-delete site visit | `site_visit.delete` |
+| POST | `/site-visits/{siteVisitId}/report` | Submit site visit report — marks it complete, optionally creating a project (`createProject`/`projectName`) from its resolved client. Idempotent | `site_visit.report` |
+
+Fields (`01_Business/FRS.md §9`): `lead`/`project` (a visit is scheduled against either or both), `client` (auto-resolved from `project.client`/`lead.convertedClient`, never independently settable), `visitDate`, `assignedTo`, `address`, `measurements`, `requirements`, `photoUrls`/`videoUrls` (plain URL lists — real storage-backed upload is deferred, see `apps/site_visits/models.py`'s docstring), `notes`, `budget`, `siteConditions`, `followUpActions`. No status enum: `reportSubmittedAt`/`isCompleted` alone carry the scheduled-vs-completed distinction (FRS/CRM_API.md document no status vocabulary for this entity, unlike Lead).
 
 ## Notes
 
