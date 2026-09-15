@@ -63,6 +63,7 @@ urlpatterns = [
     path("", include("apps.clients.urls")),
     path("", include("apps.leads.urls")),
     path("", include("apps.projects.urls")),
+    path("", include("apps.site_visits.urls")),
     path("", include("apps.products.urls")),
     path("", include("apps.boq.urls")),
     path("", include("apps.quotations.urls")),

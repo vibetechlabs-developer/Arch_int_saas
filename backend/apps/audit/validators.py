@@ -213,6 +213,26 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
         "converted_client_id",
         "converted_project_id",
     },
+    # BE-062: `address`/`budget` recorded as simple identifiers/figures;
+    # measurements/requirements/notes/site_conditions/follow_up_actions/
+    # photo_urls/video_urls excluded for the same privacy/payload-size
+    # reasoning as Lead's own exclusion of `notes` (BE-061) and Client's
+    # exclusion of `addresses`/`notes` (BE-023) -- free-form/structured
+    # content, not simple identifiers. lead_id/project_id/client_id
+    # (UUIDs) and report_submitted_at (a datetime) are stringified by
+    # apps.site_visits.services._serialize_audit_value before reaching
+    # here -- same JSONField-has-no-custom-encoder reasoning as every
+    # prior sprint's audit helper.
+    "site_visit": {
+        "lead_id",
+        "project_id",
+        "client_id",
+        "visit_date",
+        "assigned_to_id",
+        "address",
+        "budget",
+        "report_submitted_at",
+    },
 }
 
 

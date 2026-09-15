@@ -105,6 +105,7 @@ INSTALLED_APPS = [
     "apps.clients",
     "apps.leads",
     "apps.projects",
+    "apps.site_visits",
     "apps.products",
     "apps.boq",
     "apps.quotations",
