@@ -91,6 +91,25 @@ class CompanyMembershipServiceTestCase(TestCase):
                 company_id=self.company1.id, email=self.user.email, role_id=self.role1.id
             )
 
+    def test_invite_member_with_active_membership_elsewhere_rejected(self):
+        """One-login-per-company policy (client decision, 2026-09-22)."""
+        CompanyMembership.objects.create(
+            company=self.company2, user=self.user, role=self.role2, status=CompanyMembershipStatus.ACTIVE
+        )
+        with self.assertRaises(ConflictError):
+            CompanyMembershipService.invite_member(
+                company_id=self.company1.id, email=self.user.email, role_id=self.role1.id
+            )
+
+    def test_invite_member_with_only_a_revoked_membership_elsewhere_allowed(self):
+        CompanyMembership.objects.create(
+            company=self.company2, user=self.user, role=self.role2, status=CompanyMembershipStatus.REVOKED
+        )
+        membership = CompanyMembershipService.invite_member(
+            company_id=self.company1.id, email=self.user.email, role_id=self.role1.id
+        )
+        self.assertEqual(membership.company_id, self.company1.id)
+
     def test_invite_member_writes_audit_log(self):
         membership = CompanyMembershipService.invite_member(
             company_id=self.company1.id, email=self.user.email, role_id=self.role1.id

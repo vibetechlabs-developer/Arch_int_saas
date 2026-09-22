@@ -192,6 +192,19 @@ class CompanyMembershipRepository:
         ).exists()
 
     @staticmethod
+    def has_active_membership_in_other_company(user_id: str | uuid.UUID, exclude_company_id: str | uuid.UUID) -> bool:
+        """
+        One-login-per-company policy (client decision, 2026-09-22): a User
+        may hold an active membership in at most one Company at a time.
+        Used by invite_member/add_user to reject linking an existing
+        email into a second company, rather than allowing the
+        cross-company "Switch workspace" scenario that pattern enables.
+        """
+        return CompanyMembership.objects.filter(
+            user_id=user_id, status=CompanyMembershipStatus.ACTIVE
+        ).exclude(company_id=exclude_company_id).exists()
+
+    @staticmethod
     def lock_active_role_membership_ids(
         company_id: str | uuid.UUID, role_id: str | uuid.UUID
     ) -> list:

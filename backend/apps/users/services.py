@@ -578,6 +578,11 @@ class CompanyMembershipService:
         RoleService.assign_permissions — a non-platform-admin actor
         (`actor_membership` given) can't invite someone directly into a
         role that grants permission codes the actor doesn't hold.
+
+        One-login-per-company policy (client decision, 2026-09-22): rejects
+        with 409 if this email already has an ACTIVE membership in a
+        different company — see add_user()'s docstring for the full
+        reasoning; both onboarding paths enforce the same rule.
         """
         with transaction.atomic():
             company = RoleRepository.get_company_by_id(company_id)
@@ -586,6 +591,12 @@ class CompanyMembershipService:
 
             if CompanyMembershipRepository.active_membership_exists(company.id, user.id):
                 raise ConflictError("This user already has a membership in this company.")
+
+            if CompanyMembershipRepository.has_active_membership_in_other_company(user.id, company.id):
+                raise ConflictError(
+                    "This email already belongs to another company's workspace. "
+                    "Each company requires its own separate account."
+                )
 
             if not role_id:
                 raise drf_exceptions.ValidationError(
@@ -672,6 +683,13 @@ class CompanyMembershipService:
           updated, status -> active) rather than blocked, since forcing
           the caller to discover and use a separate "reactivate" action
           first would be a confusing dead end for what Add User is for.
+        - An existing User with an ACTIVE membership in a DIFFERENT
+          company -> 409 (client decision, 2026-09-22: one login belongs
+          to at most one company; each company workspace requires its own
+          separate account rather than the "Switch workspace" pattern a
+          shared email would otherwise enable). A revoked membership
+          elsewhere doesn't count -- that person no longer actually
+          belongs to that other company.
 
         The new/reactivated membership is created ACTIVE, not INVITED:
         CompanyMembershipStatus has no automatic invited->active
@@ -733,6 +751,14 @@ class CompanyMembershipService:
             existing_membership = CompanyMembershipRepository.get_membership_including_revoked(company.id, user.id)
             if existing_membership is not None and existing_membership.status != CompanyMembershipStatus.REVOKED:
                 raise ConflictError("This user already has a membership in this company.")
+
+            if existing_user is not None and CompanyMembershipRepository.has_active_membership_in_other_company(
+                existing_user.id, company.id
+            ):
+                raise ConflictError(
+                    "This email already belongs to another company's workspace. "
+                    "Each company requires its own separate account."
+                )
 
             try:
                 with transaction.atomic():

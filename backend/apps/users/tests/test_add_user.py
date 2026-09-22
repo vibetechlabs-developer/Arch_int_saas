@@ -139,20 +139,40 @@ class AddUserServiceTestCase(TestCase):
                 company_id=self.company1.id, email="x@example.com", name="   ", role_id=self.role1.id
             )
 
-    def test_multi_company_membership_for_same_user(self):
+    def test_second_company_for_an_already_active_email_is_rejected(self):
+        """
+        One-login-per-company policy (client decision, 2026-09-22): this
+        used to succeed and give one email two active memberships -- the
+        exact "Switch workspace" scenario the client asked to remove.
+        """
         CompanyMembershipService.add_user(
             company_id=self.company1.id, email="multi@example.com", name="Multi", role_id=self.role1.id
         )
         user = User.objects.get(email="multi@example.com")
 
+        with self.assertRaises(ConflictError):
+            CompanyMembershipService.add_user(
+                company_id=self.company2.id, email="multi@example.com", name="Multi", role_id=self.role2.id
+            )
+
+        self.assertEqual(CompanyMembership.objects.filter(user=user).count(), 1)
+
+    def test_second_company_is_allowed_once_the_first_membership_is_revoked(self):
+        CompanyMembershipService.add_user(
+            company_id=self.company1.id, email="mover@example.com", name="Mover", role_id=self.role1.id
+        )
+        user = User.objects.get(email="mover@example.com")
+        CompanyMembership.objects.filter(user=user, company=self.company1).update(
+            status=CompanyMembershipStatus.REVOKED
+        )
+
         membership2, user_created2, _ = CompanyMembershipService.add_user(
-            company_id=self.company2.id, email="multi@example.com", name="Multi", role_id=self.role2.id
+            company_id=self.company2.id, email="mover@example.com", name="Mover", role_id=self.role2.id
         )
 
         self.assertFalse(user_created2)
-        self.assertEqual(User.objects.filter(email__iexact="multi@example.com").count(), 1)
-        self.assertEqual(CompanyMembership.objects.filter(user=user).count(), 2)
         self.assertEqual(membership2.company_id, self.company2.id)
+        self.assertEqual(membership2.status, CompanyMembershipStatus.ACTIVE)
 
     def test_privilege_escalation_blocked_for_non_admin_actor(self):
         full_role = make_full_access_role(self.company1)
