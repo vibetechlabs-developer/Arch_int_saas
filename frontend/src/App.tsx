@@ -6,7 +6,9 @@ import { ThemeProvider } from '@/theme/ThemeProvider';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { ProtectedPlatformRoute } from '@/components/ProtectedPlatformRoute';
 import { Shell } from '@/components/shell/Shell';
+import { PlatformShell } from '@/components/platform/PlatformShell';
 import { PageLoadingFallback } from '@/components/common/PageLoadingFallback';
 import { queryClient } from '@/lib/queryClient';
 
@@ -50,6 +52,9 @@ const RolesPage = lazy(() => import('@/pages/settings/RolesPage'));
 const PermissionsPage = lazy(() => import('@/pages/settings/PermissionsPage'));
 const ProfilePage = lazy(() => import('@/pages/settings/ProfilePage'));
 const SecurityPage = lazy(() => import('@/pages/settings/SecurityPage'));
+const PlatformLoginPage = lazy(() => import('@/pages/platform/PlatformLoginPage'));
+const PlatformCompaniesListPage = lazy(() => import('@/pages/platform/PlatformCompaniesListPage'));
+const PlatformCompanyDetailPage = lazy(() => import('@/pages/platform/PlatformCompanyDetailPage'));
 
 const App: React.FC = () => {
   return (
@@ -62,6 +67,24 @@ const App: React.FC = () => {
                 <Routes>
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/reset-password" element={<SetPasswordPage />} />
+                  <Route path="/platform/login" element={<PlatformLoginPage />} />
+                  <Route
+                    path="/platform/*"
+                    element={
+                      <ProtectedPlatformRoute>
+                        <PlatformShell>
+                          <Suspense fallback={<PageLoadingFallback />}>
+                            <Routes>
+                              <Route path="/platform" element={<Navigate to="/platform/companies" replace />} />
+                              <Route path="/platform/companies" element={<PlatformCompaniesListPage />} />
+                              <Route path="/platform/companies/:companyId" element={<PlatformCompanyDetailPage />} />
+                              <Route path="*" element={<Navigate to="/platform/companies" replace />} />
+                            </Routes>
+                          </Suspense>
+                        </PlatformShell>
+                      </ProtectedPlatformRoute>
+                    }
+                  />
                   <Route
                     path="/*"
                     element={

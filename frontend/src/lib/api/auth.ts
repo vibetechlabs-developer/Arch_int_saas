@@ -23,7 +23,18 @@ interface LoginResponseData {
 
 export async function login(email: string, password: string): Promise<User> {
   const data = await unwrap<LoginResponseData>(apiClient.post('/auth/login', { email, password }));
-  tokenStore.setTokens(data.accessToken, data.refreshToken);
+  tokenStore.setTokens(data.accessToken, data.refreshToken, 'company');
+  return data.user;
+}
+
+// POST /platform-auth/login — a genuinely separate endpoint from company
+// login (apps.authentication.services.AuthenticationService
+// .login_platform_admin), reachable only for a User with both
+// is_superuser and is_staff set server-side. There is no combined
+// endpoint and no way to reach this from the regular login form.
+export async function loginPlatformAdmin(email: string, password: string): Promise<User> {
+  const data = await unwrap<LoginResponseData>(apiClient.post('/platform-auth/login', { email, password }));
+  tokenStore.setTokens(data.accessToken, data.refreshToken, 'platform');
   return data.user;
 }
 

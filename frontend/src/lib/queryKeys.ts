@@ -2,6 +2,16 @@
 // so every module invalidates precisely — a mutation never has to guess string
 // literals another file used. Extend with one factory per module as it ships.
 
+// Platform-admin-scoped company management (distinct from `companyKeys`
+// below, which is the tenant-facing "my own company" single-record key —
+// this one is the platform console's cross-tenant list/detail).
+export const platformCompanyKeys = {
+  all: ['platformCompanies'] as const,
+  lists: () => [...platformCompanyKeys.all, 'list'] as const,
+  list: (params: Record<string, unknown>) => [...platformCompanyKeys.lists(), params] as const,
+  detail: (id: string) => [...platformCompanyKeys.all, 'detail', id] as const,
+};
+
 export const clientKeys = {
   all: ['clients'] as const,
   lists: () => [...clientKeys.all, 'list'] as const,

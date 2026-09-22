@@ -9,9 +9,10 @@ jest.mock('@/lib/api/auth', () => ({
 const mockedFetchCurrentUser = fetchCurrentUser as jest.Mock;
 
 function Probe() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isPlatformAdmin } = useAuth();
   if (isLoading) return <div>loading</div>;
-  return <div>{user ? `hello ${user.name}` : 'anonymous'}</div>;
+  if (!user) return <div>anonymous</div>;
+  return <div>hello {user.name} ({isPlatformAdmin ? 'platform' : 'company'})</div>;
 }
 
 describe('AuthContext session bootstrap', () => {
@@ -48,7 +49,29 @@ describe('AuthContext session bootstrap', () => {
         <Probe />
       </AuthProvider>,
     );
-    await waitFor(() => expect(screen.getByText('hello Alice')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('hello Alice (company)')).toBeInTheDocument());
+  });
+
+  it('restores a platform-admin session as isPlatformAdmin when authMode was stored as "platform"', async () => {
+    localStorage.setItem('accessToken', 'token-456');
+    localStorage.setItem('authMode', 'platform');
+    mockedFetchCurrentUser.mockResolvedValue({
+      id: '2',
+      name: 'Root Admin',
+      email: 'root@example.com',
+      status: 'active',
+      isActive: true,
+      isStaff: true,
+      createdAt: '',
+      updatedAt: '',
+    });
+
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('hello Root Admin (platform)')).toBeInTheDocument());
   });
 
   it('clears stale tokens and falls back to anonymous when the stored token no longer resolves', async () => {

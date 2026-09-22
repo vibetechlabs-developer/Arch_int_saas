@@ -43,6 +43,10 @@ const STATUS_SEMANTICS: Record<string, Semantic> = {
   site_visit_scheduled: 'warning',
   won: 'success',
   lost: 'danger',
+  // Company (platform console) — `active` is shared with Product/Membership
+  // above, same semantic color applies.
+  trial: 'info',
+  suspended: 'danger',
 };
 
 export function humanizeStatus(status: string): string {
