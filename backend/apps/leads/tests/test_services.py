@@ -327,3 +327,23 @@ class LeadServiceTestCase(TestCase):
         LeadService.transition_status(self.lead1.id, LeadStatus.QUALIFIED)
         converted = LeadService.convert_lead(self.lead1.id)
         self.assertEqual(converted.status, LeadStatus.WON)
+
+    def test_convert_lead_backfills_client_onto_its_linked_site_visits(self):
+        from datetime import datetime, timezone as dt_timezone
+
+        from apps.site_visits.services import SiteVisitService
+
+        visit = SiteVisitService.create_site_visit(
+            company_id=self.company1.id,
+            visit_date=datetime(2026, 9, 1, tzinfo=dt_timezone.utc),
+            lead_id=self.lead1.id,
+        )
+        self.assertIsNone(visit.client_id)
+
+        SiteVisitService.submit_report(visit.id, company_id=self.company1.id)
+        visit.refresh_from_db()
+        self.assertIsNone(visit.client_id)  # not yet convertible: lead wasn't won when the report was submitted
+
+        converted = LeadService.convert_lead(self.lead1.id)
+        visit.refresh_from_db()
+        self.assertEqual(visit.client_id, converted.converted_client_id)

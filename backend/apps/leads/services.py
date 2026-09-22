@@ -415,6 +415,19 @@ class LeadService:
 
             lead = LeadRepository.save(lead, fields)
 
+            # Backfill: a site visit scheduled against this lead before it was
+            # converted has `client=None` (apps.site_visits.services resolves
+            # `client` from `lead.converted_client` only at its own creation
+            # time / report-submit time). Without this, a visit whose report
+            # was already submitted before the lead got converted is stuck
+            # showing no client forever, since submit_report short-circuits
+            # on an already-completed visit and never runs its own
+            # re-resolution again. Sync it here instead, at the moment the
+            # lead's client relationship actually becomes true.
+            from apps.site_visits.repositories import SiteVisitRepository
+
+            SiteVisitRepository.all().filter(lead_id=lead.id, client__isnull=True).update(client=client)
+
             AuditLogService.record(
                 action=AuditAction.UPDATE,
                 entity_type="lead",
