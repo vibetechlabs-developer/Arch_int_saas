@@ -142,6 +142,25 @@ class CompanyCreateResponseSerializer(CompanySerializer):
         fields = CompanySerializer.Meta.fields + ["owner"]
 
 
+class SetOwnerPasswordSerializer(serializers.Serializer):
+    """Input for `POST /companies/{id}/owner/set-password` -- platform-admin-only."""
+
+    newPassword = serializers.CharField(
+        source="new_password",
+        required=True,
+        write_only=True,
+        style={"input_type": "password"},
+        help_text="The new password meeting complexity requirements.",
+    )
+
+
+class SetOwnerPasswordResponseSerializer(serializers.Serializer):
+    """Confirms who the password was set for, without ever echoing the password itself."""
+
+    email = serializers.EmailField()
+    name = serializers.CharField()
+
+
 class CompanyLogoUploadSerializer(serializers.Serializer):
     """
     Output shape for `POST /company/{id}/logo/upload` (BE-078). Mirrors

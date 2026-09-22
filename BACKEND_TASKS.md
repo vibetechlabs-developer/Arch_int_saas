@@ -1351,6 +1351,7 @@ Depends On
 | BE-061 | Leads/CRM module (Phase 3, pulled forward — see writeup's Governance note) — Lead model/status-transition graph, CRUD + status/mark-lost/convert endpoints, idempotent lead-to-client(+project) conversion, 5 new `lead.*` permission codes — reconciles this ID from the P2–P4 backlog table into the main tracked table rather than opening a duplicate (same discipline as BE-069). See writeup below. | **Review** |
 | BE-062 | Site Visit module (Phase 3, pulled forward — same Governance note as BE-061) — SiteVisit model schedulable against a Lead and/or Project, CRUD + idempotent report-submission (optional project creation) endpoints, 5 new `site_visit.*` permission codes — reconciles this ID from the P2–P4 backlog table into the main tracked table. See writeup below. | **Review** |
 | BE-079 | `POST /companies` accepts optional `ownerEmail`/`ownerName` to grant a brand-new tenant's Owner role in the same call (reuses BE-071's Add User flow), closing the gap flagged in F48's Platform Console writeup — see writeup below. | **Review** |
+| BE-080 | `POST /companies/{id}/owner/set-password` — Platform Admin can directly set a company's Owner's password, bypassing the email-token activation flow — see writeup below. | **Review** |
 
 #### BE-069 — Stable System Role Identity & Last-Owner Protection — 2026-09-11
 
@@ -1512,6 +1513,34 @@ Provides: `generate_storage_key`/`save_upload`/`delete_file` (tenant-namespaced 
 **Validation:** `manage.py check` clean. `makemigrations --check --dry-run`: no changes detected (no model change — this only wires two already-existing tables together). `manage.py spectacular` confirmed clean after the fix; live `/schema/` re-verified 200. Live end-to-end verification against the real running server: created a company with `ownerEmail`/`ownerName`, confirmed the response's `owner.userCreated`/`activationRequired` flags, deleted the company and the created User afterward, confirmed both gone.
 
 **Files changed (backend):** `apps/company/serializers.py` (`ownerEmail`/`ownerName` on `CompanyCreateSerializer`, new `CompanyOwnerResultSerializer`/`CompanyCreateResponseSerializer`), `apps/company/services.py` (`create_company`'s new params + tuple return), `apps/company/views.py` (response `owner` key + schema annotation), `apps/company/tests/{test_services,test_views}.py` (new tests + 5 return-unpack fixes), `apps/users/tests/{test_last_owner_api,test_last_owner_concurrency,test_last_owner_protection,test_rbac_role_matrix,test_role_system_key}.py` (return-unpack fixes only, no behavior change).
+
+#### BE-080 — Platform Admin Can Directly Set a Company Owner's Password — 2026-09-22
+
+**Status:** Review (awaiting Backend Lead approval — not self-approved)
+
+**Priority:** P2 — found live while the client was testing BE-079/F48's owner-creation flow end-to-end.
+
+**Owner:** Backend Team
+
+**Problem, found live by the client:** a brand-new company's Owner (from BE-079's `ownerEmail`/`ownerName`, or from Add User/BE-071) gets an account-setup email carrying a token-based activation link — but this environment's email backend (`django.core.mail.backends.console.EmailBackend`) only prints that email to the *server's own terminal*, which a platform admin working purely from the browser has no way to read. Editing the Platform Console's Company sheet, the client correctly pointed out there was no password option anywhere for a company's Owner — with no way to read the console log, a freshly-created Owner had no way to ever actually finish onboarding.
+
+**Design:** rather than trying to surface the raw token/link in the UI (which would need its own new plumbing and still requires the admin to somehow relay it to the real Owner), the platform admin can now directly set the Owner's password themselves — the more practical fit for how this console is actually used, and a natural platform-admin capability (mirrors things like Django admin's own "Set password" affordance for a `User`).
+
+**New endpoint:** `POST /companies/{id}/owner/set-password` (`CompanyViewSet.set_owner_password`, wired manually like every other custom action in this codebase — no `@action` decorator, `.as_view({"post": "set_owner_password"})` in `apps/company/urls.py`, matching `logo/upload`'s own convention). Request: `{newPassword}`. Response: `{email, name}` of the Owner the password was set for — the password itself is of course never echoed back.
+
+**Permission boundary — platform-admin-exclusive, reusing existing infrastructure, no new permission code:** `CompanyViewSet`'s existing `IsPlatformAdminOrCompanyAccess.has_permission` already denies any `view.action` outside `["retrieve", "partial_update", "update"]` to a non-platform-admin caller outright — since `set_owner_password` isn't in that list, it's automatically platform-admin-only the same way `create`/`list`/`destroy` already are, with zero new permission-class code. Verified live and in tests with a **genuine** non-superuser company member holding a full-permissions role (`make_full_access_membership`) — correctly 403s. (A first live test accidentally used an account that also happens to be a real Django superuser and got 200 — not a bug in this feature: `apps.common.permissions.is_platform_admin()` has always treated `user.is_superuser` as a platform-admin bypass regardless of which token type authenticated the request, consistent with how every other platform-admin-gated endpoint in this codebase already behaves; re-tested against a real non-superuser Owner account and confirmed 403 as expected.)
+
+**Owner resolution:** the first ACTIVE `CompanyMembership` holding the company's Owner-system-key role (`Role.objects.get(company=company, system_key=OWNER_SYSTEM_KEY)`, the same resolution BE-079's `create_company` already uses). A company with no Owner role, or no active Owner membership (e.g. an empty tenant created without `ownerEmail`/`ownerName`), returns 404 rather than guessing or picking an arbitrary member.
+
+**Password handling:** reuses `AuthenticationService.reset_password`'s exact validation/persistence primitives (`apps.authentication.validators.validate_new_password_strength` — Django's configured `AUTH_PASSWORD_VALIDATORS`, so weak/common/numeric-only passwords are rejected with the same specific messages the normal reset flow gives) and `UserRepository.set_password`/`TokenBlacklistRepository.blacklist_all_outstanding_for_user` (any outstanding refresh tokens for that Owner are invalidated, exactly like a normal password reset would). No new password-strength logic was invented.
+
+**Audit logging:** `entity_type="user"`, `AuditAction.UPDATE`, `after_state={"password_set_by_platform_admin": True}` — a boolean marker only, never the password itself. `apps/audit/validators.py`'s `"user"` allowlist gained this one field.
+
+**Tests:** `apps/company/tests/test_services.py::CompanyServiceSetOwnerPasswordTestCase` (6: sets the password directly, blacklists existing refresh tokens, weak password rejected, no-owner company 404s, nonexistent company 404s, audit entry present without leaking the password) and `apps/company/tests/test_views.py::CompanySetOwnerPasswordViewTestCase` (6: platform admin success, a genuine non-superuser full-permission company member correctly denied 403, unauthenticated 401, weak password 400, no-owner company 404, nonexistent company 404). All 12 passed. Full `apps.company apps.authentication apps.users` regression afterward, fresh DB (`--noinput`): **417/417 passed**.
+
+**Validation:** `manage.py check` clean, `manage.py spectacular` clean (no schema errors). Live end-to-end verification against the real running server: set a real Owner's password directly, confirmed the new password logs in successfully via `/auth/login`, confirmed the old refresh token was blacklisted, confirmed a weak password 400s with Django's real validator messages, confirmed a non-superuser company member 403s, confirmed an ownerless company 404s.
+
+**Files changed (backend):** `apps/company/services.py` (`set_owner_password`, new import `rest_framework.exceptions`), `apps/company/serializers.py` (`SetOwnerPasswordSerializer`, `SetOwnerPasswordResponseSerializer`), `apps/company/views.py` (`set_owner_password` action + schema), `apps/company/urls.py` (new route), `apps/audit/validators.py` (`"user"` allowlist gained `password_set_by_platform_admin`), `apps/company/tests/{test_services,test_views}.py` (new test classes).
 
 #### BE-077 — CSRF Trusted Origins Configuration — 2026-09-10
 

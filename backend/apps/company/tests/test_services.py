@@ -274,3 +274,78 @@ class CompanyServiceOwnerCreationTestCase(TestCase):
                 entity_type="company_membership", company_id=company.id, action="create"
             ).exists()
         )
+
+
+class CompanyServiceSetOwnerPasswordTestCase(TestCase):
+    """
+    Unit tests for CompanyService.set_owner_password -- lets a platform
+    admin directly set a new company's Owner's password, since this dev
+    environment's email backend (console-only) leaves no way to read the
+    normal account-setup activation link (found live, 2026-09-22).
+    """
+
+    def test_sets_the_owners_password_directly(self):
+        company, _ = CompanyService.create_company(
+            name="Password Co", owner_email="owner@example.com", owner_name="Owner Person"
+        )
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        owner = User.objects.get(email="owner@example.com")
+        self.assertFalse(owner.has_usable_password())
+
+        result = CompanyService.set_owner_password(company.id, "BrandNewPassword123!")
+
+        self.assertEqual(result, {"email": "owner@example.com", "name": "Owner Person"})
+        owner.refresh_from_db()
+        self.assertTrue(owner.check_password("BrandNewPassword123!"))
+
+    def test_blacklists_existing_refresh_tokens(self):
+        from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+        from apps.authentication.tokens import CompanyUserRefreshToken
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        company, _ = CompanyService.create_company(
+            name="Blacklist Co", owner_email="stale@example.com", owner_name="Stale Owner"
+        )
+        owner = User.objects.get(email="stale@example.com")
+        refresh = CompanyUserRefreshToken.for_user(owner)
+        outstanding = OutstandingToken.objects.get(jti=refresh["jti"])
+        self.assertFalse(BlacklistedToken.objects.filter(token=outstanding).exists())
+
+        CompanyService.set_owner_password(company.id, "AnotherNewPassword123!")
+
+        self.assertTrue(BlacklistedToken.objects.filter(token=outstanding).exists())
+
+    def test_weak_password_rejected(self):
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        company, _ = CompanyService.create_company(
+            name="Weak Pw Co", owner_email="weak@example.com", owner_name="Weak Owner"
+        )
+        with self.assertRaises(DjangoValidationError):
+            CompanyService.set_owner_password(company.id, "123")
+
+    def test_company_with_no_owner_raises_not_found(self):
+        company, _ = CompanyService.create_company(name="Ownerless Co")
+        with self.assertRaises(NotFound):
+            CompanyService.set_owner_password(company.id, "SomeStrongPassword123!")
+
+    def test_nonexistent_company_raises_not_found(self):
+        with self.assertRaises(NotFound):
+            CompanyService.set_owner_password(uuid.uuid4(), "SomeStrongPassword123!")
+
+    def test_writes_audit_log_without_leaking_the_password(self):
+        company, _ = CompanyService.create_company(
+            name="Audited Pw Co", owner_email="auditedpw@example.com", owner_name="Audited Pw Owner"
+        )
+
+        CompanyService.set_owner_password(company.id, "YetAnotherPassword123!")
+
+        entry = AuditLog.objects.filter(entity_type="user", company_id=company.id, action="update").latest(
+            "created_at"
+        )
+        self.assertEqual(entry.after_state, {"password_set_by_platform_admin": True})
+        self.assertNotIn("password", str(entry.after_state).lower().replace("password_set_by_platform_admin", ""))

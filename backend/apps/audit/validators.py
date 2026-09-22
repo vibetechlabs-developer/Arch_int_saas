@@ -17,7 +17,10 @@ ENTITY_FIELD_ALLOWLISTS: Dict[str, set] = {
     # Authentication events (login/logout/refresh/password reset) audit the
     # "user" entity. Deliberately excludes password/password_hash/token
     # fields entirely — only a non-sensitive identifier is ever persisted.
-    "user": {"email"},
+    # password_set_by_platform_admin: a boolean marker only (never the
+    # password itself) recording that CompanyService.set_owner_password
+    # forcibly set this user's password, bypassing the normal token flow.
+    "user": {"email", "password_set_by_platform_admin"},
     # Deliberate MVP payload scope, not a permanent product rule (BE-023):
     # `addresses`/`notes` are excluded for now as a privacy/payload-size
     # choice, since they're free-form/structured content rather than

@@ -425,3 +425,85 @@ class CompanyViewSetTestCase(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
+
+
+class CompanySetOwnerPasswordViewTestCase(TestCase):
+    """
+    Tests for POST /companies/{id}/owner/set-password (platform-admin-only).
+    """
+
+    def setUp(self):
+        from apps.company.services import CompanyService
+
+        self.client = APIClient()
+
+        self.superadmin = User.objects.create_superuser(
+            email="pwadmin@example.com", name="Pw Admin", password="StrongPassword123!"
+        )
+        self.superadmin_token = str(PlatformAdminAccessToken.for_user(self.superadmin))
+
+        self.member_user = User.objects.create_user(
+            email="pwmember@example.com", name="Pw Member", password="StrongPassword123!"
+        )
+        self.member_token = str(CompanyUserAccessToken.for_user(self.member_user))
+
+        self.company, _ = CompanyService.create_company(
+            name="Owner Pw Co", owner_email="ownerpw@example.com", owner_name="Owner Pw Person"
+        )
+        make_full_access_membership(self.company, self.member_user)
+
+        self.url = f"/companies/{self.company.id}/owner/set-password"
+
+    def test_platform_admin_sets_owner_password_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        response = self.client.post(self.url, {"newPassword": "BrandNewPassword123!"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["data"], {"email": "ownerpw@example.com", "name": "Owner Pw Person"})
+
+        owner = User.objects.get(email="ownerpw@example.com")
+        self.assertTrue(owner.check_password("BrandNewPassword123!"))
+
+    def test_regular_company_member_is_denied_even_with_full_permissions(self):
+        """
+        A same-company member with a full-access role (not the platform
+        admin bypass) must not be able to reset the Owner's password --
+        this is platform-admin-exclusive, mirroring create/list/destroy.
+        """
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.member_token}")
+        response = self.client.post(self.url, {"newPassword": "ShouldNeverWork123!"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.json()["error"]["code"], "PERMISSION_ERROR")
+
+    def test_unauthenticated_request_fails_401(self):
+        response = self.client.post(self.url, {"newPassword": "Whatever123!"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_weak_password_returns_400(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        response = self.client.post(self.url, {"newPassword": "123"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
+
+    def test_company_with_no_owner_returns_404(self):
+        from apps.company.services import CompanyService
+
+        ownerless, _ = CompanyService.create_company(name="No Owner Here Co")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+
+        response = self.client.post(
+            f"/companies/{ownerless.id}/owner/set-password", {"newPassword": "Whatever123!"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_nonexistent_company_returns_404(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        response = self.client.post(
+            f"/companies/{uuid.uuid4()}/owner/set-password", {"newPassword": "Whatever123!"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

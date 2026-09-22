@@ -2,6 +2,7 @@ import uuid
 from typing import Any, Dict, Optional
 from django.db import transaction
 from django.db.models import QuerySet
+from rest_framework import exceptions as drf_exceptions
 
 from apps.audit.models import AuditAction
 from apps.audit.services import AuditLogService
@@ -105,6 +106,80 @@ class CompanyService:
             )
 
             return company, owner_result
+
+    @classmethod
+    def set_owner_password(
+        cls,
+        company_id: str | uuid.UUID,
+        new_password: str,
+        actor_user: Any = None,
+        request: Any = None,
+    ) -> Dict[str, Any]:
+        """
+        Platform-admin-only: directly set a company's Owner's password,
+        bypassing the normal email-token activation flow entirely.
+
+        Real need this closes: a brand-new Owner (from create_company's
+        owner_email/owner_name, or Add User) gets an account-setup email
+        with a token link -- but this environment's email backend prints
+        to the server console (`django.core.mail.backends.console.
+        EmailBackend`), which a platform admin using only the browser has
+        no way to read. Without this, there is no way to actually finish
+        onboarding that Owner at all. Restricted to platform admins only
+        (CompanyViewSet's permission class already denies any action
+        outside retrieve/partial_update/update to a non-admin) -- a
+        company's own Owner cannot use this on themselves or anyone
+        else's company, which would otherwise be a privilege-escalation
+        hole.
+
+        Resolves "the" Owner as the first ACTIVE membership holding this
+        company's Owner-system-key role -- mirrors create_company's own
+        `Role.objects.get(company=company, system_key=OWNER_SYSTEM_KEY)`
+        resolution. Raises NotFound if the company has no active Owner at
+        all (e.g. an empty tenant created without owner_email/owner_name).
+        """
+        from apps.authentication.repositories import TokenBlacklistRepository, UserRepository
+        from apps.authentication import validators as auth_validators
+        from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role
+        from apps.users.permission_catalog import OWNER_SYSTEM_KEY
+
+        company = CompanyRepository.get_by_id(company_id)
+
+        try:
+            owner_role = Role.objects.get(company=company, system_key=OWNER_SYSTEM_KEY)
+        except Role.DoesNotExist:
+            raise drf_exceptions.NotFound("This company has no Owner role.")
+
+        owner_membership = (
+            CompanyMembership.objects.filter(
+                company=company, role=owner_role, status=CompanyMembershipStatus.ACTIVE
+            )
+            .select_related("user")
+            .order_by("created_at")
+            .first()
+        )
+        if owner_membership is None:
+            raise drf_exceptions.NotFound("This company has no active Owner to set a password for.")
+
+        auth_validators.require_new_password_str(new_password)
+        owner = owner_membership.user
+        auth_validators.validate_new_password_strength(new_password, owner)
+
+        with transaction.atomic():
+            UserRepository.set_password(owner, new_password)
+            TokenBlacklistRepository.blacklist_all_outstanding_for_user(owner)
+
+            AuditLogService.record(
+                action=AuditAction.UPDATE,
+                entity_type="user",
+                entity_id=owner.id,
+                company_id=company.id,
+                actor_user=actor_user,
+                after_state={"password_set_by_platform_admin": True},
+                request=request,
+            )
+
+        return {"email": owner.email, "name": owner.name}
 
     @classmethod
     def get_company_by_id(cls, company_id: str | uuid.UUID) -> Company:

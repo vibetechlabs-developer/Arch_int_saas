@@ -18,6 +18,8 @@ from apps.company.serializers import (
     CompanyLogoUploadSerializer,
     CompanySerializer,
     CompanyUpdateSerializer,
+    SetOwnerPasswordResponseSerializer,
+    SetOwnerPasswordSerializer,
 )
 from apps.company.services import CompanyService
 
@@ -187,6 +189,37 @@ class CompanyViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
 
         return ApiResponse.success(
             data={"message": "Company deleted successfully."},
+            request_id=request_id,
+        )
+
+    @extend_schema(
+        summary="Set Company Owner Password",
+        description=(
+            "Directly set this company's Owner's password (Platform Admin only), bypassing "
+            "the normal email-token activation flow -- for onboarding an Owner in an "
+            "environment where the account-setup email isn't reachable (e.g. dev's console "
+            "email backend). Blacklists the Owner's existing refresh tokens."
+        ),
+        request=SetOwnerPasswordSerializer,
+        responses={status.HTTP_200_OK: SetOwnerPasswordResponseSerializer},
+        tags=["Company"],
+    )
+    def set_owner_password(self, request: Request, pk: str = None) -> Response:
+        company = CompanyService.get_company_by_id(pk)
+        self.check_object_permissions(request, company)
+
+        serializer = SetOwnerPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        result = CompanyService.set_owner_password(
+            company_id=pk,
+            new_password=serializer.validated_data["new_password"],
+            actor_user=request.user,
+            request=request,
+        )
+        request_id = getattr(request, "request_id", None)
+        return ApiResponse.success(
+            data=SetOwnerPasswordResponseSerializer(result).data,
             request_id=request_id,
         )
 
