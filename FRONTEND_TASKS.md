@@ -413,6 +413,27 @@ Commits: `c5094e2`/`df3036b` (F25), `83cf909` (F26).
 - New tests: `SiteVisitsListPage.test.tsx` (3), `SiteVisitFormSheet.test.tsx` (5), `SubmitReportDialog.test.tsx` (4) — all real assertions, no new `it.skip`s (neither dialog here opens a Radix `<Select>`, unlike `LeadStatusDialog`/`StatusTransitionDialog`). TypeScript (`tsc --noEmit`): PASS. Full frontend suite: 353 passed, 8 skipped (unchanged baseline — this task added zero new skips). Production build: PASS.
 - Visual QA: **PENDING** — no browser tooling available in this environment; live HTTP verification against the real running backend covers the functional contract (see BE-062's report).
 
+## Phase 24 — Platform Super Admin Console
+
+| Task | Description | Status |
+|---|---|---|
+| F48 | Platform Super Admin console — separate login (`/platform/login`), a minimal top-bar-only shell with no tenant-scoped chrome, and full Company (tenant) management: list/search/filter, create, view/edit, status change, soft-delete | Review |
+
+**Scope note:** the backend already fully supported this (`CompanyViewSet` — list/create/destroy are platform-admin-exclusive, enforced server-side regardless of what any client sends) — nothing new was added to the backend for this task. Deliberately **not** built: platform-wide user list, platform-wide audit log, plans/subscriptions, feature flags — none of these have any backend behind them yet (`Plan`/`Subscription` models don't exist at all), so a screen for them would be fiction. The console today does exactly one real thing: manage tenant companies.
+
+**Implementation notes (F48):**
+- A platform admin authenticates via a genuinely separate endpoint (`POST /platform-auth/login`, gated server-side on `is_superuser AND is_staff` — confirmed by reading `AuthenticationService.login_platform_admin`), not an option on the regular login form. `lib/api/auth.ts` gained `loginPlatformAdmin`; `lib/api/tokenStore.ts` gained an `authMode` marker (`'company' | 'platform'`) stored alongside the tokens so a page refresh restores the right session type without guessing.
+- `AuthContext` gained `isPlatformAdmin` (derived from which login flow succeeded, never re-derived from `user.isStaff` alone — that field alone doesn't imply `is_superuser`, and the frontend has no way to read `is_superuser` directly since `UserSerializer` doesn't expose it) and `loginPlatformAdmin`.
+- `ProtectedPlatformRoute.tsx` mirrors `ProtectedRoute.tsx` exactly, gating on `isPlatformAdmin` and redirecting to `/platform/login` rather than `/login`.
+- `components/platform/PlatformShell.tsx` — deliberately no Sidebar/CommandPalette/QuickCreate/NotificationDrawer; every one of those is built around a resolved tenant company, which a platform-admin session never has (`request.company_id` is always null for this token type). A plain top bar (theme toggle, user menu, logout) is the honest shell for the one real screen area this console has, rather than reusing `Shell` and hiding parts of it.
+- `lib/api/company.ts` extended (not duplicated) with `getCompanies`/`createCompany`/`deleteCompany` and `status` added to `CompanyUpdateInput`/`CompanyCreateInput` — the tenant-facing `CompanySettingsPage.tsx` simply never sets `status`; only the console's own `CompanyFormSheet.tsx` does.
+- `pages/platform/PlatformCompaniesListPage.tsx`/`PlatformCompanyDetailPage.tsx` mirror `LeadsListPage.tsx`/`LeadDetailPage.tsx`'s exact structure. `StatusBadge` gained `trial`(info)/`suspended`(danger) semantics.
+- Routing: `/platform/login` (public) and `/platform/*` (protected, own `PlatformShell`, entirely separate from the tenant `/*` block) added to `App.tsx`.
+- **Known gap, disclosed in the create-company form's own description text:** creating a company here only creates the tenant row (plus its 6 default roles, seeded server-side) — there is no combined "create company + first Owner" endpoint, so a brand-new tenant is genuinely empty of any member until someone is added to it through a separate, not-yet-built path (today: direct DB/shell access). Not silently glossed over — flagged to the operator right in the sheet.
+- Verified live against the real running backend: platform login, list (correctly showed every tenant across the whole platform), create, status update (trial → suspended), delete, and — importantly — confirmed a genuine company-user login attempt against `/platform-auth/login` is rejected (401), proving the console can't be reached by an ordinary Owner account no matter what URL they guess.
+- New tests: `PlatformLoginPage.test.tsx` (4), `ProtectedPlatformRoute.test.tsx` (4), `CompanyFormSheet.test.tsx` (4), `PlatformCompaniesListPage.test.tsx` (3), plus `AuthContext.test.tsx` extended (+1, restoring an `authMode: 'platform'` session on refresh) — 19 new/changed tests total, all real assertions. TypeScript (`tsc --noEmit`): PASS. Full frontend suite: 369 passed, 8 skipped (unchanged baseline). Production build: PASS.
+- Visual QA: **PENDING** — no browser tooling available in this environment; live HTTP verification above covers the functional contract, and a real platform-admin demo account was created for the user to try the console themselves.
+
 ## Not Yet Started
 
-Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists).
+Per `06_UI/Wireframes.md`'s module order: Activity Log is blocked (see Phase 10), not merely deferred. Sales/Project reports (no backend endpoint exists). Platform-wide user list, platform-wide audit log, plans/subscriptions, and feature flags all remain unbuilt at any layer — see F48's scope note.
