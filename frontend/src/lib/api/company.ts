@@ -120,6 +120,25 @@ export async function updateCompany(id: string, input: CompanyUpdateInput): Prom
   return unwrap<Company>(apiClient.patch(`/companies/${id}`, input));
 }
 
+// Mirrors backend/apps/company/serializers.py::SetOwnerPasswordResponseSerializer.
+export interface OwnerPasswordSetResult {
+  email: string;
+  name: string;
+}
+
+// POST /companies/{id}/owner/set-password (platform-admin-only) — directly
+// sets this company's Owner's password, bypassing the normal email-token
+// activation flow (which this environment's console-only email backend
+// leaves unreachable from the browser).
+export async function setCompanyOwnerPassword(
+  companyId: string,
+  newPassword: string,
+): Promise<OwnerPasswordSetResult> {
+  return unwrap<OwnerPasswordSetResult>(
+    apiClient.post(`/companies/${companyId}/owner/set-password`, { newPassword }),
+  );
+}
+
 // Multipart upload — the browser/axios set the Content-Type boundary
 // automatically from the FormData body; never set it manually. Returns an
 // absolute URL + internal key that the caller then passes to

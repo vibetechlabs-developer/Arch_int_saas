@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Banknote, Building2, FileWarning, Pencil, ReceiptText, Trash2 } from 'lucide-react';
+import { ArrowLeft, Banknote, Building2, FileWarning, KeyRound, Pencil, ReceiptText, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
@@ -15,6 +15,7 @@ import { deleteCompany, getCompany } from '@/lib/api/company';
 import { platformCompanyKeys } from '@/lib/queryKeys';
 import { formatDateTime } from '@/lib/format';
 import { CompanyFormSheet } from '@/components/platform/CompanyFormSheet';
+import { SetOwnerPasswordDialog } from '@/components/platform/SetOwnerPasswordDialog';
 
 export default function PlatformCompanyDetailPage() {
   const { companyId } = useParams<{ companyId: string }>();
@@ -22,6 +23,7 @@ export default function PlatformCompanyDetailPage() {
   const queryClient = useQueryClient();
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [ownerPasswordOpen, setOwnerPasswordOpen] = useState(false);
 
   const { data: company, isLoading, isError, error, refetch } = useQuery({
     queryKey: platformCompanyKeys.detail(companyId!),
@@ -82,6 +84,10 @@ export default function PlatformCompanyDetailPage() {
             actions={
               <>
                 <StatusBadge status={company.status} />
+                <Button variant="outline" onClick={() => setOwnerPasswordOpen(true)}>
+                  <KeyRound />
+                  Set Owner Password
+                </Button>
                 <Button variant="outline" onClick={() => setEditOpen(true)}>
                   <Pencil />
                   Edit
@@ -126,6 +132,13 @@ export default function PlatformCompanyDetailPage() {
           </div>
 
           <CompanyFormSheet open={editOpen} onOpenChange={setEditOpen} company={company} />
+
+          <SetOwnerPasswordDialog
+            open={ownerPasswordOpen}
+            onOpenChange={setOwnerPasswordOpen}
+            companyId={company.id}
+            companyName={company.name}
+          />
 
           <ConfirmationDialog
             open={deleteOpen}
