@@ -7,6 +7,9 @@ from rest_framework_simplejwt.tokens import UntypedToken
 
 from apps.audit.models import AuditLog
 from apps.authentication.tests.base import ThrottleIsolatedTestCase
+from apps.authentication.tokens import CompanyUserAccessToken
+from apps.common.test_utils import make_full_access_membership
+from apps.company.models import Company, CompanyStatus
 
 User = get_user_model()
 
@@ -267,3 +270,32 @@ class LoginEndpointTestCase(ThrottleIsolatedTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         mocked_set_password.assert_called_once()
+
+    def test_login_succeeds_with_a_leftover_ambiguous_company_token_attached(self):
+        """
+        Same bug as PlatformAuthEndpointTestCase's own version of this test
+        (2026-09-22), for the far more common path: /auth/login itself
+        wasn't in TenantJWTAuthentication's exempt_paths either, so a
+        browser re-logging-in with a stale token from a user who now has
+        2+ (or 0) active company memberships got a bare 403 before this
+        view was ever reached, regardless of how valid the fresh login
+        credentials in the body were.
+        """
+        company1 = Company.objects.create(name="Alpha Co", status=CompanyStatus.ACTIVE)
+        company2 = Company.objects.create(name="Beta Co", status=CompanyStatus.ACTIVE)
+        multi_user = User.objects.create_user(
+            email="multi.member2@example.com", name="Multi Member Two", password="StrongPassword123!"
+        )
+        make_full_access_membership(company1, multi_user)
+        make_full_access_membership(company2, multi_user)
+        stale_token = str(CompanyUserAccessToken.for_user(multi_user))
+
+        response = self.client.post(
+            self.url,
+            {"email": "developer@example.com", "password": self.raw_password},
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {stale_token}",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.json()["success"])

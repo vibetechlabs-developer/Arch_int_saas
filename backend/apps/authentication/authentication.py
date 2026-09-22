@@ -43,11 +43,27 @@ class TenantJWTAuthentication(JWTAuthentication):
         # exact string here matches what request.path actually reports) —
         # otherwise a caller with a stored Bearer token but no/ambiguous
         # company membership would get a 403 from just loading the docs.
+        # /auth/login, /platform-auth/login, /auth/forgot-password and
+        # /auth/reset-password are AllowAny and take their identity from
+        # the request body, not the Bearer token -- they must be exempt
+        # too, or a browser with a leftover token from a *different*
+        # already-logged-out/ambiguous session (any stored token, even a
+        # stale or wrong-type one, since axios attaches it to every
+        # request unconditionally) gets a bare 403 attempting a fresh
+        # login instead of ever reaching the view that would authenticate
+        # them properly. Found live: a platform-admin login attempt from a
+        # tab that still had a leftover company-user token in localStorage
+        # from an earlier session 403'd here before ever reaching
+        # PlatformLoginView.
         exempt_paths = [
+            "/auth/login",
             "/auth/logout",
             "/auth/me",
             "/auth/refresh",
             "/auth/memberships",
+            "/auth/forgot-password",
+            "/auth/reset-password",
+            "/platform-auth/login",
             "/schema/",
             "/docs/",
             "/redoc/",

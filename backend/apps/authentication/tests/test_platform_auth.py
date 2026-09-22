@@ -5,6 +5,9 @@ from rest_framework_simplejwt.tokens import UntypedToken
 
 from apps.audit.models import AuditLog
 from apps.authentication.tests.base import ThrottleIsolatedTestCase
+from apps.authentication.tokens import CompanyUserAccessToken
+from apps.common.test_utils import make_full_access_membership
+from apps.company.models import Company, CompanyStatus
 
 User = get_user_model()
 
@@ -176,3 +179,35 @@ class PlatformAuthEndpointTestCase(ThrottleIsolatedTestCase):
         # because the underlying credentials happened to be valid.
         regular_user.refresh_from_db()
         self.assertIsNone(regular_user.last_login)
+
+    def test_platform_login_succeeds_with_a_leftover_ambiguous_company_token_attached(self):
+        """
+        Bug found live (2026-09-22): apiClient's request interceptor
+        attaches whatever access token is in storage to every request,
+        including a fresh login attempt. TenantJWTAuthentication.
+        authenticate() previously ran its full companyId-resolution logic
+        against /platform-auth/login too (it wasn't in exempt_paths), so a
+        browser with a leftover token belonging to a user with 2+ (or 0)
+        active company memberships got a bare 403 PermissionDenied before
+        PlatformLoginView was ever reached -- even though the login
+        credentials in the request body were entirely valid. This
+        reproduces the exact ambiguous-membership case.
+        """
+        company1 = Company.objects.create(name="Alpha Co", status=CompanyStatus.ACTIVE)
+        company2 = Company.objects.create(name="Beta Co", status=CompanyStatus.ACTIVE)
+        multi_user = User.objects.create_user(
+            email="multi.member@example.com", name="Multi Member", password="StrongPassword123!"
+        )
+        make_full_access_membership(company1, multi_user)
+        make_full_access_membership(company2, multi_user)
+        stale_token = str(CompanyUserAccessToken.for_user(multi_user))
+
+        response = self.client.post(
+            self.url,
+            {"email": "platform.admin@example.com", "password": self.password},
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {stale_token}",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.json()["success"])
