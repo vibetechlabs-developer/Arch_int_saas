@@ -75,9 +75,9 @@ const App: React.FC = () => {
                         <PlatformShell>
                           <Suspense fallback={<PageLoadingFallback />}>
                             <Routes>
-                              <Route path="/platform" element={<Navigate to="/platform/companies" replace />} />
-                              <Route path="/platform/companies" element={<PlatformCompaniesListPage />} />
-                              <Route path="/platform/companies/:companyId" element={<PlatformCompanyDetailPage />} />
+                              <Route index element={<Navigate to="/platform/companies" replace />} />
+                              <Route path="companies" element={<PlatformCompaniesListPage />} />
+                              <Route path="companies/:companyId" element={<PlatformCompanyDetailPage />} />
                               <Route path="*" element={<Navigate to="/platform/companies" replace />} />
                             </Routes>
                           </Suspense>
