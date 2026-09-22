@@ -98,6 +98,39 @@ class CompanyViewSetTestCase(TestCase):
         self.assertEqual(data["data"]["settings"]["paymentTerms"]["defaultDays"], 45)
         self.assertIn("requestId", data)
 
+    def test_create_company_with_owner_fields_creates_the_owner_and_returns_the_flag(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        payload = {"name": "Owned From Birth Co", "ownerEmail": "birth-owner@example.com", "ownerName": "Birth Owner"}
+        response = self.client.post("/companies", payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.json()["data"]
+        self.assertEqual(data["owner"], {"userCreated": True, "activationRequired": True})
+
+        from apps.users.models import CompanyMembership
+
+        self.assertTrue(
+            CompanyMembership.objects.filter(
+                company_id=data["id"], user__email="birth-owner@example.com", role__name="Owner"
+            ).exists()
+        )
+
+    def test_create_company_without_owner_fields_has_no_owner_key_in_response(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        response = self.client.post("/companies", {"name": "Ownerless Co"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertNotIn("owner", response.json()["data"])
+
+    def test_create_company_owner_email_without_owner_name_returns_400(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.superadmin_token}")
+        response = self.client.post(
+            "/companies", {"name": "Half Owner Co", "ownerEmail": "half@example.com"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.json()["error"]["code"], "VALIDATION_ERROR")
+
     def test_create_company_as_regular_user_fails_403(self):
         """
         Verify regular authenticated user cannot create companies (403 Permission Error).

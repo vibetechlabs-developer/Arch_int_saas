@@ -34,7 +34,7 @@ from apps.users.services import CompanyMembershipService
 
 class LastOwnerConcurrencyTestCase(TransactionTestCase):
     def setUp(self):
-        self.company = CompanyService.create_company(name="Concurrency Co")
+        self.company, _ = CompanyService.create_company(name="Concurrency Co")
         self.owner_role = Role.objects.get(company=self.company, system_key="owner")
         self.admin_role = Role.objects.get(company=self.company, system_key="admin")
 

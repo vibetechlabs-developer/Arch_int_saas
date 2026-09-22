@@ -25,27 +25,27 @@ class SeededRoleSystemKeyTestCase(TestCase):
     """1. New company seeds stable system keys; 2. unique within company."""
 
     def test_new_company_seeds_a_system_key_for_every_default_role(self):
-        company = CompanyService.create_company(name="Seed Test Co")
+        company, _ = CompanyService.create_company(name="Seed Test Co")
         roles = {r.name: r.system_key for r in Role.objects.filter(company=company)}
         for role_name in DEFAULT_ROLE_PERMISSIONS:
             self.assertEqual(roles[role_name], DEFAULT_ROLE_SYSTEM_KEYS[role_name])
 
     def test_owner_role_gets_the_owner_system_key(self):
-        company = CompanyService.create_company(name="Owner Key Co")
+        company, _ = CompanyService.create_company(name="Owner Key Co")
         owner = Role.objects.get(company=company, name="Owner")
         self.assertEqual(owner.system_key, OWNER_SYSTEM_KEY)
         self.assertEqual(owner.system_key, "owner")
 
     def test_system_keys_unique_within_company(self):
-        company = CompanyService.create_company(name="Unique Key Co")
+        company, _ = CompanyService.create_company(name="Unique Key Co")
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 Role.objects.create(company=company, name="Second Owner Row", system_key="owner")
 
     def test_same_system_key_allowed_across_different_companies(self):
         """The uniqueness constraint is scoped per-company, not global."""
-        company_a = CompanyService.create_company(name="Company A")
-        company_b = CompanyService.create_company(name="Company B")
+        company_a, _ = CompanyService.create_company(name="Company A")
+        company_b, _ = CompanyService.create_company(name="Company B")
         owner_a = Role.objects.get(company=company_a, system_key="owner")
         owner_b = Role.objects.get(company=company_b, system_key="owner")
         self.assertNotEqual(owner_a.id, owner_b.id)
@@ -64,7 +64,7 @@ class CustomRoleSystemKeyTestCase(TestCase):
     """3. Custom role system_key is null; 6. custom role named Owner is NOT system Owner."""
 
     def setUp(self):
-        self.company = CompanyService.create_company(name="Custom Role Co")
+        self.company, _ = CompanyService.create_company(name="Custom Role Co")
 
     def test_custom_role_has_null_system_key(self):
         role = RoleService.create_role(company_id=self.company.id, name="Bespoke Role")
@@ -98,7 +98,7 @@ class ApiCannotSetSystemKeyTestCase(TestCase):
 
     def setUp(self):
         self.client = APIClient()
-        self.company = CompanyService.create_company(name="API Key Co")
+        self.company, _ = CompanyService.create_company(name="API Key Co")
         self.user = User.objects.create_user(email="alice@company1.com", name="Alice", password="StrongPassword123!")
         make_full_access_membership(self.company, self.user)
         self.token = str(CompanyUserAccessToken.for_user(self.user))

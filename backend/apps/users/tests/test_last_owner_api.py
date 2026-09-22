@@ -23,8 +23,8 @@ class LastOwnerApiTestCase(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-        self.company1 = CompanyService.create_company(name="API Owner Co 1")
-        self.company2 = CompanyService.create_company(name="API Owner Co 2")
+        self.company1, _ = CompanyService.create_company(name="API Owner Co 1")
+        self.company2, _ = CompanyService.create_company(name="API Owner Co 2")
         self.owner_role_1 = Role.objects.get(company=self.company1, system_key="owner")
         self.admin_role_1 = Role.objects.get(company=self.company1, system_key="admin")
         self.owner_role_2 = Role.objects.get(company=self.company2, system_key="owner")

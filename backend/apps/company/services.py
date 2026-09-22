@@ -34,9 +34,11 @@ class CompanyService:
         gst_number: Optional[str] = None,
         status: str = "trial",
         settings: Optional[Dict[str, Any]] = None,
+        owner_email: Optional[str] = None,
+        owner_name: Optional[str] = None,
         actor_user: Any = None,
         request: Any = None,
-    ) -> Company:
+    ) -> tuple[Company, Optional[Dict[str, Any]]]:
         """
         Create a new Company tenant.
 
@@ -48,14 +50,49 @@ class CompanyService:
         already imports apps.company.models at module level, so a
         module-level import here in the other direction would risk a
         circular/partial-import at startup.
+
+        `owner_email`/`owner_name` (both optional, but the serializer
+        requires them together) close the gap flagged when the Platform
+        Console shipped (F48/BACKEND_TASKS.md): a company created with
+        neither is left with zero members, exactly the prior behavior,
+        unchanged for any existing caller. When both are given, the new
+        Owner role (from the roles just seeded) is granted to that email
+        via the exact same `CompanyMembershipService.add_user` flow the
+        in-app "Add User" feature already uses (BE-071) — same
+        set_unusable_password()-plus-activation-email mechanism, no new
+        onboarding path invented. `actor_membership=None` is deliberate:
+        the platform admin creating this company is never themselves a
+        member of it, so BE-054's escalation guard (which only applies
+        when a real actor_membership is supplied) correctly does not
+        apply here — there is no "own permissions" to compare against.
+        Returns `(company, owner_result)` — `owner_result` is `None` when
+        no owner was requested, else `{"userCreated": bool,
+        "activationRequired": bool}` mirroring AddUserResponseSerializer's
+        own two flags.
         """
         with transaction.atomic():
             fields = validators.build_create_fields(name, currency, gst_number, status, settings)
             company = CompanyRepository.create(**fields)
 
-            from apps.users.services import RoleService
+            from apps.users.models import Role
+            from apps.users.permission_catalog import OWNER_SYSTEM_KEY
+            from apps.users.services import CompanyMembershipService, RoleService
 
             RoleService.seed_default_roles_for_company(company)
+
+            owner_result: Optional[Dict[str, Any]] = None
+            if owner_email and owner_name:
+                owner_role = Role.objects.get(company=company, system_key=OWNER_SYSTEM_KEY)
+                _membership, user_created, activation_required = CompanyMembershipService.add_user(
+                    company_id=company.id,
+                    email=owner_email,
+                    name=owner_name,
+                    role_id=owner_role.id,
+                    actor_user=actor_user,
+                    actor_membership=None,
+                    request=request,
+                )
+                owner_result = {"userCreated": user_created, "activationRequired": activation_required}
 
             AuditLogService.record(
                 action=AuditAction.CREATE,
@@ -67,7 +104,7 @@ class CompanyService:
                 request=request,
             )
 
-            return company
+            return company, owner_result
 
     @classmethod
     def get_company_by_id(cls, company_id: str | uuid.UUID) -> Company:

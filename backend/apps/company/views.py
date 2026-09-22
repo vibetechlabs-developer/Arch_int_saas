@@ -12,6 +12,7 @@ from apps.common.views import ObjectPermission404Mixin
 from apps.company.models import Company
 from apps.company.permissions import IsPlatformAdminOrCompanyAccess, is_platform_admin
 from apps.company.serializers import (
+    CompanyCreateResponseSerializer,
     CompanyCreateSerializer,
     CompanyListQuerySerializer,
     CompanyLogoUploadSerializer,
@@ -30,9 +31,14 @@ from apps.company.services import CompanyService
     ),
     create=extend_schema(
         summary="Create Company",
-        description="Create a new tenant company (Platform Admin only).",
+        description=(
+            "Create a new tenant company (Platform Admin only). Optionally supply "
+            "ownerEmail/ownerName together to also grant the new company's Owner role "
+            "to that email (BE-071's Add User flow) -- the response then includes "
+            "an `owner` object; omitted entirely when no owner was requested."
+        ),
         request=CompanyCreateSerializer,
-        responses={status.HTTP_201_CREATED: CompanySerializer},
+        responses={status.HTTP_201_CREATED: CompanyCreateResponseSerializer},
         tags=["Company"],
     ),
     retrieve=extend_schema(
@@ -105,17 +111,26 @@ class CompanyViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
 
     def create(self, request: Request) -> Response:
         """
-        Create a new tenant company.
+        Create a new tenant company. Optionally, when `ownerEmail`/
+        `ownerName` are supplied, also grants the new company's Owner
+        role to that email (see CompanyService.create_company's
+        docstring) -- the response then carries `owner: {userCreated,
+        activationRequired}` alongside the usual company fields;
+        `owner` is omitted entirely when no owner was requested, so an
+        existing caller that never sends these fields sees no shape
+        change at all.
         """
         serializer = CompanyCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        company = CompanyService.create_company(
+        company, owner_result = CompanyService.create_company(
             **serializer.validated_data,
             actor_user=request.user,
             request=request,
         )
         response_data = CompanySerializer(company).data
+        if owner_result is not None:
+            response_data["owner"] = owner_result
         request_id = getattr(request, "request_id", None)
 
         return ApiResponse.created(data=response_data, request_id=request_id)

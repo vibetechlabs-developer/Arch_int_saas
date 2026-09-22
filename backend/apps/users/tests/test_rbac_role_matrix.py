@@ -30,7 +30,7 @@ class RoleMatrixTestCase(TestCase):
     def setUp(self):
         self.client_api = APIClient()
 
-        self.company = CompanyService.create_company(name="Matrix Studio")
+        self.company, _ = CompanyService.create_company(name="Matrix Studio")
 
         self.owner_role = Role.objects.get(company=self.company, name="Owner")
         self.admin_role = Role.objects.get(company=self.company, name="Admin")

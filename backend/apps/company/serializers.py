@@ -84,12 +84,62 @@ class CompanyCreateSerializer(serializers.Serializer):
         required=False,
         help_text="Tenant configuration and preferences dictionary.",
     )
+    ownerEmail = serializers.EmailField(
+        source="owner_email",
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text=(
+            "Optional. When given together with ownerName, this company's "
+            "Owner role is granted to this email via the same Add User "
+            "flow (BE-071) used elsewhere -- a new User is created with an "
+            "unusable password and an account-setup email, or an existing "
+            "User is linked if the email already has an account. Omit "
+            "both to create an empty tenant with no members, unchanged "
+            "from this endpoint's original behavior."
+        ),
+    )
+    ownerName = serializers.CharField(
+        source="owner_name",
+        max_length=255,
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        default=None,
+        help_text="Required together with ownerEmail.",
+    )
 
     def validate_name(self, value: str) -> str:
         cleaned = value.strip()
         if not cleaned:
             raise serializers.ValidationError("Company name cannot be blank or empty.")
         return cleaned
+
+    def validate(self, attrs):
+        owner_email = attrs.get("owner_email")
+        owner_name = (attrs.get("owner_name") or "").strip()
+        if owner_email and not owner_name:
+            raise serializers.ValidationError({"ownerName": ["ownerName is required when ownerEmail is set."]})
+        if owner_name and not owner_email:
+            raise serializers.ValidationError({"ownerEmail": ["ownerEmail is required when ownerName is set."]})
+        attrs["owner_name"] = owner_name or None
+        return attrs
+
+
+class CompanyOwnerResultSerializer(serializers.Serializer):
+    """Documents the optional `owner` key CompanyViewSet.create() adds to its response -- present only when ownerEmail/ownerName were supplied. Mirrors AddUserResponseSerializer's own two flags exactly (BE-071)."""
+
+    userCreated = serializers.BooleanField()
+    activationRequired = serializers.BooleanField()
+
+
+class CompanyCreateResponseSerializer(CompanySerializer):
+    """CompanySerializer plus the optional owner-creation outcome, for accurate OpenAPI schema generation only -- CompanyViewSet.create() builds this dict directly, this class is never instantiated at runtime."""
+
+    owner = CompanyOwnerResultSerializer(required=False)
+
+    class Meta(CompanySerializer.Meta):
+        fields = CompanySerializer.Meta.fields + ["owner"]
 
 
 class CompanyLogoUploadSerializer(serializers.Serializer):

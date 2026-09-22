@@ -15,7 +15,7 @@ from apps.users.services import CompanyMembershipService, RoleService
 
 class LastOwnerProtectionTestCase(TestCase):
     def setUp(self):
-        self.company = CompanyService.create_company(name="Last Owner Co")
+        self.company, _ = CompanyService.create_company(name="Last Owner Co")
         self.owner_role = Role.objects.get(company=self.company, system_key="owner")
         self.admin_role = Role.objects.get(company=self.company, system_key="admin")
 
@@ -144,7 +144,7 @@ class RoleDeleteSafetyWithSystemKeyTestCase(TestCase):
     """8. Protected Owner role cannot be deleted; 9. custom role named Owner can follow normal custom-role delete rules."""
 
     def setUp(self):
-        self.company = CompanyService.create_company(name="Delete Safety Co")
+        self.company, _ = CompanyService.create_company(name="Delete Safety Co")
 
     def test_system_owner_role_cannot_be_deleted(self):
         owner = Role.objects.get(company=self.company, system_key="owner")
