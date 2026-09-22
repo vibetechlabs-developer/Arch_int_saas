@@ -9,7 +9,8 @@ jest.mock('@/lib/api/company', () => ({
   createCompany: jest.fn(),
   updateCompany: jest.fn(),
 }));
-jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
+const mockedToastSuccess = jest.fn();
+jest.mock('sonner', () => ({ toast: { success: (...args: unknown[]) => mockedToastSuccess(...args), error: jest.fn() } }));
 
 const mockedCreateCompany = createCompany as jest.Mock;
 const mockedUpdateCompany = updateCompany as jest.Mock;
@@ -37,6 +38,11 @@ function renderSheet(props: Partial<React.ComponentProps<typeof CompanyFormSheet
   return { onOpenChange };
 }
 
+async function fillOwnerFields(name = 'New Owner', email = 'new-owner@example.com') {
+  await userEvent.type(screen.getByLabelText('Owner name'), name);
+  await userEvent.type(screen.getByLabelText('Owner email'), email);
+}
+
 describe('CompanyFormSheet', () => {
   afterEach(() => jest.clearAllMocks());
 
@@ -49,19 +55,64 @@ describe('CompanyFormSheet', () => {
     expect(mockedCreateCompany).not.toHaveBeenCalled();
   });
 
-  it('creates a company with the entered values (defaulting to trial status) and closes on success', async () => {
-    mockedCreateCompany.mockResolvedValue({ ...existingCompany, id: 'c99', name: 'New Studio' });
-    const { onOpenChange } = renderSheet();
+  it('requires an owner name and email in create mode before ever calling the API', async () => {
+    renderSheet();
 
     await userEvent.type(screen.getByLabelText('Company name'), 'New Studio');
     await userEvent.click(screen.getByRole('button', { name: /create company/i }));
 
+    expect(await screen.findByText(/enter the new owner/i)).toBeInTheDocument();
+    expect(mockedCreateCompany).not.toHaveBeenCalled();
+  });
+
+  it('does not show owner fields at all when editing', () => {
+    renderSheet({ company: existingCompany });
+    expect(screen.queryByLabelText('Owner name')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Owner email')).not.toBeInTheDocument();
+  });
+
+  it('creates a company with the entered values plus its first owner, and closes on success', async () => {
+    mockedCreateCompany.mockResolvedValue({
+      ...existingCompany,
+      id: 'c99',
+      name: 'New Studio',
+      owner: { userCreated: true, activationRequired: true },
+    });
+    const { onOpenChange } = renderSheet();
+
+    await userEvent.type(screen.getByLabelText('Company name'), 'New Studio');
+    await fillOwnerFields();
+    await userEvent.click(screen.getByRole('button', { name: /create company/i }));
+
     await waitFor(() =>
       expect(mockedCreateCompany).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'New Studio', status: 'trial', currency: 'INR' }),
+        expect.objectContaining({
+          name: 'New Studio',
+          status: 'trial',
+          currency: 'INR',
+          ownerEmail: 'new-owner@example.com',
+          ownerName: 'New Owner',
+        }),
       ),
     );
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(mockedToastSuccess).toHaveBeenCalledWith(expect.stringMatching(/account-setup email was sent/i));
+  });
+
+  it('shows a different success message when the owner email already had an account', async () => {
+    mockedCreateCompany.mockResolvedValue({
+      ...existingCompany,
+      owner: { userCreated: false, activationRequired: false },
+    });
+    renderSheet();
+
+    await userEvent.type(screen.getByLabelText('Company name'), 'New Studio');
+    await fillOwnerFields('Existing Person', 'existing@example.com');
+    await userEvent.click(screen.getByRole('button', { name: /create company/i }));
+
+    await waitFor(() =>
+      expect(mockedToastSuccess).toHaveBeenCalledWith(expect.stringMatching(/existing account was granted/i)),
+    );
   });
 
   it('pre-fills the form and PATCHes the existing company when editing', async () => {
@@ -89,8 +140,25 @@ describe('CompanyFormSheet', () => {
     renderSheet();
 
     await userEvent.type(screen.getByLabelText('Company name'), 'Duplicate Studio');
+    await fillOwnerFields();
     await userEvent.click(screen.getByRole('button', { name: /create company/i }));
 
     expect(await screen.findByText('Company name cannot be blank or empty.')).toBeInTheDocument();
+  });
+
+  it('maps a 400 VALIDATION_ERROR on ownerEmail onto the owner section, not a form field', async () => {
+    const { ApiError } = jest.requireActual('@/lib/api/client');
+    mockedCreateCompany.mockRejectedValue(
+      new ApiError('VALIDATION_ERROR', 'Request validation failed.', [
+        { field: 'ownerEmail', issue: 'This email already has an unresolvable conflict.' },
+      ]),
+    );
+    renderSheet();
+
+    await userEvent.type(screen.getByLabelText('Company name'), 'New Studio');
+    await fillOwnerFields();
+    await userEvent.click(screen.getByRole('button', { name: /create company/i }));
+
+    expect(await screen.findByText('This email already has an unresolvable conflict.')).toBeInTheDocument();
   });
 });

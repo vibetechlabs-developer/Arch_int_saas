@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -12,21 +12,35 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { humanizeStatus } from '@/components/common/StatusBadge';
 import { ApiError } from '@/lib/api/client';
-import { createCompany, updateCompany, type Company, type CompanyStatus } from '@/lib/api/company';
+import { createCompany, updateCompany, type Company, type CompanyStatus, type CreatedCompany } from '@/lib/api/company';
 import { platformCompanyKeys } from '@/lib/queryKeys';
 
 const COMPANY_STATUSES: CompanyStatus[] = ['trial', 'active', 'suspended'];
 
+// ownerEmail/ownerName are optional at the schema/type level (the backend
+// itself only requires them together, and updateCompany never sends
+// either) — this form enforces "required in create mode" itself, via
+// ownerError below, the same manual-check pattern ProjectFormSheet uses
+// for its own create-only required field (clientId).
 const companySchema = z.object({
   name: z.string().trim().min(1, 'Company name is required').max(255),
   status: z.enum(['trial', 'active', 'suspended']),
   currency: z.string().trim().max(10).optional(),
   gstNumber: z.string().trim().max(15).optional(),
+  ownerEmail: z.string().trim().email('Enter a valid email address').optional().or(z.literal('')),
+  ownerName: z.string().trim().max(255).optional(),
 });
 
 type CompanyFormValues = z.infer<typeof companySchema>;
 
-const EMPTY_VALUES: CompanyFormValues = { name: '', status: 'trial', currency: 'INR', gstNumber: '' };
+const EMPTY_VALUES: CompanyFormValues = {
+  name: '',
+  status: 'trial',
+  currency: 'INR',
+  gstNumber: '',
+  ownerEmail: '',
+  ownerName: '',
+};
 
 export interface CompanyFormSheetProps {
   open: boolean;
@@ -37,10 +51,14 @@ export interface CompanyFormSheetProps {
 
 // Same Sheet drives both create and edit, mirroring LeadFormSheet/
 // ClientFormSheet's exact pattern. Platform-admin-only — CompanyViewSet
-// enforces this server-side regardless of what this form sends.
+// enforces this server-side regardless of what this form sends. The
+// Owner fields only appear in create mode — an already-created company
+// already has members, so "who's the Owner" isn't a field to edit here,
+// it's Settings → Members' job.
 export function CompanyFormSheet({ open, onOpenChange, company, onSaved }: CompanyFormSheetProps) {
   const isEdit = !!company;
   const queryClient = useQueryClient();
+  const [ownerError, setOwnerError] = useState<string | null>(null);
 
   const {
     register,
@@ -56,6 +74,7 @@ export function CompanyFormSheet({ open, onOpenChange, company, onSaved }: Compa
 
   useEffect(() => {
     if (!open) return;
+    setOwnerError(null);
     reset(
       company
         ? {
@@ -63,6 +82,8 @@ export function CompanyFormSheet({ open, onOpenChange, company, onSaved }: Compa
             status: company.status,
             currency: company.currency,
             gstNumber: company.gstNumber ?? '',
+            ownerEmail: '',
+            ownerName: '',
           }
         : EMPTY_VALUES,
     );
@@ -70,24 +91,46 @@ export function CompanyFormSheet({ open, onOpenChange, company, onSaved }: Compa
 
   const mutation = useMutation({
     mutationFn: (values: CompanyFormValues) => {
-      const input = {
+      if (isEdit) {
+        return updateCompany(company!.id, {
+          name: values.name,
+          status: values.status,
+          currency: values.currency || 'INR',
+          gstNumber: values.gstNumber || null,
+        });
+      }
+      return createCompany({
         name: values.name,
         status: values.status,
         currency: values.currency || 'INR',
         gstNumber: values.gstNumber || null,
-      };
-      return isEdit ? updateCompany(company!.id, input) : createCompany(input);
+        ownerEmail: values.ownerEmail || undefined,
+        ownerName: values.ownerName || undefined,
+      });
     },
-    onSuccess: (saved) => {
+    onSuccess: (saved: Company | CreatedCompany) => {
       queryClient.invalidateQueries({ queryKey: platformCompanyKeys.lists() });
       if (isEdit) queryClient.invalidateQueries({ queryKey: platformCompanyKeys.detail(saved.id) });
-      toast.success(isEdit ? 'Company updated' : 'Company created');
+      const owner = 'owner' in saved ? saved.owner : undefined;
+      if (owner) {
+        toast.success(
+          owner.userCreated
+            ? 'Company created — an account-setup email was sent to the new Owner'
+            : 'Company created — the existing account was granted Owner access',
+        );
+      } else {
+        toast.success(isEdit ? 'Company updated' : 'Company created');
+      }
       onOpenChange(false);
       onSaved?.(saved);
     },
     onError: (error: unknown) => {
       if (error instanceof ApiError && error.code === 'VALIDATION_ERROR') {
         for (const detail of error.details) {
+          if (detail.field === 'ownerEmail' || detail.field === 'ownerName') {
+            setOwnerError(detail.issue);
+            continue;
+          }
           if (detail.field in EMPTY_VALUES) {
             setError(detail.field as keyof CompanyFormValues, { message: detail.issue });
           }
@@ -99,7 +142,14 @@ export function CompanyFormSheet({ open, onOpenChange, company, onSaved }: Compa
     },
   });
 
-  const onSubmit = (values: CompanyFormValues) => mutation.mutate(values);
+  const onSubmit = (values: CompanyFormValues) => {
+    setOwnerError(null);
+    if (!isEdit && (!values.ownerEmail || !values.ownerName)) {
+      setOwnerError('Enter the new Owner’s name and email — every company needs at least one.');
+      return;
+    }
+    mutation.mutate(values);
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -107,7 +157,9 @@ export function CompanyFormSheet({ open, onOpenChange, company, onSaved }: Compa
         <SheetHeader>
           <SheetTitle>{isEdit ? 'Edit company' : 'New company'}</SheetTitle>
           <SheetDescription>
-            {isEdit ? 'Update this tenant’s details.' : 'Create a new tenant company. It starts with no members — add its first Owner separately.'}
+            {isEdit
+              ? 'Update this tenant’s details.'
+              : 'Create a new tenant company and grant its first Owner access in one step.'}
           </SheetDescription>
         </SheetHeader>
 
@@ -146,6 +198,34 @@ export function CompanyFormSheet({ open, onOpenChange, company, onSaved }: Compa
               {errors.gstNumber && <p className="text-small text-danger-text">{errors.gstNumber.message}</p>}
             </div>
           </div>
+
+          {!isEdit && (
+            <div className="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-secondary p-4">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-small font-medium text-text-primary">First Owner</span>
+                <span className="text-caption text-text-tertiary">
+                  Granted the Owner role immediately. A new email gets an account-setup message; an existing account
+                  is simply added to this company.
+                </span>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="company-owner-name">Owner name</Label>
+                <Input id="company-owner-name" invalid={!!errors.ownerName || !!ownerError} {...register('ownerName')} />
+                {errors.ownerName && <p className="text-small text-danger-text">{errors.ownerName.message}</p>}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="company-owner-email">Owner email</Label>
+                <Input
+                  id="company-owner-email"
+                  type="email"
+                  invalid={!!errors.ownerEmail || !!ownerError}
+                  {...register('ownerEmail')}
+                />
+                {errors.ownerEmail && <p className="text-small text-danger-text">{errors.ownerEmail.message}</p>}
+              </div>
+              {ownerError && <p className="text-small text-danger-text">{ownerError}</p>}
+            </div>
+          )}
 
           {mutation.isError && !(mutation.error instanceof ApiError && mutation.error.code === 'VALIDATION_ERROR') && (
             <Alert variant="destructive">

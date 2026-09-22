@@ -52,17 +52,34 @@ export interface CompanyListParams {
   page?: number;
 }
 
-// Mirrors CompanyCreateSerializer. Creating a company here only creates
-// the tenant row itself (plus its 6 default roles, seeded server-side) —
-// there is no combined "create company + first owner" endpoint, so a new
-// tenant is genuinely empty of any member until someone is added to it
-// through a separate, not-yet-built path. Disclosed in the console UI,
-// not silently glossed over.
+// Mirrors CompanyCreateSerializer. `ownerEmail`/`ownerName` are optional
+// on the backend (any other programmatic caller stays backward
+// compatible) but the console's own CompanyFormSheet always sends both —
+// creating a company with no owner just reproduces the original gap this
+// form was built to close. When both are sent, the backend also grants
+// that email the new company's Owner role via the same Add User flow
+// (BE-071) used elsewhere — a new User with an unusable password plus an
+// account-setup email, or an existing User linked if the email already
+// has an account.
 export interface CompanyCreateInput {
   name: string;
   status?: CompanyStatus;
   currency?: string;
   gstNumber?: string | null;
+  ownerEmail?: string;
+  ownerName?: string;
+}
+
+// The extra `owner` key CompanyViewSet.create() adds to its response only
+// when ownerEmail/ownerName were supplied — absent (not merely null) on
+// every other create call, matching the backend's own response shape.
+export interface CompanyOwnerResult {
+  userCreated: boolean;
+  activationRequired: boolean;
+}
+
+export interface CreatedCompany extends Company {
+  owner?: CompanyOwnerResult;
 }
 
 export async function getCompanies(params: CompanyListParams): Promise<{ items: Company[]; pagination: PaginationMeta }> {
@@ -78,8 +95,8 @@ export async function getCompanies(params: CompanyListParams): Promise<{ items: 
   );
 }
 
-export async function createCompany(input: CompanyCreateInput): Promise<Company> {
-  return unwrap<Company>(apiClient.post('/companies', input));
+export async function createCompany(input: CompanyCreateInput): Promise<CreatedCompany> {
+  return unwrap<CreatedCompany>(apiClient.post('/companies', input));
 }
 
 export async function deleteCompany(id: string): Promise<void> {
