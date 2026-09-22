@@ -38,6 +38,7 @@ Commit: `e536c1c` (`feat(frontend): add project workspace and team management`).
 - New shared `Combobox` primitive (Popover + cmdk) backs both the Client selector (Project create/edit) and a company-member selector (Add Team Member, sourced from the real `GET /company-memberships` endpoint).
 - Full CRUD + status-transition + team lifecycle verified live against the running backend (see commit message); test data cleaned up afterward.
 - Frontend tests: 35 passed, 6 explicitly skipped (all six are Radix Select/Popover/DropdownMenu open-and-interact flows that hang in this project's jsdom+Jest+Node combination — a reproduced environment issue, not an app defect; each skip cites the diagnosis and the live-backend flow that verifies the same behavior independently).
+- **Follow-up — 2026-09-22 (reported by the client):** the Team tab's remove-member action (`ProjectTeamTab.tsx`) was icon-only (a bare `Trash2` button with only an `aria-label`, no visible text anywhere in the row) — inconsistent with every other list-row action in the app, which either shows visible button text or opens a dropdown menu with visible text items. Changed it to show a visible "Remove" label next to the icon. `ProjectTeamTab.test.tsx` (3 tests) still passes unchanged, since it queries by accessible name.
 
 ## Phase 3 — Product Catalog
 

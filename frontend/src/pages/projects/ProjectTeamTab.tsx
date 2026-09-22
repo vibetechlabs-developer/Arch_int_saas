@@ -125,11 +125,13 @@ export default function ProjectTeamTab() {
                 </span>
                 <Button
                   variant="ghost"
-                  size="icon"
+                  size="sm"
+                  className="text-danger-text hover:text-danger-text"
                   aria-label={`Remove ${member.userName ?? 'member'}`}
                   onClick={() => setRemovingMember(member)}
                 >
-                  <Trash2 className="size-4 text-danger-text" />
+                  <Trash2 className="size-4" />
+                  Remove
                 </Button>
               </div>
             </div>
