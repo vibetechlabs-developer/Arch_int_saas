@@ -523,6 +523,17 @@ LOGGING = {
 # --- Security Hardening -----------------------------------------------------
 
 if not DEBUG:
+    # Required whenever TLS terminates at a reverse proxy (nginx) in front
+    # of Gunicorn, which is always true in this project's deployment
+    # topology (07_DevOps/Docker.md §4) -- Gunicorn itself only ever sees
+    # plain HTTP from nginx, so without this, request.is_secure() is always
+    # False and SECURE_SSL_REDIRECT below redirects every request to
+    # https://<the same URL it was already given>, a same-URL 301 loop.
+    # Safe only because nginx is the sole thing that can reach Gunicorn at
+    # all (it's bound to 127.0.0.1 -- see docker-compose.prod.yml) and is
+    # the only party that ever sets this header; an untrusted client can't
+    # forge it to bypass the redirect.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = env("DJANGO_SECURE_SSL_REDIRECT")
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
