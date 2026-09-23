@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,7 @@ import { Alert } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ApiError } from '@/lib/api/client';
 import { setCompanyOwnerPassword } from '@/lib/api/company';
+import { platformCompanyKeys } from '@/lib/queryKeys';
 
 const setOwnerPasswordSchema = z.object({
   newPassword: z.string().trim().min(8, 'Password must be at least 8 characters'),
@@ -24,13 +25,23 @@ export interface SetOwnerPasswordDialogProps {
   onOpenChange: (open: boolean) => void;
   companyId: string;
   companyName: string;
+  ownerName?: string;
+  ownerEmail?: string;
 }
 
 // POST /companies/{id}/owner/set-password (platform-admin only) — a direct
 // alternative to the normal email-token activation link, since this
 // environment's email backend only prints to the server console, which a
 // platform admin working from the browser has no way to read.
-export function SetOwnerPasswordDialog({ open, onOpenChange, companyId, companyName }: SetOwnerPasswordDialogProps) {
+export function SetOwnerPasswordDialog({
+  open,
+  onOpenChange,
+  companyId,
+  companyName,
+  ownerName,
+  ownerEmail,
+}: SetOwnerPasswordDialogProps) {
+  const queryClient = useQueryClient();
   const {
     register,
     handleSubmit,
@@ -44,6 +55,7 @@ export function SetOwnerPasswordDialog({ open, onOpenChange, companyId, companyN
   const mutation = useMutation({
     mutationFn: (values: SetOwnerPasswordFormValues) => setCompanyOwnerPassword(companyId, values.newPassword),
     onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: platformCompanyKeys.owner(companyId) });
       toast.success(`Password set for ${result.name} (${result.email})`);
       handleOpenChange(false);
     },
@@ -72,8 +84,17 @@ export function SetOwnerPasswordDialog({ open, onOpenChange, companyId, companyN
         <DialogHeader>
           <DialogTitle>Set Owner password</DialogTitle>
           <DialogDescription>
-            Directly set the password for "{companyName}"'s Owner, so they can sign in without waiting on an
-            activation email.
+            {ownerName && ownerEmail ? (
+              <>
+                Directly set the password for {ownerName} ({ownerEmail}), "{companyName}"'s Owner, so they can sign
+                in without waiting on an activation email.
+              </>
+            ) : (
+              <>
+                Directly set the password for "{companyName}"'s Owner, so they can sign in without waiting on an
+                activation email.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
 

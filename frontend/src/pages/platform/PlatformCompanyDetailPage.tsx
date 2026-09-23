@@ -2,16 +2,18 @@ import { useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Banknote, Building2, FileWarning, KeyRound, Pencil, ReceiptText, Trash2 } from 'lucide-react';
+import { ArrowLeft, Banknote, Building2, FileWarning, KeyRound, Pencil, ReceiptText, ShieldQuestion, Trash2, User } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { ErrorState } from '@/components/common/ErrorState';
+import { EmptyState } from '@/components/common/EmptyState';
 import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
 import { StatusBadge } from '@/components/common/StatusBadge';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api/client';
-import { deleteCompany, getCompany } from '@/lib/api/company';
+import { deleteCompany, getCompany, getCompanyOwner } from '@/lib/api/company';
 import { platformCompanyKeys } from '@/lib/queryKeys';
 import { formatDateTime } from '@/lib/format';
 import { CompanyFormSheet } from '@/components/platform/CompanyFormSheet';
@@ -30,6 +32,19 @@ export default function PlatformCompanyDetailPage() {
     queryFn: () => getCompany(companyId!),
     enabled: !!companyId,
   });
+
+  const {
+    data: owner,
+    isLoading: isOwnerLoading,
+    isError: isOwnerError,
+    error: ownerError,
+  } = useQuery({
+    queryKey: platformCompanyKeys.owner(companyId!),
+    queryFn: () => getCompanyOwner(companyId!),
+    enabled: !!companyId,
+    retry: false,
+  });
+  const ownerNotFound = isOwnerError && ownerError instanceof ApiError && ownerError.code === 'NOT_FOUND';
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteCompany(companyId!),
@@ -84,10 +99,6 @@ export default function PlatformCompanyDetailPage() {
             actions={
               <>
                 <StatusBadge status={company.status} />
-                <Button variant="outline" onClick={() => setOwnerPasswordOpen(true)}>
-                  <KeyRound />
-                  Set Owner Password
-                </Button>
                 <Button variant="outline" onClick={() => setEditOpen(true)}>
                   <Pencil />
                   Edit
@@ -129,16 +140,66 @@ export default function PlatformCompanyDetailPage() {
                 </div>
               </CardContent>
             </Card>
+
+            <Card className="lg:col-span-3">
+              <CardHeader>
+                <CardTitle>
+                  <User className="size-4 text-accent-500" />
+                  Owner
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {isOwnerLoading ? (
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="size-9 rounded-full" />
+                    <div className="flex flex-col gap-1.5">
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="h-3 w-56" />
+                    </div>
+                  </div>
+                ) : ownerNotFound ? (
+                  <EmptyState
+                    icon={ShieldQuestion}
+                    title="No Owner assigned"
+                    description="This tenant has no active Owner — it was created without one, or its Owner membership was removed."
+                  />
+                ) : isOwnerError ? (
+                  <p className="text-small text-danger-text">
+                    {ownerError instanceof ApiError ? ownerError.message : 'Could not load this company’s Owner.'}
+                  </p>
+                ) : owner ? (
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-body font-medium text-text-primary">{owner.name}</span>
+                      <span className="text-small text-text-tertiary">{owner.email}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Badge variant={owner.hasUsablePassword ? 'success' : 'warning'}>
+                        {owner.hasUsablePassword ? 'Active' : 'Needs setup'}
+                      </Badge>
+                      <Button variant="outline" size="sm" onClick={() => setOwnerPasswordOpen(true)}>
+                        <KeyRound />
+                        Set Password
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
           </div>
 
           <CompanyFormSheet open={editOpen} onOpenChange={setEditOpen} company={company} />
 
-          <SetOwnerPasswordDialog
-            open={ownerPasswordOpen}
-            onOpenChange={setOwnerPasswordOpen}
-            companyId={company.id}
-            companyName={company.name}
-          />
+          {owner && (
+            <SetOwnerPasswordDialog
+              open={ownerPasswordOpen}
+              onOpenChange={setOwnerPasswordOpen}
+              companyId={company.id}
+              companyName={company.name}
+              ownerName={owner.name}
+              ownerEmail={owner.email}
+            />
+          )}
 
           <ConfirmationDialog
             open={deleteOpen}

@@ -126,6 +126,19 @@ export interface OwnerPasswordSetResult {
   name: string;
 }
 
+// Mirrors backend/apps/company/serializers.py::CompanyOwnerSerializer.
+export interface CompanyOwner {
+  email: string;
+  name: string;
+  hasUsablePassword: boolean;
+}
+
+// GET /companies/{id}/owner (platform-admin-only) — who this company's
+// Owner is, and whether they've ever actually finished account setup.
+export async function getCompanyOwner(companyId: string): Promise<CompanyOwner> {
+  return unwrap<CompanyOwner>(apiClient.get(`/companies/${companyId}/owner`));
+}
+
 // POST /companies/{id}/owner/set-password (platform-admin-only) — directly
 // sets this company's Owner's password, bypassing the normal email-token
 // activation flow (which this environment's console-only email backend

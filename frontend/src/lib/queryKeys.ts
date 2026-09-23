@@ -10,6 +10,7 @@ export const platformCompanyKeys = {
   lists: () => [...platformCompanyKeys.all, 'list'] as const,
   list: (params: Record<string, unknown>) => [...platformCompanyKeys.lists(), params] as const,
   detail: (id: string) => [...platformCompanyKeys.all, 'detail', id] as const,
+  owner: (id: string) => [...platformCompanyKeys.all, 'owner', id] as const,
 };
 
 export const clientKeys = {
