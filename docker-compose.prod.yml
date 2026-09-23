@@ -49,8 +49,14 @@ services:
       - staticfiles:/app/staticfiles
       - media:/app/media
       - media_private:/app/media_private
+    # Host-side port only -- the container still listens on 8000 inside its
+    # own network namespace either way. 8020 instead of the "obvious" 8000
+    # is deliberate: on a shared VPS already running other projects, 8000
+    # (and 8001, and 8080) may already be taken by them -- check with
+    # `ss -tlnp` before assuming 8000 is free, never kill what's already
+    # listening without confirming it's actually this project's own.
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8020:8000"
     env_file:
       - backend/.env
     environment:
