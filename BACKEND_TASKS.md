@@ -1542,6 +1542,8 @@ Provides: `generate_storage_key`/`save_upload`/`delete_file` (tenant-namespaced 
 
 **Files changed (backend):** `apps/company/services.py` (`set_owner_password`, new import `rest_framework.exceptions`), `apps/company/serializers.py` (`SetOwnerPasswordSerializer`, `SetOwnerPasswordResponseSerializer`), `apps/company/views.py` (`set_owner_password` action + schema), `apps/company/urls.py` (new route), `apps/audit/validators.py` (`"user"` allowlist gained `password_set_by_platform_admin`), `apps/company/tests/{test_services,test_views}.py` (new test classes).
 
+**Gap found live and closed same day — `GET /companies/{id}/owner`:** right after shipping the above, the client pointed out the Company Detail page never showed *whose* password Set Owner Password would act on — no owner email/name was visible anywhere before clicking it. Added a companion read endpoint (platform-admin-only, same permission-bypass mechanism as `set_owner_password` — `"owner"` isn't in the retrieve/partial_update/update whitelist either) returning `{email, name, hasUsablePassword}`. Refactored the shared "resolve this company's active Owner" logic out of `set_owner_password` into `CompanyService._resolve_active_owner`, used by both. New serializer `CompanyOwnerSerializer`. Tests: `CompanyServiceGetOwnerTestCase` (4) + `CompanyGetOwnerViewTestCase` (4), all passed. `manage.py check`/`spectacular` clean. Live-verified: a company with a real Owner returns their identity and `hasUsablePassword: true` after Set Owner Password is used on them; an ownerless company 404s.
+
 #### BE-077 — CSRF Trusted Origins Configuration — 2026-09-10
 
 **Status:** Review (awaiting Backend Lead approval — not self-approved)

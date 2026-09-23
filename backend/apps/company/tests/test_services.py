@@ -276,6 +276,42 @@ class CompanyServiceOwnerCreationTestCase(TestCase):
         )
 
 
+class CompanyServiceGetOwnerTestCase(TestCase):
+    """
+    Unit tests for CompanyService.get_owner -- found missing live right
+    after set_owner_password shipped: nothing showed *whose* password an
+    admin was about to set, on the company detail page or in the dialog.
+    """
+
+    def test_returns_the_active_owners_identity(self):
+        company, _ = CompanyService.create_company(
+            name="Visible Owner Co", owner_email="visible@example.com", owner_name="Visible Owner"
+        )
+
+        result = CompanyService.get_owner(company.id)
+
+        self.assertEqual(result, {"email": "visible@example.com", "name": "Visible Owner", "hasUsablePassword": False})
+
+    def test_has_usable_password_reflects_a_completed_setup(self):
+        company, _ = CompanyService.create_company(
+            name="Setup Done Co", owner_email="setup@example.com", owner_name="Setup Owner"
+        )
+        CompanyService.set_owner_password(company.id, "SomeStrongPassword123!")
+
+        result = CompanyService.get_owner(company.id)
+
+        self.assertTrue(result["hasUsablePassword"])
+
+    def test_company_with_no_owner_raises_not_found(self):
+        company, _ = CompanyService.create_company(name="Ownerless Visible Co")
+        with self.assertRaises(NotFound):
+            CompanyService.get_owner(company.id)
+
+    def test_nonexistent_company_raises_not_found(self):
+        with self.assertRaises(NotFound):
+            CompanyService.get_owner(uuid.uuid4())
+
+
 class CompanyServiceSetOwnerPasswordTestCase(TestCase):
     """
     Unit tests for CompanyService.set_owner_password -- lets a platform

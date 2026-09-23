@@ -108,6 +108,55 @@ class CompanyService:
             return company, owner_result
 
     @classmethod
+    def _resolve_active_owner(cls, company: Company) -> Any:
+        """
+        Shared by get_owner/set_owner_password: resolves "the" Owner as
+        the first ACTIVE membership holding this company's Owner-system-
+        key role -- mirrors create_company's own `Role.objects.get(company
+        =company, system_key=OWNER_SYSTEM_KEY)` resolution. Raises
+        NotFound if the company has no active Owner at all (e.g. an empty
+        tenant created without owner_email/owner_name). Returns the User,
+        not the membership -- callers only ever need the person.
+        """
+        from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role
+        from apps.users.permission_catalog import OWNER_SYSTEM_KEY
+
+        try:
+            owner_role = Role.objects.get(company=company, system_key=OWNER_SYSTEM_KEY)
+        except Role.DoesNotExist:
+            raise drf_exceptions.NotFound("This company has no Owner role.")
+
+        owner_membership = (
+            CompanyMembership.objects.filter(
+                company=company, role=owner_role, status=CompanyMembershipStatus.ACTIVE
+            )
+            .select_related("user")
+            .order_by("created_at")
+            .first()
+        )
+        if owner_membership is None:
+            raise drf_exceptions.NotFound("This company has no active Owner.")
+
+        return owner_membership.user
+
+    @classmethod
+    def get_owner(cls, company_id: str | uuid.UUID) -> Dict[str, Any]:
+        """
+        Platform-admin-only: who is this company's Owner, and have they
+        ever actually finished setting a password. Closes the gap found
+        live right after set_owner_password shipped -- that action let an
+        admin set a password, but nothing anywhere showed *whose* it was,
+        so there was no way to confirm the right person before acting.
+        """
+        company = CompanyRepository.get_by_id(company_id)
+        owner = cls._resolve_active_owner(company)
+        return {
+            "email": owner.email,
+            "name": owner.name,
+            "hasUsablePassword": owner.has_usable_password(),
+        }
+
+    @classmethod
     def set_owner_password(
         cls,
         company_id: str | uuid.UUID,
@@ -131,38 +180,14 @@ class CompanyService:
         company's own Owner cannot use this on themselves or anyone
         else's company, which would otherwise be a privilege-escalation
         hole.
-
-        Resolves "the" Owner as the first ACTIVE membership holding this
-        company's Owner-system-key role -- mirrors create_company's own
-        `Role.objects.get(company=company, system_key=OWNER_SYSTEM_KEY)`
-        resolution. Raises NotFound if the company has no active Owner at
-        all (e.g. an empty tenant created without owner_email/owner_name).
         """
         from apps.authentication.repositories import TokenBlacklistRepository, UserRepository
         from apps.authentication import validators as auth_validators
-        from apps.users.models import CompanyMembership, CompanyMembershipStatus, Role
-        from apps.users.permission_catalog import OWNER_SYSTEM_KEY
 
         company = CompanyRepository.get_by_id(company_id)
-
-        try:
-            owner_role = Role.objects.get(company=company, system_key=OWNER_SYSTEM_KEY)
-        except Role.DoesNotExist:
-            raise drf_exceptions.NotFound("This company has no Owner role.")
-
-        owner_membership = (
-            CompanyMembership.objects.filter(
-                company=company, role=owner_role, status=CompanyMembershipStatus.ACTIVE
-            )
-            .select_related("user")
-            .order_by("created_at")
-            .first()
-        )
-        if owner_membership is None:
-            raise drf_exceptions.NotFound("This company has no active Owner to set a password for.")
+        owner = cls._resolve_active_owner(company)
 
         auth_validators.require_new_password_str(new_password)
-        owner = owner_membership.user
         auth_validators.validate_new_password_strength(new_password, owner)
 
         with transaction.atomic():

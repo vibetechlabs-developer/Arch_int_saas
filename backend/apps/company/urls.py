@@ -18,6 +18,7 @@ company_detail = CompanyViewSet.as_view(
     }
 )
 
+company_owner = CompanyViewSet.as_view({"get": "owner"})
 company_owner_set_password = CompanyViewSet.as_view({"post": "set_owner_password"})
 
 urlpatterns = [
@@ -31,6 +32,11 @@ urlpatterns = [
         r"^companies/(?P<pk>[0-9a-fA-F-]{36})/logo/upload/?$",
         CompanyLogoUploadView.as_view(),
         name="company-logo-upload",
+    ),
+    re_path(
+        r"^companies/(?P<pk>[0-9a-fA-F-]{36})/owner/?$",
+        company_owner,
+        name="company-owner",
     ),
     re_path(
         r"^companies/(?P<pk>[0-9a-fA-F-]{36})/owner/set-password/?$",

@@ -16,6 +16,7 @@ from apps.company.serializers import (
     CompanyCreateSerializer,
     CompanyListQuerySerializer,
     CompanyLogoUploadSerializer,
+    CompanyOwnerSerializer,
     CompanySerializer,
     CompanyUpdateSerializer,
     SetOwnerPasswordResponseSerializer,
@@ -191,6 +192,23 @@ class CompanyViewSet(ObjectPermission404Mixin, viewsets.GenericViewSet):
             data={"message": "Company deleted successfully."},
             request_id=request_id,
         )
+
+    @extend_schema(
+        summary="Get Company Owner",
+        description=(
+            "Who this company's Owner is (Platform Admin only) -- including whether they've ever "
+            "completed account setup, so an admin knows before reaching for Set Owner Password."
+        ),
+        responses={status.HTTP_200_OK: CompanyOwnerSerializer},
+        tags=["Company"],
+    )
+    def owner(self, request: Request, pk: str = None) -> Response:
+        company = CompanyService.get_company_by_id(pk)
+        self.check_object_permissions(request, company)
+
+        result = CompanyService.get_owner(pk)
+        request_id = getattr(request, "request_id", None)
+        return ApiResponse.success(data=CompanyOwnerSerializer(result).data, request_id=request_id)
 
     @extend_schema(
         summary="Set Company Owner Password",

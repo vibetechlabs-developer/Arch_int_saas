@@ -161,6 +161,16 @@ class SetOwnerPasswordResponseSerializer(serializers.Serializer):
     name = serializers.CharField()
 
 
+class CompanyOwnerSerializer(serializers.Serializer):
+    """Output for `GET /companies/{id}/owner` -- who this company's Owner is, platform-admin-only."""
+
+    email = serializers.EmailField()
+    name = serializers.CharField()
+    hasUsablePassword = serializers.BooleanField(
+        help_text="False means this Owner has never completed account setup -- Set Owner Password will give them one."
+    )
+
+
 class CompanyLogoUploadSerializer(serializers.Serializer):
     """
     Output shape for `POST /company/{id}/logo/upload` (BE-078). Mirrors
