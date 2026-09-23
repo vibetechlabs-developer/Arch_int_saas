@@ -1,6 +1,6 @@
 # Docker / Containerization
 
-**Status:** Implemented (BE-020) — backend stack only. `docker-compose.yml` (repo root) and `backend/Dockerfile` are real, committed files, not indicative snippets. Frontend containerization (`web` service, an nginx-hosted static build) is deferred until `apps/web` exists in this repo — the sections below describe the backend-only stack actually running today: Nginx → Django (Gunicorn) → PostgreSQL, plus Redis → Celery Worker → Celery Beat.
+**Status:** Implemented — local dev (BE-020) and production (Hostinger VPS deployment runbook, 2026-09-23). `docker-compose.yml` (repo root, local dev), `docker-compose.prod.yml` (repo root, production), `backend/Dockerfile`, and `frontend/Dockerfile` are all real, committed files, not indicative snippets. §3 below (frontend containerization) is now implemented, correcting its own earlier "still indicative/draft" status — the real file lives at `frontend/Dockerfile`, not the `apps/web/Dockerfile` path this doc originally sketched (that directory never existed; the real frontend lives at `frontend/`).
 
 ---
 
@@ -24,43 +24,34 @@ Four stages: `base` (shared OS deps) → `dev` (hot-reload target, used by all t
 - `production` stage installs `libpq5`/`curl` (runtime libs + the binary the compose healthcheck uses), copies only the installed site-packages from `builder` (not the build toolchain), runs `collectstatic --noinput` while still root (before the ownership handoff, since `STATIC_ROOT` must be writable at that point), then switches to non-root `appuser` — a basic hardening step, not optional.
 - **Migrations are deliberately not run inside the Dockerfile or the container's `CMD`** — per `07_DevOps/CI_CD.md` §4, `migrate` is an explicit, isolated deploy step that runs *before* new containers receive traffic, not baked into every container start (which would race concurrent replicas running `migrate` simultaneously). Locally: `docker compose exec django python manage.py migrate`, matching `Development_Environment.md` §2 step 4 exactly.
 
-## 3. Frontend Dockerfile (`apps/web/Dockerfile`) — Multi-Stage
+## 3. Frontend Dockerfile (`frontend/Dockerfile`) — Multi-Stage, Implemented
 
-**Status: still indicative/draft** — no `apps/web` directory exists in this repo yet, so nothing below is implemented. Kept as the target design for whenever frontend work begins; not part of BE-020's scope or verification.
+Three stages, mirroring the backend's own dev/builder/production split: `base` (Node install) → `dev` (hot-reload, `npm run dev -- --host`, used by `docker-compose.yml` if a frontend dev service is ever added there) and, separately, `builder` (`npx tsc && npx vite build --outDir dist`) → `production` (`nginx:alpine`, serves the built static files, no Node runtime shipped).
 
-```dockerfile
-# --- dev target ---
-FROM node:20-slim AS dev
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-CMD ["npm", "run", "dev", "--", "--host"]
+The `--outDir dist` override is deliberate: `frontend/vite.config.ts`'s own `build.outDir` points *outside* the frontend directory (`../backend/staticfiles/frontend`, a leftover from early scaffolding), which isn't reachable from an isolated frontend-only Docker build context. The flag redirects the build back to a normal local `dist/` inside the image without touching the checked-in Vite config other tooling may still depend on.
 
-# --- builder ---
-FROM node:20-slim AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build            # Vite production build → /app/dist
+`VITE_API_BASE_URL` is baked into the JS bundle at build time from `frontend/.env.production` (Vite's own convention — a static SPA build has no runtime env injection) — edit that file to the real deployed API origin *before* building this image for a real deployment, matching how `.env.development`'s `http://localhost:8000` already works for local dev.
 
-# --- production: static files served via nginx ---
-FROM nginx:alpine AS production
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-```
+`frontend/nginx.conf` handles SPA routing fallback (`try_files $uri /index.html`, since this is a client-side-routed React app per `00_Development_Standards/Folder_Structure.md` §3) and far-future cache headers for Vite's content-hashed `/assets/` files. It does **not** proxy `/api/*` to the backend — this app's frontend/backend split is cross-origin by design (see `05_Security/Tenant.md` and `CORS_ALLOWED_ORIGINS`), not same-origin-via-path-prefix, so the two are deployed as separate subdomains (e.g. `app.` / `api.`) rather than one origin with a path split.
 
-`nginx.conf` handles SPA routing fallback (serve `index.html` for unmatched paths, since this is a client-side-routed React app per `00_Development_Standards/Folder_Structure.md` §3) and proxies `/api/*` to the backend service in non-local environments.
+## 4. Production — `docker-compose.prod.yml` (single-VPS deployment)
 
-## 4. What's Deliberately Not Containerized
+Implemented (2026-09-23 Hostinger deployment runbook), a companion to `docker-compose.yml` rather than a replacement — do not run both on the same host. Same six-service shape as local dev (`postgres`, `redis`, `django`, `celery-worker`, `celery-beat`, plus `frontend`, new), with three deliberate differences:
 
-- **PostgreSQL in production** — use a managed service (see `07_DevOps/Production.md` §2), not a self-hosted container; the `postgres` service in §1 is local-dev-only.
-- **Object storage** — not present in this compose file at all yet (§1) since no S3-compatible backend is wired into Django settings; a local emulator (e.g. MinIO) or a managed provider is a future addition once that's built (`02_Architecture/Technical_Architecture.md` §8 item 4), not before.
+- `django`/`celery-worker`/`celery-beat` build `target: production` (Gunicorn, no dev/test tooling, non-root `appuser` — §2), not `target: dev`.
+- Every app-tier port is bound to `127.0.0.1` only (`postgres`/`redis` expose no port to the host at all). Nothing in this compose file is reachable from the public internet directly — a host-level nginx + Certbot (installed on the VPS itself, *not* in this compose file, so a broken app container can never take TLS termination down with it) reverse-proxies the real domains onto these localhost ports. See the deployment runbook for that host nginx config and the one-time Certbot setup.
+- No dockerized backend nginx (`backend/nginx/nginx.conf`, §1) — Gunicorn serves `/static/` directly via Whitenoise (`config/settings.py` `MIDDLEWARE`) in production, and `/media/` only matters at all when `STORAGE_BACKEND=local` (recommend `STORAGE_BACKEND=s3` for anything beyond an initial launch — §5). The host-level nginx above is the only reverse-proxy layer in front of Gunicorn in this topology.
 
-## 5. Related
+**Deviation from §5/Production.md's "managed PostgreSQL" recommendation, disclosed:** self-hosting Postgres (and Redis) in containers here, rather than a managed service, is a deliberate pragmatic choice for a *single-VPS* deployment, where there is no separate managed-database tier to point at. `pgdata` is a named Docker volume with no automated backup — cron a nightly `pg_dump` at minimum until real traffic justifies moving to a managed provider (`07_DevOps/Backup_Strategy.md`).
 
-- `07_DevOps/Development_Environment.md` — full local setup walkthrough using this compose file
-- `07_DevOps/CI_CD.md` — how these images are built and pushed in the pipeline
-- `07_DevOps/Production.md` — how these images are deployed and run in production
+Migrations are run as an explicit one-off (`docker compose -f docker-compose.prod.yml run --rm django python manage.py migrate`), same discipline as local dev's own §2 note — never baked into a container's start command.
+
+## 5. What's Deliberately Not Containerized
+
+- **PostgreSQL and object storage at real scale** — §4's self-hosted Postgres is a single-VPS MVP choice, not the long-term recommendation; `07_DevOps/Production.md` §2 still describes the managed-service target once traffic/backup requirements justify the move. **Object storage** is genuinely not present in either compose file — no S3-compatible backend is wired into Django settings by default (`STORAGE_BACKEND=local`); set `STORAGE_BACKEND=s3` (fully implemented, BE-078) once a bucket exists, rather than accumulating client files on a single VPS disk.
+
+## 6. Related
+
+- `07_DevOps/Development_Environment.md` — full local setup walkthrough using `docker-compose.yml`
+- `07_DevOps/CI_CD.md` — how these images are built and validated in the pipeline (`.github/workflows/ci.yml`'s `docker-build` job builds both the backend and frontend production images on every push, validation only — not pushed to a registry)
+- `07_DevOps/Production.md` — the longer-term, larger-scale target architecture (managed Postgres, load balancer, CDN); §4 above is the pragmatic single-VPS path actually deployed today

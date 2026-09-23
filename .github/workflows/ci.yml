@@ -124,3 +124,9 @@ jobs:
           context: backend
           target: production
           push: false
+      - name: Build frontend production image (validation only — not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          target: production
+          push: false

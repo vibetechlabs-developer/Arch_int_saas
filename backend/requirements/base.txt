@@ -41,3 +41,8 @@ xhtml2pdf>=0.2.18,<0.3
 # Asynchronous Tasks & Caching
 redis>=5.3.1,<6.0
 celery>=5.5.3,<5.6
+
+# Static file serving (config/settings.py MIDDLEWARE) -- lets Gunicorn serve
+# STATIC_ROOT directly in production, compressed with far-future cache
+# headers, no separate nginx volume/mount needed to reach these files.
+whitenoise>=6.7.0,<6.8

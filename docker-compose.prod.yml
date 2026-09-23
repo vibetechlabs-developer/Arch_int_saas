@@ -1,0 +1,124 @@
+# Production stack for a single-VPS deployment (e.g. a Hostinger VPS).
+# Companion to docker-compose.yml (local dev) -- do not run both on the same
+# host. Every app-tier port below is bound to 127.0.0.1 only: nothing here is
+# reachable from the public internet directly. A host-level nginx + Certbot
+# (installed on the VPS itself, not in this compose file) terminates TLS and
+# reverse-proxies the two real domains onto these localhost ports -- see the
+# deployment guide for that nginx config and the one-time Certbot setup.
+#
+# Self-hosting Postgres/Redis in containers here (rather than
+# 07_DevOps/Production.md §2's longer-term "managed service" recommendation)
+# is a deliberate, pragmatic MVP choice for a single VPS -- move to a managed
+# Postgres once real traffic/backup requirements justify it.
+#
+# Setup: copy backend/.env.example to backend/.env and fill in real
+# production values (including POSTGRES_DB/POSTGRES_USER/POSTGRES_PASSWORD,
+# read by the postgres service below from the same file Django reads) --
+# see the deployment guide for the full walkthrough. Edit
+# frontend/.env.production to the real API domain *before* building the
+# frontend image (baked in at build time, not runtime).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file:
+      - backend/.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  django:
+    build:
+      context: ./backend
+      target: production
+    volumes:
+      - staticfiles:/app/staticfiles
+      - media:/app/media
+      - media_private:/app/media_private
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - backend/.env
+    environment:
+      DB_HOST: postgres
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  celery-worker:
+    build:
+      context: ./backend
+      target: production
+    command: ["celery", "-A", "config", "worker", "-l", "info"]
+    volumes:
+      - media:/app/media
+      - media_private:/app/media_private
+    env_file:
+      - backend/.env
+    environment:
+      DB_HOST: postgres
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery-beat:
+    build:
+      context: ./backend
+      target: production
+    command: ["celery", "-A", "config", "beat", "-l", "info"]
+    env_file:
+      - backend/.env
+    environment:
+      DB_HOST: postgres
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+    ports:
+      - "127.0.0.1:8080:80"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  staticfiles:
+  media:
+  media_private:

@@ -38,6 +38,11 @@ env = environ.Env(
     CELERY_RESULT_BACKEND=(str, "redis://localhost:6379/0"),
     STORAGE_BACKEND=(str, "local"),
     AWS_S3_SIGNED_URL_EXPIRE_SECONDS=(int, 3600),
+    EMAIL_HOST=(str, ""),
+    EMAIL_PORT=(int, 587),
+    EMAIL_HOST_USER=(str, ""),
+    EMAIL_HOST_PASSWORD=(str, ""),
+    EMAIL_USE_TLS=(bool, True),
 )
 
 # Read .env file if present
@@ -123,6 +128,14 @@ AUTH_USER_MODEL = "users.User"
 MIDDLEWARE = [
     "apps.common.middleware.RequestIDMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # Serves STATIC_ROOT directly from Gunicorn in production (compressed +
+    # far-future cache headers via ManifestStaticFilesStorage below) -- no
+    # separate nginx container/volume needed to reach these files, since the
+    # host-level nginx reverse-proxying to Gunicorn (see the deployment
+    # guide) never needs to know where they live on disk. A no-op locally:
+    # DEBUG=true serves static files through Django's own dev static
+    # handler instead, same as always.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -230,6 +243,17 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # every access, never persisted to the database.
 STORAGE_BACKEND = env("STORAGE_BACKEND")
 
+# Whitenoise's manifest storage requires collectstatic to have already run
+# (true in the production Docker image, false for a bare `manage.py
+# runserver` in local dev) -- gated on DEBUG, not STORAGE_BACKEND, since the
+# two are independent choices (a deployment could use STORAGE_BACKEND=local
+# for media while still being a real, non-debug production environment).
+_staticfiles_backend = (
+    "django.contrib.staticfiles.storage.StaticFilesStorage"
+    if DEBUG
+    else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+)
+
 if STORAGE_BACKEND == "s3":
     from django.core.exceptions import ImproperlyConfigured as _ImproperlyConfigured
 
@@ -288,7 +312,7 @@ if STORAGE_BACKEND == "s3":
                 "location": "private",
             },
         },
-        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+        "staticfiles": {"BACKEND": _staticfiles_backend},
     }
 else:
     STORAGES = {
@@ -305,7 +329,7 @@ else:
                 "base_url": None,
             },
         },
-        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+        "staticfiles": {"BACKEND": _staticfiles_backend},
     }
 
 
@@ -449,7 +473,21 @@ CELERY_TIMEZONE = TIME_ZONE
 
 
 # --- Email & Password Reset ------------------------------------------------
+# Defaults to the console backend (dev-only, prints to stdout) unless
+# DJANGO_EMAIL_BACKEND is set -- a real deployment sets it to
+# "django.core.mail.backends.smtp.EmailBackend" and fills in the EMAIL_*
+# variables below (any SMTP provider works: Hostinger's own mailbox,
+# SendGrid, Mailgun, Brevo, ...). Without this, password-reset and
+# account-activation emails silently vanish into a container's stdout that
+# nobody reads in production -- BE-080's "Set Owner Password" workaround
+# exists specifically because this wasn't configured for this session's
+# own dev environment either.
 EMAIL_BACKEND = env("DJANGO_EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = env("EMAIL_HOST")
+EMAIL_PORT = env("EMAIL_PORT")
+EMAIL_HOST_USER = env("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
+EMAIL_USE_TLS = env("EMAIL_USE_TLS")
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@intprojects.com")
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")
 PASSWORD_RESET_TOKEN_LIFETIME = timedelta(hours=1)
