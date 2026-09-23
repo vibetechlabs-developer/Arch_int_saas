@@ -42,8 +42,14 @@ COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY . .
 # collectstatic runs while still root, before the ownership handoff below —
-# STATIC_ROOT must be writable at the point it runs.
-RUN python manage.py collectstatic --noinput \
+# STATIC_ROOT must be writable at the point it runs. DJANGO_DEBUG=true here
+# is build-time only, scoped to this one RUN instruction -- no real .env
+# exists yet at build time (real values are injected later, at
+# `docker compose up`, via env_file), so without this, settings.py's own
+# insecure-secret-key guard (correctly meant for the *running* app) fires
+# here instead and blocks the build entirely. collectstatic never touches
+# the database or does anything security-sensitive with the secret key.
+RUN DJANGO_DEBUG=true python manage.py collectstatic --noinput \
     && chown -R appuser:appuser /app
 USER appuser
 EXPOSE 8000
