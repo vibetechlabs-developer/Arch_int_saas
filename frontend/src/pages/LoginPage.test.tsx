@@ -19,6 +19,19 @@ describe('LoginPage', () => {
     mockNavigate.mockClear();
   });
 
+  it('offers a forgot-password link and a show/hide password toggle', () => {
+    mockedUseAuth.mockReturnValue({ user: null, isLoading: false, login: jest.fn() });
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: /forgot password/i })).toHaveAttribute('href', '/forgot-password');
+    expect(screen.getByRole('button', { name: 'Show password' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Email')).toHaveFocus();
+  });
+
   it('shows validation errors and never calls login when submitted empty', async () => {
     const login = jest.fn();
     mockedUseAuth.mockReturnValue({ user: null, isLoading: false, login });

@@ -19,6 +19,7 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { EmptyState } from '@/components/common/EmptyState';
 import { ErrorState } from '@/components/common/ErrorState';
 import { Timeline } from '@/components/common/Timeline';
+import { GettingStartedCard } from '@/components/dashboard/GettingStartedCard';
 import { getDashboard, type DashboardKPIs } from '@/lib/api/dashboard';
 import { useAuth } from '@/context/AuthContext';
 import { formatCurrency, formatDate, formatDateTime, humanizeAction, humanizeEntityType } from '@/lib/format';
@@ -56,6 +57,8 @@ export default function DashboardPage() {
         </h2>
         <p className="text-body text-text-secondary">{today} — here's what needs your attention.</p>
       </div>
+
+      {data && <GettingStartedCard kpis={data.kpis} />}
 
       {isLoading || !data ? (
         <KpiSkeleton />
@@ -371,12 +374,14 @@ function MiniStat({ label, value, tone }: { label: string; value: number; tone: 
 
 function NetProfitCard({ value }: { value: number }) {
   const animated = useCountUp(value);
+  // Exactly zero means nothing has been billed or spent yet -- not "profitable".
+  const isEmpty = value === 0;
   const isPositive = value >= 0;
   return (
     <Card className="flex h-full flex-col justify-between gap-4 p-6">
       <div className="flex items-center justify-between">
         <span className="text-label text-text-tertiary">Net Profit / Loss</span>
-        {isPositive ? (
+        {isEmpty ? null : isPositive ? (
           <TrendingUp className="size-4 text-success-text" />
         ) : (
           <TrendingDown className="size-4 text-danger-text" />
@@ -385,13 +390,17 @@ function NetProfitCard({ value }: { value: number }) {
       <span
         className={cn(
           'text-kpi tabular-nums tracking-tight',
-          isPositive ? 'text-success-text' : 'text-danger-text',
+          isEmpty ? 'text-text-primary' : isPositive ? 'text-success-text' : 'text-danger-text',
         )}
       >
         {formatCurrency(animated)}
       </span>
       <span className="text-small text-text-secondary">
-        {isPositive ? 'Profitable this period' : 'Operating at a loss this period'}
+        {isEmpty
+          ? 'Nothing billed or spent yet'
+          : isPositive
+            ? 'Profitable this period'
+            : 'Operating at a loss this period'}
       </span>
     </Card>
   );

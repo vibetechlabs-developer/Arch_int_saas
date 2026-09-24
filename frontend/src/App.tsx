@@ -1,6 +1,6 @@
 import { Suspense, lazy } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider } from '@/context/AuthContext';
 import { ThemeProvider } from '@/theme/ThemeProvider';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -10,6 +10,9 @@ import { ProtectedPlatformRoute } from '@/components/ProtectedPlatformRoute';
 import { Shell } from '@/components/shell/Shell';
 import { PlatformShell } from '@/components/platform/PlatformShell';
 import { PageLoadingFallback } from '@/components/common/PageLoadingFallback';
+import { ErrorBoundary } from '@/components/common/ErrorBoundary';
+import { NotFoundState } from '@/components/common/NotFoundState';
+import { PageTitle } from '@/components/PageTitle';
 import { queryClient } from '@/lib/queryClient';
 
 // Every page is its own lazy-loaded chunk rather than one monolithic
@@ -21,6 +24,7 @@ import { queryClient } from '@/lib/queryClient';
 // for no payload benefit.
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
 const SetPasswordPage = lazy(() => import('@/pages/SetPasswordPage'));
+const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPasswordPage'));
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'));
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
 const ClientsListPage = lazy(() => import('@/pages/clients/ClientsListPage'));
@@ -56,6 +60,16 @@ const PlatformLoginPage = lazy(() => import('@/pages/platform/PlatformLoginPage'
 const PlatformCompaniesListPage = lazy(() => import('@/pages/platform/PlatformCompaniesListPage'));
 const PlatformCompanyDetailPage = lazy(() => import('@/pages/platform/PlatformCompanyDetailPage'));
 
+// Keyed on the route so leaving a crashed page clears the error screen.
+function RouteErrorBoundary({ children, fullScreen }: { children: React.ReactNode; fullScreen?: boolean }) {
+  const { pathname } = useLocation();
+  return (
+    <ErrorBoundary resetKey={pathname} fullScreen={fullScreen}>
+      {children}
+    </ErrorBoundary>
+  );
+}
+
 const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
@@ -63,9 +77,12 @@ const App: React.FC = () => {
         <TooltipProvider>
           <AuthProvider>
             <BrowserRouter>
+              <PageTitle />
+              <RouteErrorBoundary fullScreen>
               <Suspense fallback={<PageLoadingFallback />}>
                 <Routes>
                   <Route path="/login" element={<LoginPage />} />
+                  <Route path="/forgot-password" element={<ForgotPasswordPage />} />
                   <Route path="/reset-password" element={<SetPasswordPage />} />
                   <Route path="/platform/login" element={<PlatformLoginPage />} />
                   <Route
@@ -90,6 +107,7 @@ const App: React.FC = () => {
                     element={
                       <ProtectedRoute>
                         <Shell>
+                          <RouteErrorBoundary>
                           <Suspense fallback={<PageLoadingFallback />}>
                             <Routes>
                               <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -127,15 +145,17 @@ const App: React.FC = () => {
                                 <Route path="profile" element={<ProfilePage />} />
                                 <Route path="security" element={<SecurityPage />} />
                               </Route>
-                              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                              <Route path="*" element={<NotFoundState />} />
                             </Routes>
                           </Suspense>
+                          </RouteErrorBoundary>
                         </Shell>
                       </ProtectedRoute>
                     }
                   />
                 </Routes>
               </Suspense>
+              </RouteErrorBoundary>
             </BrowserRouter>
             <Toaster />
           </AuthProvider>

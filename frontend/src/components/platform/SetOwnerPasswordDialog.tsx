@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { Alert } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -101,9 +101,8 @@ export function SetOwnerPasswordDialog({
         <form onSubmit={handleSubmit((values) => mutation.mutate(values))} className="flex flex-col gap-4" noValidate>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="owner-new-password">New password</Label>
-            <Input
+            <PasswordInput
               id="owner-new-password"
-              type="password"
               autoComplete="new-password"
               invalid={!!errors.newPassword}
               aria-describedby={errors.newPassword ? 'owner-new-password-error' : undefined}

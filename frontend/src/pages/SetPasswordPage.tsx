@@ -7,7 +7,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { Building2, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { Alert } from '@/components/ui/alert';
 import { ApiError } from '@/lib/api/client';
@@ -86,13 +86,13 @@ export default function SetPasswordPage() {
             <form onSubmit={handleSubmit((values) => mutation.mutate(values))} className="flex flex-col gap-5" noValidate>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="new-password">New password</Label>
-                <Input id="new-password" type="password" autoComplete="new-password" invalid={!!errors.newPassword} {...register('newPassword')} />
+                <PasswordInput id="new-password" autoComplete="new-password" autoFocus invalid={!!errors.newPassword} {...register('newPassword')} />
                 {errors.newPassword && <p className="text-small text-danger-text">{errors.newPassword.message}</p>}
               </div>
 
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="confirm-password">Confirm password</Label>
-                <Input id="confirm-password" type="password" autoComplete="new-password" invalid={!!errors.confirmPassword} {...register('confirmPassword')} />
+                <PasswordInput id="confirm-password" autoComplete="new-password" invalid={!!errors.confirmPassword} {...register('confirmPassword')} />
                 {errors.confirmPassword && <p className="text-small text-danger-text">{errors.confirmPassword.message}</p>}
               </div>
 

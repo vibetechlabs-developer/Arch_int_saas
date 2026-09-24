@@ -7,6 +7,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { Alert } from '@/components/ui/alert';
 import { useAuth } from '@/context/AuthContext';
@@ -77,6 +78,7 @@ export default function PlatformLoginPage() {
                 id="platform-email"
                 type="email"
                 autoComplete="email"
+                autoFocus
                 invalid={!!errors.email}
                 aria-describedby={errors.email ? 'platform-email-error' : undefined}
                 {...register('email')}
@@ -90,9 +92,8 @@ export default function PlatformLoginPage() {
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="platform-password">Password</Label>
-              <Input
+              <PasswordInput
                 id="platform-password"
-                type="password"
                 autoComplete="current-password"
                 invalid={!!errors.password}
                 aria-describedby={errors.password ? 'platform-password-error' : undefined}
